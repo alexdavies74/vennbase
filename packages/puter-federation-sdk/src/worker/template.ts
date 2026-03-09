@@ -71,11 +71,11 @@ function inviteKey(token) {
 }
 
 async function getMembers() {
-  return (await puter.kv.get(membersKey())) || [];
+  return (await me.puter.kv.get(membersKey())) || [];
 }
 
 async function ensureMeta() {
-  const existing = await puter.kv.get(roomMetaKey());
+  const existing = await me.puter.kv.get(roomMetaKey());
   if (existing) {
     return existing;
   }
@@ -88,7 +88,7 @@ async function ensureMeta() {
     createdAt: Date.now(),
   };
 
-  await puter.kv.set(roomMetaKey(), meta);
+  await me.puter.kv.set(roomMetaKey(), meta);
   return meta;
 }
 
@@ -212,7 +212,7 @@ async function handleJoin(request) {
   const jwk = await fetchPublicKeyDoc(body.publicKeyUrl, body.username);
 
   if (alreadyMember) {
-    const stored = await puter.kv.get(memberKey(body.username));
+    const stored = await me.puter.kv.get(memberKey(body.username));
     if (!stored) {
       throw { status: 401, code: "UNAUTHORIZED", message: "Member key missing" };
     }
@@ -229,15 +229,15 @@ async function handleJoin(request) {
       throw { status: 401, code: "INVITE_REQUIRED", message: "Invite token is required for first join" };
     }
 
-    const invite = await puter.kv.get(inviteKey(body.inviteToken));
+    const invite = await me.puter.kv.get(inviteKey(body.inviteToken));
     if (!invite || invite.roomId !== ROOM_ID) {
       throw { status: 401, code: "INVITE_REQUIRED", message: "Invite token is invalid" };
     }
   }
 
   members.push(body.username);
-  await puter.kv.set(membersKey(), members);
-  await puter.kv.set(memberKey(body.username), jwk);
+  await me.puter.kv.set(membersKey(), members);
+  await me.puter.kv.set(memberKey(body.username), jwk);
 
   return json(200, await snapshot());
 }
@@ -254,7 +254,7 @@ async function assertSignedWrite(request, envelope, signedBy) {
 
   await assertMember(envelope.signer.username);
 
-  const jwk = await puter.kv.get(memberKey(envelope.signer.username));
+  const jwk = await me.puter.kv.get(memberKey(envelope.signer.username));
   if (!jwk) {
     throw { status: 401, code: "UNAUTHORIZED", message: "Signer key not found" };
   }
@@ -277,7 +277,7 @@ async function handleInviteToken(request) {
     throw { status: 400, code: "BAD_REQUEST", message: "Envelope roomId does not match worker room" };
   }
 
-  await puter.kv.set(inviteKey(envelope.payload.token), envelope.payload);
+  await me.puter.kv.set(inviteKey(envelope.payload.token), envelope.payload);
 
   return json(200, { inviteToken: envelope.payload });
 }
@@ -294,7 +294,7 @@ async function handleMessage(request) {
     throw { status: 400, code: "BAD_REQUEST", message: "Envelope roomId does not match worker room" };
   }
 
-  await puter.kv.set(messageKey(envelope.payload), envelope.payload);
+  await me.puter.kv.set(messageKey(envelope.payload), envelope.payload);
   return json(200, { message: envelope.payload });
 }
 
@@ -309,7 +309,7 @@ async function handleMessages(request) {
   await assertMember(requester);
 
   const after = Number(new URL(request.url).searchParams.get("after") || "0");
-  const entries = await puter.kv.list(messagePrefix());
+  const entries = await me.puter.kv.list(messagePrefix(), true);
 
   const messages = entries
     .map((entry) => entry.value)
@@ -320,7 +320,7 @@ async function handleMessages(request) {
 }
 
 function route(handler) {
-  return async function (request) {
+  return async function ({ request }) {
     try {
       return await handler(request);
     } catch (err) {
@@ -333,12 +333,16 @@ function route(handler) {
   };
 }
 
-puter.router.options("*", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
-puter.router.get("/room", route(handleRoom));
-puter.router.get("/messages", route(handleMessages));
-puter.router.post("/join", route(handleJoin));
-puter.router.post("/invite-token", route(handleInviteToken));
-puter.router.post("/message", route(handleMessage));
+router.options("/room", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
+router.options("/messages", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
+router.options("/join", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
+router.options("/invite-token", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
+router.options("/message", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
+router.get("/room", route(handleRoom));
+router.get("/messages", route(handleMessages));
+router.post("/join", route(handleJoin));
+router.post("/invite-token", route(handleInviteToken));
+router.post("/message", route(handleMessage));
 `;
 
 export function buildClassicWorkerScript(args: {
