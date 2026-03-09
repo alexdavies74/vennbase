@@ -25,7 +25,6 @@ import type {
   RoomUser,
   SignedWriteEnvelope,
 } from "./types";
-import type { Puter } from "@heyputer/puter.js";
 
 interface RoomResponse extends Room {
   members: string[];
@@ -46,7 +45,7 @@ interface PollMessagesResponse {
 export class PuterFedRooms {
   private readonly options: PuterFedRoomsOptions;
 
-  private puter: Puter | undefined;
+  private puter: PuterFedRoomsOptions["puter"];
 
   private fetchFn: typeof fetch;
 
@@ -62,7 +61,7 @@ export class PuterFedRooms {
   }
 
   async init(): Promise<void> {
-    this.puter = this.options.puter ?? ((globalThis as { puter?: Puter }).puter as Puter | undefined);
+    this.puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
     if (typeof this.fetchFn !== "function") {
       throw new Error("fetch is required");
     }
@@ -91,7 +90,7 @@ export class PuterFedRooms {
     }
 
     const auth = this.puter?.auth;
-    let candidate: { username?: string; name?: string; id?: string } | null = null;
+    let candidate: { username?: string } | null = null;
 
     if (auth?.getUser) {
       candidate = await auth.getUser().catch(() => null);
@@ -112,7 +111,7 @@ export class PuterFedRooms {
       candidate = await this.puter.getUser().catch(() => null);
     }
 
-    const username = candidate?.username ?? candidate?.name ?? candidate?.id;
+    const username = candidate?.username;
     if (!username) {
       throw new Error(
         "Unable to determine current Puter username. Import @heyputer/puter.js in the frontend and pass { puter } to PuterFedRooms.",
@@ -239,7 +238,7 @@ export class PuterFedRooms {
     return snapshot.members;
   }
 
-  async sendMessage(room: Room, body: unknown): Promise<Message> {
+  async sendMessage(room: Room, body: Message["body"]): Promise<Message> {
     await this.init();
 
     const user = await this.whoAmI();
@@ -251,7 +250,7 @@ export class PuterFedRooms {
     const payload: Message = {
       id: this.createId("msg"),
       roomId: room.id,
-      body: body as Message["body"],
+      body,
       createdAt: Date.now(),
       signedBy: user.username,
     };
@@ -314,7 +313,7 @@ export class PuterFedRooms {
     url: string,
     options: {
       method: "GET" | "POST";
-      body?: unknown;
+      body?: object;
     },
   ): Promise<T> {
     const user = await this.whoAmI();

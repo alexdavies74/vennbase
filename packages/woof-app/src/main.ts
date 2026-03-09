@@ -1,5 +1,5 @@
 import { puter } from "@heyputer/puter.js";
-import { PuterFedRooms, type Message } from "puter-federation-sdk";
+import { PuterFedError, PuterFedRooms, type Message } from "puter-federation-sdk";
 
 import type { DogProfile } from "./profile";
 import { WoofService } from "./service";
@@ -163,7 +163,11 @@ async function renderChat(profile: DogProfile) {
       input.value = "";
       await refreshMessages();
     } catch (error) {
-      chatError.textContent = error instanceof Error ? error.message : "Failed to send message.";
+      console.error("[woof-app] sendTurn failed", {
+        error,
+        roomId: currentProfile.room.id,
+      });
+      chatError.textContent = getErrorMessage(error, "Failed to send message.");
     }
   });
 }
@@ -201,9 +205,9 @@ function renderMessages(messages: Message[]) {
   container.scrollTop = container.scrollHeight;
 }
 
-function normalizeMessageBody(body: unknown): { userType: string; content: string } {
-  if (body && typeof body === "object") {
-    const record = body as Record<string, unknown>;
+function normalizeMessageBody(body: Message["body"]): { userType: string; content: string } {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const record = body as Record<string, Message["body"]>;
     return {
       userType: String(record.userType ?? "user"),
       content: String(record.content ?? ""),
@@ -212,7 +216,7 @@ function normalizeMessageBody(body: unknown): { userType: string; content: strin
 
   return {
     userType: "user",
-    content: String(body ?? ""),
+    content: String(body),
   };
 }
 
@@ -234,12 +238,16 @@ function escapeHtml(value: string): string {
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    const code = (error as { code?: unknown }).code;
-    const status = (error as { status?: unknown }).status;
-    if (typeof code === "string" || typeof status === "number") {
-      return `${error.message} (${[code, status].filter(Boolean).join(", ")})`;
+  if (error instanceof PuterFedError) {
+    const detailsParts: Array<string | number> = [error.code];
+    if (error.status !== undefined) {
+      detailsParts.push(error.status);
     }
+    const details = detailsParts.join(", ");
+    return details ? `${error.message} (${details})` : error.message;
+  }
+
+  if (error instanceof Error && error.message) {
     return error.message;
   }
 
@@ -247,14 +255,21 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return error;
   }
 
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      return message;
-    }
+  if (hasStringMessage(error)) {
+    return error.message;
   }
 
   return fallback;
+}
+
+function hasStringMessage(value: unknown): value is { message: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "message" in value &&
+    typeof (value as { message?: unknown }).message === "string" &&
+    Boolean((value as { message: string }).message.trim())
+  );
 }
 
 void boot();

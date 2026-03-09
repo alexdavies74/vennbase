@@ -90,7 +90,7 @@ export interface DeployWorkerArgs {
 }
 
 export interface PuterFedRoomsOptions {
-  puter?: Puter;
+  puter?: Pick<Puter, "auth" | "getUser" | "fs" | "workers">;
   fetchFn?: typeof fetch;
   appBaseUrl?: string;
   workerBaseUrl?: string;

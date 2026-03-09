@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Puter } from "@heyputer/puter.js";
 
 import { PuterFedRooms } from "../src/client";
+import type { PuterFedRoomsOptions } from "../src/types";
 
 describe("PuterFedRooms", () => {
   it("calls provided fetchFn without binding `this` to SDK instance", async () => {
@@ -115,7 +115,7 @@ describe("PuterFedRooms", () => {
       });
     };
 
-    const puter = {
+    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
       fs: {
         mkdir: async () => undefined,
         write: async () => undefined,
@@ -123,7 +123,7 @@ describe("PuterFedRooms", () => {
       workers: {
         create: async () => ({ success: true, url: deployedWorkerUrl }),
       },
-    } as unknown as Puter;
+    };
 
     const rooms = new PuterFedRooms({
       identityProvider: async () => ({ username: "owner" }),

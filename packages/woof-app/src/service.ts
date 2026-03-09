@@ -1,4 +1,8 @@
-import type { Room } from "puter-federation-sdk";
+import type {
+  PuterFedRooms,
+  Room,
+} from "puter-federation-sdk";
+import type { AI, ChatResponse } from "@heyputer/puter.js";
 
 import { clearProfile, loadProfile, saveProfile, type DogProfile } from "./profile";
 
@@ -9,19 +13,18 @@ interface TimerLike {
   clearInterval(handle: PollHandle): void;
 }
 
-interface RoomsLike {
-  createRoom(name: string): Promise<Room>;
-  joinRoom(workerUrl: string, options: { inviteToken?: string; publicKeyUrl: string }): Promise<Room>;
-  parseInviteInput(input: string): { workerUrl: string; inviteToken?: string };
-  getPublicKeyUrl(): string;
-  sendMessage(room: Room, body: unknown): Promise<unknown>;
-  createInviteToken(room: Room): Promise<{ token: string }>;
-  createInviteLink(room: Room, inviteToken: string): string;
-}
+type RoomsLike = Pick<
+  PuterFedRooms,
+  | "createRoom"
+  | "joinRoom"
+  | "parseInviteInput"
+  | "getPublicKeyUrl"
+  | "sendMessage"
+  | "createInviteToken"
+  | "createInviteLink"
+>;
 
-interface PuterAI {
-  chat(input: unknown): Promise<unknown>;
-}
+type PuterAI = Pick<AI, "chat">;
 
 export class WoofService {
   private pollHandle: PollHandle | null = null;
@@ -112,8 +115,8 @@ export class WoofService {
       return `${dogName} tilts its head and wags.`;
     }
 
-    const response = await puterAI.chat({
-      messages: [
+    try {
+      const response = await puterAI.chat([
         {
           role: "system",
           content: `You are ${dogName}, a friendly dog replying in short playful lines.`,
@@ -122,27 +125,40 @@ export class WoofService {
           role: "user",
           content: userMessage,
         },
-      ],
-    });
+      ]);
 
-    const extracted = extractAIText(response);
-    return extracted || `${dogName} barks happily.`;
+      const extracted = extractAIText(response);
+      if (extracted) {
+        return extracted;
+      }
+
+      console.warn("[woof-app] AI response had no usable text", { response });
+      return `${dogName} barks happily.`;
+    } catch (error) {
+      console.error("[woof-app] AI reply generation failed", {
+        error,
+        dogName,
+      });
+      return `${dogName} barks happily.`;
+    }
   }
 }
 
-function extractAIText(response: unknown): string | null {
-  if (!response || typeof response !== "object") {
+function extractAIText(response: ChatResponse): string | null {
+  const content = response.message?.content;
+  if (content == null) {
     return null;
   }
 
-  const message = (response as Record<string, unknown>).message;
-  if (!message || typeof message !== "object") {
-    return null;
-  }
-
-  const content = (message as Record<string, unknown>).content;
   if (typeof content === "string" && content.trim()) {
     return content.trim();
+  }
+
+  if (content && typeof content === "object") {
+    const maybeText = (content as Record<string, unknown>).text;
+    if (typeof maybeText === "string" && maybeText.trim()) {
+      return maybeText.trim();
+    }
   }
 
   if (Array.isArray(content)) {

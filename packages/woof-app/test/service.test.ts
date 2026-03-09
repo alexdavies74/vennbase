@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { Room } from "puter-federation-sdk";
+import type { InviteToken, Message, Room } from "puter-federation-sdk";
+import type { ChatMessage } from "@heyputer/puter.js";
 
 import { loadProfile } from "../src/profile";
 import { WoofService } from "../src/service";
@@ -46,7 +47,7 @@ class MockTimer {
 }
 
 class MockRooms {
-  public sentMessages: Array<{ room: Room; body: unknown }> = [];
+  public sentMessages: Array<{ room: Room; body: Message["body"] }> = [];
 
   async createRoom(name: string): Promise<Room> {
     return {
@@ -79,12 +80,17 @@ class MockRooms {
     return "https://keys.example/alex.json";
   }
 
-  async sendMessage(room: Room, body: unknown): Promise<void> {
+  async sendMessage(room: Room, body: Message["body"]): Promise<void> {
     this.sentMessages.push({ room, body });
   }
 
-  async createInviteToken(_room: Room): Promise<{ token: string }> {
-    return { token: "invite_1" };
+  async createInviteToken(room: Room): Promise<InviteToken> {
+    return {
+      token: "invite_1",
+      roomId: room.id,
+      invitedBy: room.owner,
+      createdAt: 1,
+    };
   }
 
   createInviteLink(room: Room, inviteToken: string): string {
@@ -120,11 +126,13 @@ describe("WoofService", () => {
   it("sends user and dog messages in one turn", async () => {
     const rooms = new MockRooms();
     const service = new WoofService(rooms, new MockStorage());
+    let chatInput: ChatMessage[] | undefined;
 
     const profile = await service.enterChat({ dogName: "Rex" });
 
     await service.sendTurn(profile, "hello", {
-      async chat() {
+      async chat(input: ChatMessage[]) {
+        chatInput = input;
         return {
           message: {
             content: "woof!",
@@ -136,6 +144,38 @@ describe("WoofService", () => {
     expect(rooms.sentMessages).toHaveLength(2);
     expect(rooms.sentMessages[0].body).toEqual({ userType: "user", content: "hello" });
     expect(rooms.sentMessages[1].body).toEqual({ userType: "dog", content: "woof!" });
+    expect(chatInput).toEqual([
+      {
+        role: "system",
+        content: "You are Rex, a friendly dog replying in short playful lines.",
+      },
+      {
+        role: "user",
+        content: "hello",
+      },
+    ]);
+  });
+
+  it("falls back to canned dog reply when AI call fails", async () => {
+    const rooms = new MockRooms();
+    const service = new WoofService(rooms, new MockStorage());
+
+    const profile = await service.enterChat({ dogName: "Rex" });
+
+    await service.sendTurn(profile, "hello", {
+      async chat() {
+        throw {
+          message: "messages required",
+        };
+      },
+    });
+
+    expect(rooms.sentMessages).toHaveLength(2);
+    expect(rooms.sentMessages[0].body).toEqual({ userType: "user", content: "hello" });
+    expect(rooms.sentMessages[1].body).toEqual({
+      userType: "dog",
+      content: "Rex barks happily.",
+    });
   });
 
   it("relinquish clears profile and stops polling", async () => {

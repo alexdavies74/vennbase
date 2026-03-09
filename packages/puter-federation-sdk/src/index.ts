@@ -20,6 +20,7 @@ export type {
   ApiError,
   DeployWorkerArgs,
   InviteToken,
+  JsonValue,
   JoinOptions,
   Message,
   ParsedInviteInput,

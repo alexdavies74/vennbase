@@ -1,18 +1,8 @@
-interface PuterAIResponse {
-  message?: {
-    content?: string;
-  };
-}
-
-interface PuterGlobal {
-  ai?: {
-    chat: (input: unknown) => Promise<PuterAIResponse>;
-  };
-}
+import type { Puter } from "@heyputer/puter.js";
 
 declare global {
   interface Window {
-    puter?: PuterGlobal;
+    puter?: Puter;
   }
 }
 
