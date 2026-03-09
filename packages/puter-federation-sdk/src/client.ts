@@ -20,11 +20,13 @@ import type {
   InviteToken,
   JoinOptions,
   Message,
+  PollMessagesOptions,
   ParsedInviteInput,
   PuterFedRoomsOptions,
   Room,
   RoomSnapshot,
   RoomUser,
+  SendMessageOptions,
   SignedWriteEnvelope,
 } from "./types";
 
@@ -252,7 +254,7 @@ export class PuterFedRooms {
     });
   }
 
-  async sendMessage(room: Room, body: Message["body"]): Promise<Message> {
+  async sendMessage(room: Room, body: Message["body"], options: SendMessageOptions = {}): Promise<Message> {
     await this.init();
 
     const user = await this.whoAmI();
@@ -268,6 +270,10 @@ export class PuterFedRooms {
       createdAt: Date.now(),
       signedBy: user.username,
     };
+
+    if (typeof options.threadUser === "string" && options.threadUser.trim()) {
+      payload.threadUser = options.threadUser.trim();
+    }
 
     const envelope: SignedWriteEnvelope<Message> = await signEnvelope(
       "message",
@@ -290,9 +296,14 @@ export class PuterFedRooms {
     return response.message;
   }
 
-  async pollMessages(room: Room, sinceTimestamp: number): Promise<Message[]> {
+  async pollMessages(
+    room: Room,
+    sinceTimestamp: number,
+    options: PollMessagesOptions = {},
+  ): Promise<Message[]> {
+    const scope = options.scope ?? "thread";
     const response = await this.requestJson<PollMessagesResponse>(
-      `${stripTrailingSlash(room.workerUrl)}/messages?after=${encodeURIComponent(String(sinceTimestamp))}`,
+      `${stripTrailingSlash(room.workerUrl)}/messages?after=${encodeURIComponent(String(sinceTimestamp))}&scope=${encodeURIComponent(scope)}`,
       {
         method: "GET",
       },

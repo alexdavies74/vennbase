@@ -37,8 +37,21 @@ class MockTimer {
 }
 
 class MockRooms {
-  public sentMessages: Array<{ room: Room; body: Message["body"] }> = [];
+  public sentMessages: Array<{
+    room: Room;
+    body: Message["body"];
+    options?: { threadUser?: string };
+  }> = [];
   public failGetRoom = false;
+  public readonly members = ["alex", "friend"];
+
+  private messageCounter = 0;
+
+  private readonly globalMessages: Message[] = [];
+
+  async whoAmI(): Promise<{ username: string }> {
+    return { username: "alex" };
+  }
 
   async createRoom(name: string): Promise<Room> {
     return {
@@ -89,8 +102,37 @@ class MockRooms {
     return "https://keys.example/alex.json";
   }
 
-  async sendMessage(room: Room, body: Message["body"]): Promise<void> {
-    this.sentMessages.push({ room, body });
+  async sendMessage(room: Room, body: Message["body"], options?: { threadUser?: string }): Promise<void> {
+    this.sentMessages.push({ room, body, options });
+
+    const createdAt = ++this.messageCounter;
+    this.globalMessages.push({
+      id: `msg_${createdAt}`,
+      roomId: room.id,
+      body,
+      createdAt,
+      signedBy: "alex",
+      threadUser: options?.threadUser ?? "alex",
+    });
+  }
+
+  async pollMessages(
+    _room: Room,
+    sinceTimestamp: number,
+    options?: { scope?: "thread" | "global" },
+  ): Promise<Message[]> {
+    const scope = options?.scope ?? "thread";
+    if (scope === "global") {
+      return this.globalMessages.filter((message) => message.createdAt > sinceTimestamp);
+    }
+
+    return this.globalMessages.filter(
+      (message) => message.createdAt > sinceTimestamp && (message.threadUser ?? message.signedBy) === "alex",
+    );
+  }
+
+  async listMembers(_room: Room): Promise<string[]> {
+    return this.members;
   }
 
   async createInviteToken(room: Room): Promise<InviteToken> {
@@ -201,17 +243,18 @@ describe("WoofService", () => {
 
     expect(rooms.sentMessages).toHaveLength(2);
     expect(rooms.sentMessages[0].body).toEqual({ userType: "user", content: "hello" });
-    expect(rooms.sentMessages[1].body).toEqual({ userType: "dog", content: "woof!" });
-    expect(chatInput).toEqual([
-      {
-        role: "system",
-        content: "You are Rex, a friendly dog replying in short playful lines.",
-      },
-      {
-        role: "user",
-        content: "hello",
-      },
-    ]);
+    expect(rooms.sentMessages[1].body).toEqual({ userType: "dog", content: "woof!", toUser: "alex" });
+    expect(rooms.sentMessages[1].options).toEqual({ threadUser: "alex" });
+    expect(chatInput?.[0]).toEqual({
+      role: "system",
+      content:
+        "You are Rex, a friendly dog in a shared room with separate 1:1 threads. You can reply to multiple users, but you must always reply to the trigger user. Return STRICT JSON only: {\"replies\":[{\"toUser\":\"username\",\"content\":\"message\"}]} Keep content short and playful.",
+    });
+    expect(chatInput?.[1].role).toBe("user");
+    const promptPayload = JSON.parse(String(chatInput?.[1].content));
+    expect(promptPayload.triggerUser).toBe("alex");
+    expect(promptPayload.latestUserMessage).toBe("hello");
+    expect(promptPayload.members).toEqual(["alex", "friend"]);
   });
 
   it("uses canonical room name for dog persona", async () => {
@@ -236,7 +279,8 @@ describe("WoofService", () => {
 
     expect(chatInput?.[0]).toEqual({
       role: "system",
-      content: "You are Joined, a friendly dog replying in short playful lines.",
+      content:
+        "You are Joined, a friendly dog in a shared room with separate 1:1 threads. You can reply to multiple users, but you must always reply to the trigger user. Return STRICT JSON only: {\"replies\":[{\"toUser\":\"username\",\"content\":\"message\"}]} Keep content short and playful.",
     });
   });
 
@@ -259,6 +303,67 @@ describe("WoofService", () => {
     expect(rooms.sentMessages[1].body).toEqual({
       userType: "dog",
       content: "Rex barks happily.",
+      toUser: "alex",
+    });
+    expect(rooms.sentMessages[1].options).toEqual({ threadUser: "alex" });
+  });
+
+  it("can send additional dog replies to other users", async () => {
+    const rooms = new MockRooms();
+    const service = new WoofService(rooms, new MockKv());
+    const profile = await service.enterChat({ dogName: "Rex" });
+
+    await service.sendTurn(profile, "hello", {
+      async chat() {
+        return {
+          message: {
+            content: JSON.stringify({
+              replies: [
+                { toUser: "alex", content: "woof for alex" },
+                { toUser: "friend", content: "woof for friend" },
+              ],
+            }),
+          },
+        };
+      },
+    });
+
+    expect(rooms.sentMessages).toHaveLength(3);
+    expect(rooms.sentMessages[1]).toMatchObject({
+      body: { userType: "dog", content: "woof for alex", toUser: "alex" },
+      options: { threadUser: "alex" },
+    });
+    expect(rooms.sentMessages[2]).toMatchObject({
+      body: { userType: "dog", content: "woof for friend", toUser: "friend" },
+      options: { threadUser: "friend" },
+    });
+  });
+
+  it("forces a reply to actor when AI omits it", async () => {
+    const rooms = new MockRooms();
+    const service = new WoofService(rooms, new MockKv());
+    const profile = await service.enterChat({ dogName: "Rex" });
+
+    await service.sendTurn(profile, "hello", {
+      async chat() {
+        return {
+          message: {
+            content: JSON.stringify({
+              replies: [{ toUser: "friend", content: "hello friend" }],
+            }),
+          },
+        };
+      },
+    });
+
+    expect(rooms.sentMessages).toHaveLength(3);
+    expect(rooms.sentMessages[1]).toMatchObject({
+      body: { userType: "dog", content: "Rex barks in reply.", toUser: "alex" },
+      options: { threadUser: "alex" },
+    });
+    expect(rooms.sentMessages[2]).toMatchObject({
+      body: { userType: "dog", content: "hello friend", toUser: "friend" },
+      options: { threadUser: "friend" },
     });
   });
 

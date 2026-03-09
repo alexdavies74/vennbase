@@ -244,4 +244,88 @@ describe("PuterFedRooms", () => {
     });
     expect(signerKeyStore.size).toBeGreaterThan(0);
   });
+
+  it("supports message thread routing and global poll scope", async () => {
+    const capturedBodies: unknown[] = [];
+    const requestedUrls: string[] = [];
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        requestedUrls.push(url);
+
+        if (init?.body && typeof init.body === "string") {
+          capturedBodies.push(JSON.parse(init.body));
+        }
+
+        if (url.includes("/messages")) {
+          return new Response(
+            JSON.stringify({
+              messages: [],
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        if (url.includes("/message")) {
+          const body = capturedBodies[capturedBodies.length - 1] as {
+            payload: { id: string; roomId: string; body: unknown; createdAt: number; signedBy: string; threadUser?: string };
+          };
+
+          return new Response(
+            JSON.stringify({
+              message: body.payload,
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    await rooms.sendMessage(
+      {
+        id: "room_1",
+        name: "Rex",
+        owner: "owner",
+        workerUrl: "https://worker.example",
+        createdAt: 1,
+      },
+      { userType: "dog", content: "woof" },
+      { threadUser: "friend" },
+    );
+
+    await rooms.pollMessages(
+      {
+        id: "room_1",
+        name: "Rex",
+        owner: "owner",
+        workerUrl: "https://worker.example",
+        createdAt: 1,
+      },
+      123,
+      { scope: "global" },
+    );
+
+    const messageEnvelope = capturedBodies[0] as { payload?: { threadUser?: string } };
+    expect(messageEnvelope.payload?.threadUser).toBe("friend");
+    expect(requestedUrls).toContain("https://worker.example/messages?after=123&scope=global");
+  });
 });

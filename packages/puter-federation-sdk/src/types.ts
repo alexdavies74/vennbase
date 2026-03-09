@@ -38,6 +38,7 @@ export interface Message {
   body: JsonValue;
   createdAt: number;
   signedBy: string;
+  threadUser?: string;
 }
 
 export interface InviteToken {
@@ -50,6 +51,16 @@ export interface InviteToken {
 export interface JoinOptions {
   inviteToken?: string;
   publicKeyUrl: string;
+}
+
+export interface SendMessageOptions {
+  threadUser?: string;
+}
+
+export type PollMessagesScope = "thread" | "global";
+
+export interface PollMessagesOptions {
+  scope?: PollMessagesScope;
 }
 
 export interface SignerIdentity {

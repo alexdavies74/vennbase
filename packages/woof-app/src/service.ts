@@ -1,8 +1,10 @@
 import type {
   PuterFedRooms,
+  Message,
   Room,
+  RoomUser,
 } from "puter-federation-sdk";
-import type { AI, ChatResponse, KV } from "@heyputer/puter.js";
+import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
 
 import {
   clearProfile,
@@ -23,9 +25,12 @@ type RoomsLike = Pick<
   | "createRoom"
   | "getRoom"
   | "joinRoom"
+  | "whoAmI"
   | "parseInviteInput"
   | "getPublicKeyUrl"
   | "sendMessage"
+  | "pollMessages"
+  | "listMembers"
   | "createInviteToken"
   | "createInviteLink"
 >;
@@ -95,17 +100,40 @@ export class WoofService {
   }
 
   async sendTurn(profile: DogProfile, content: string, puterAI?: PuterAI): Promise<void> {
+    const actor = await this.rooms.whoAmI();
+
     await this.rooms.sendMessage(profile.room, {
       userType: "user",
       content,
     });
 
-    const dogReply = await this.getDogReply(content, profile.room.name, puterAI);
+    const [messages, members] = await Promise.all([
+      this.rooms.pollMessages(profile.room, 0, { scope: "global" }),
+      this.rooms.listMembers(profile.room),
+    ]);
 
-    await this.rooms.sendMessage(profile.room, {
-      userType: "dog",
-      content: dogReply,
+    const replies = await this.getDogReplies({
+      actor,
+      userMessage: content,
+      dogName: profile.room.name,
+      messages,
+      members,
+      puterAI,
     });
+
+    for (const reply of replies) {
+      await this.rooms.sendMessage(
+        profile.room,
+        {
+          userType: "dog",
+          content: reply.content,
+          toUser: reply.toUser,
+        },
+        {
+          threadUser: reply.toUser,
+        },
+      );
+    }
   }
 
   startPolling(callback: () => Promise<void>, intervalMs = 5000): void {
@@ -129,43 +157,180 @@ export class WoofService {
     await clearProfile(this.kv);
   }
 
-  private async getDogReply(
-    userMessage: string,
-    dogName: string,
-    puterAI?: PuterAI,
-  ): Promise<string> {
-    if (!puterAI?.chat) {
-      return `${dogName} tilts its head and wags.`;
+  private async getDogReplies(args: {
+    actor: RoomUser;
+    userMessage: string;
+    dogName: string;
+    messages: Message[];
+    members: string[];
+    puterAI?: PuterAI;
+  }): Promise<Array<{ toUser: string; content: string }>> {
+    const fallbackToActor = () => [
+      {
+        toUser: args.actor.username,
+        content: `${args.dogName} barks happily.`,
+      },
+    ];
+
+    if (!args.puterAI?.chat) {
+      return [
+        {
+          toUser: args.actor.username,
+          content: `${args.dogName} tilts its head and wags.`,
+        },
+      ];
     }
 
     try {
-      const response = await puterAI.chat([
-        {
-          role: "system",
-          content: `You are ${dogName}, a friendly dog replying in short playful lines.`,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ]);
+      const response = await args.puterAI.chat(buildDogPrompt(args));
 
       const extracted = extractAIText(response);
       if (extracted) {
-        return extracted;
+        const plan = parseDogReplyPlan(extracted);
+        const sanitized = sanitizeDogReplyPlan(plan, args.members);
+
+        if (sanitized.length > 0) {
+          const hasActorReply = sanitized.some((item) => item.toUser === args.actor.username);
+          if (hasActorReply) {
+            return sanitized;
+          }
+
+          return [
+            {
+              toUser: args.actor.username,
+              content: `${args.dogName} barks in reply.`,
+            },
+            ...sanitized,
+          ];
+        }
+
+        return [
+          {
+            toUser: args.actor.username,
+            content: extracted,
+          },
+        ];
       }
 
       console.warn("[woof-app] AI response had no usable text", { response });
-      return `${dogName} barks happily.`;
+      return fallbackToActor();
     } catch (error) {
       console.error("[woof-app] AI reply generation failed", {
         error,
-        dogName,
+        dogName: args.dogName,
       });
-      return `${dogName} barks happily.`;
+      return fallbackToActor();
     }
   }
 
+}
+
+function buildDogPrompt(args: {
+  actor: RoomUser;
+  userMessage: string;
+  dogName: string;
+  messages: Message[];
+  members: string[];
+}): ChatMessage[] {
+  const normalizedHistory = args.messages
+    .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+    .map((message) => {
+      const payload = normalizeMessageBody(message.body);
+      return {
+        id: message.id,
+        at: message.createdAt,
+        fromUser: message.signedBy,
+        toUser: message.threadUser ?? message.signedBy,
+        userType: payload.userType,
+        content: payload.content,
+      };
+    });
+
+  return [
+    {
+      role: "system",
+      content: [
+        `You are ${args.dogName}, a friendly dog in a shared room with separate 1:1 threads.`,
+        "You can reply to multiple users, but you must always reply to the trigger user.",
+        "Return STRICT JSON only: {\"replies\":[{\"toUser\":\"username\",\"content\":\"message\"}]}",
+        "Keep content short and playful.",
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        triggerUser: args.actor.username,
+        latestUserMessage: args.userMessage,
+        members: args.members,
+        history: normalizedHistory,
+      }),
+    },
+  ];
+}
+
+function normalizeMessageBody(body: Message["body"]): { userType: string; content: string } {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const record = body as Record<string, Message["body"]>;
+    return {
+      userType: String(record.userType ?? "user"),
+      content: String(record.content ?? ""),
+    };
+  }
+
+  return {
+    userType: "user",
+    content: String(body),
+  };
+}
+
+function parseDogReplyPlan(value: string): unknown {
+  const trimmed = value.trim();
+  const fencedMatch = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  const jsonText = fencedMatch ? fencedMatch[1] : trimmed;
+
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeDogReplyPlan(
+  plan: unknown,
+  roomMembers: string[],
+): Array<{ toUser: string; content: string }> {
+  if (!plan || typeof plan !== "object" || !("replies" in plan)) {
+    return [];
+  }
+
+  const replies = (plan as { replies?: unknown }).replies;
+  if (!Array.isArray(replies)) {
+    return [];
+  }
+
+  const memberSet = new Set(roomMembers);
+  const sanitized: Array<{ toUser: string; content: string }> = [];
+
+  for (const item of replies) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const toUser = typeof (item as { toUser?: unknown }).toUser === "string"
+      ? (item as { toUser: string }).toUser.trim()
+      : "";
+    const content = typeof (item as { content?: unknown }).content === "string"
+      ? (item as { content: string }).content.trim()
+      : "";
+
+    if (!toUser || !content || !memberSet.has(toUser)) {
+      continue;
+    }
+
+    sanitized.push({ toUser, content });
+  }
+
+  return sanitized;
 }
 
 function extractAIText(response: ChatResponse): string | null {
