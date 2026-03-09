@@ -7,7 +7,7 @@ Monorepo for a Puter-backed federated message room SDK plus a working example ap
 - `puter-federation-sdk/`: TypeScript SDK and worker template for signed, federated room of messages.
 - `woof-app/`: TypeScript SPA that uses the SDK (adopt a dog, chat, invite via link).
 
-## Current design (implemented)
+## Current design
 
 - Each room is backed by a dedicated Puter worker + KV namespace.
 - Writes (`/message`, `/invite-token`) are signed with ECDSA P-256.
@@ -16,7 +16,6 @@ Monorepo for a Puter-backed federated message room SDK plus a working example ap
 - Invites are token-based links:
   - create token via `POST /invite-token`
   - join with `inviteToken` for non-owner/non-member first join
-  - token object already includes future fields (`expiresAt`, `maxUses`, `revokedAt`) but they are not enforced yet
 
 
 # puter-federation-sdk
@@ -27,7 +26,7 @@ SDK for Puter federated rooms with signed writes (append message), worker-backed
 
 - One room = one deployed worker endpoint. Puter workers use classic script files, not ES modules, and you access kv through globals. Read examples carefully. Use puter router routes, so you can add options to add CORS headers for the endpoints clients hit.
 - Room data is stored in owner KV under `room:{roomId}:*`.
-- Members join by submitting username + public-key proof URL.
+- Members join by submitting username + + public-key URL.
 - Worker verifies signatures for writes and ignores client identity claims unless verified.
 
 ### Storage model
@@ -88,7 +87,7 @@ const messages = await rooms.pollMessages(room, 0);
 - `init()`
 - `whoAmI()`
 - `createRoom(name)`
-- `joinRoom(workerUrl, { inviteToken? })`
+- `joinRoom(workerUrl, { inviteToken?, publicKeyUrl })`
 - `createInviteToken(room)`
 - `listMembers(room)`
 - `sendMessage(room, body)`
