@@ -217,35 +217,6 @@ describe("RoomWorker", () => {
 
     expect(invalidSignature.status).toBe(401);
     expect((await jsonBody(invalidSignature)).code).toBe("INVALID_SIGNATURE");
-
-    const crossThreadUserEnvelope = await signEnvelope(
-      "message",
-      {
-        id: "msg_cross_thread",
-        roomId: "room_2",
-        body: { userType: "user", content: "not allowed" },
-        createdAt: 101,
-        signedBy: "guest",
-        threadUser: "owner",
-      },
-      {
-        username: "guest",
-        publicKeyUrl: guest.publicKeyUrl,
-      },
-      guest.keyPair.privateKey,
-      101,
-    );
-
-    const crossThreadUserResponse = await worker.handle(
-      new Request("https://worker.example/message", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-puter-username": "guest" },
-        body: JSON.stringify(crossThreadUserEnvelope),
-      }),
-    );
-
-    expect(crossThreadUserResponse.status).toBe(401);
-    expect((await jsonBody(crossThreadUserResponse)).code).toBe("UNAUTHORIZED");
   });
 
   it("returns messages sorted by createdAt and id", async () => {
@@ -331,7 +302,7 @@ describe("RoomWorker", () => {
     expect(payload.messages.map((message) => message.id)).toEqual(["a", "b"]);
   });
 
-  it("scopes /messages to requester thread and supports global history scope", async () => {
+  it("all members see all messages globally", async () => {
     const worker = new RoomWorker(
       {
         roomId: "room_4",
@@ -344,7 +315,6 @@ describe("RoomWorker", () => {
 
     const owner = await createIdentity("owner");
     const guest = await createIdentity("guest");
-    const friend = await createIdentity("friend");
 
     await worker.handle(
       new Request("https://worker.example/join", {
@@ -390,24 +360,12 @@ describe("RoomWorker", () => {
       }),
     );
 
-    await worker.handle(
-      new Request("https://worker.example/join", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-puter-username": "friend" },
-        body: JSON.stringify({
-          username: "friend",
-          publicKeyUrl: friend.publicKeyUrl,
-          inviteToken: "invite_4",
-        }),
-      }),
-    );
-
     const guestMsg = await signEnvelope(
       "message",
       {
         id: "msg_guest",
         roomId: "room_4",
-        body: { userType: "user", content: "hi from guest" },
+        body: { type: "yjs-update", data: "AAAA" },
         createdAt: 100,
         signedBy: "guest",
       },
@@ -427,38 +385,12 @@ describe("RoomWorker", () => {
       }),
     );
 
-    const dogToFriendMsg = await signEnvelope(
-      "message",
-      {
-        id: "msg_dog_to_friend",
-        roomId: "room_4",
-        body: { userType: "dog", content: "woof friend" },
-        createdAt: 110,
-        signedBy: "guest",
-        threadUser: "friend",
-      },
-      {
-        username: "guest",
-        publicKeyUrl: guest.publicKeyUrl,
-      },
-      guest.keyPair.privateKey,
-      110,
-    );
-
-    await worker.handle(
-      new Request("https://worker.example/message", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-puter-username": "guest" },
-        body: JSON.stringify(dogToFriendMsg),
-      }),
-    );
-
     const ownerMsg = await signEnvelope(
       "message",
       {
         id: "msg_owner",
         roomId: "room_4",
-        body: { userType: "user", content: "owner note" },
+        body: { type: "yjs-update", data: "BBBB" },
         createdAt: 120,
         signedBy: "owner",
       },
@@ -478,35 +410,16 @@ describe("RoomWorker", () => {
       }),
     );
 
-    const guestThreadResponse = await worker.handle(
-      new Request("https://worker.example/messages?after=0", {
-        method: "GET",
-        headers: { "x-puter-username": "guest" },
-      }),
-    );
-    const guestThreadPayload = (await guestThreadResponse.json()) as { messages: Array<{ id: string }> };
-    expect(guestThreadPayload.messages.map((message) => message.id)).toEqual(["msg_guest"]);
-
-    const friendThreadResponse = await worker.handle(
-      new Request("https://worker.example/messages?after=0", {
-        method: "GET",
-        headers: { "x-puter-username": "friend" },
-      }),
-    );
-    const friendThreadPayload = (await friendThreadResponse.json()) as { messages: Array<{ id: string }> };
-    expect(friendThreadPayload.messages.map((message) => message.id)).toEqual(["msg_dog_to_friend"]);
-
-    const guestGlobalResponse = await worker.handle(
-      new Request("https://worker.example/messages?after=0&scope=global", {
-        method: "GET",
-        headers: { "x-puter-username": "guest" },
-      }),
-    );
-    const guestGlobalPayload = (await guestGlobalResponse.json()) as { messages: Array<{ id: string }> };
-    expect(guestGlobalPayload.messages.map((message) => message.id)).toEqual([
-      "msg_guest",
-      "msg_dog_to_friend",
-      "msg_owner",
-    ]);
+    // Both guest and owner see all messages
+    for (const username of ["guest", "owner"]) {
+      const response = await worker.handle(
+        new Request("https://worker.example/messages?after=0", {
+          method: "GET",
+          headers: { "x-puter-username": username },
+        }),
+      );
+      const payload = (await response.json()) as { messages: Array<{ id: string }> };
+      expect(payload.messages.map((message) => message.id)).toEqual(["msg_guest", "msg_owner"]);
+    }
   });
 });

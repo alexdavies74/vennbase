@@ -7,7 +7,6 @@ import type {
   ApiError,
   InviteToken,
   Message,
-  PollMessagesScope,
   Room,
   RoomSnapshot,
   SignedWriteEnvelope,
@@ -50,7 +49,6 @@ interface MessagePayload {
   body: unknown;
   createdAt: number;
   signedBy: string;
-  threadUser?: string;
 }
 
 export interface RoomWorkerDeps {
@@ -124,14 +122,6 @@ function requesterFromHeader(request: Request): string {
   return requester;
 }
 
-function messageThreadKey(
-  roomId: string,
-  threadUser: string,
-  message: Pick<Message, "createdAt" | "id">,
-): string {
-  return `room:${roomId}:thread_message:${threadUser}:${message.createdAt}:${message.id}`;
-}
-
 function messageGlobalKey(roomId: string, message: Pick<Message, "createdAt" | "id">): string {
   return `room:${roomId}:global_message:${message.createdAt}:${message.id}`;
 }
@@ -150,10 +140,6 @@ function roomMetaKey(roomId: string): string {
 
 function roomMembersKey(roomId: string): string {
   return `room:${roomId}:members`;
-}
-
-function roomThreadMessagePrefix(roomId: string, threadUser: string): string {
-  return `room:${roomId}:thread_message:${threadUser}:`;
 }
 
 function roomGlobalMessagePrefix(roomId: string): string {
@@ -209,8 +195,7 @@ export class RoomWorker {
 
       if (request.method === "GET" && pathname === "/messages") {
         const after = Number(searchParams.get("after") ?? 0);
-        const scope = parseMessagesScope(searchParams.get("scope"));
-        return await this.getMessages(request, after, scope);
+        return await this.getMessages(request, after);
       }
 
       if (request.method === "POST" && pathname === "/join") {
@@ -250,14 +235,11 @@ export class RoomWorker {
     return jsonResponse(200, snapshot);
   }
 
-  private async getMessages(request: Request, after: number, scope: PollMessagesScope): Promise<Response> {
+  private async getMessages(request: Request, after: number): Promise<Response> {
     const requester = requesterFromHeader(request);
     await this.assertMember(requester);
 
-    const messageEntries =
-      scope === "global"
-        ? await this.kv.list(roomGlobalMessagePrefix(this.config.roomId))
-        : await this.kv.list(roomThreadMessagePrefix(this.config.roomId, requester));
+    const messageEntries = await this.kv.list(roomGlobalMessagePrefix(this.config.roomId));
 
     const messages = messageEntries
       .map((entry) => entry.value as Message)
@@ -341,21 +323,12 @@ export class RoomWorker {
       error(400, "BAD_REQUEST", "Envelope roomId does not match worker roomId");
     }
 
-    const userType = inferUserType(envelope.payload.body);
-    const threadUser = inferThreadUser(envelope.payload, userType);
-
-    await this.assertMember(threadUser);
-
     const message: Message = {
       ...envelope.payload,
       body: envelope.payload.body as Message["body"],
-      threadUser,
     };
 
-    await Promise.all([
-      this.kv.set(messageThreadKey(this.config.roomId, threadUser, message), message),
-      this.kv.set(messageGlobalKey(this.config.roomId, message), message),
-    ]);
+    await this.kv.set(messageGlobalKey(this.config.roomId, message), message);
 
     return jsonResponse(200, {
       message,
@@ -479,38 +452,3 @@ export class RoomWorker {
   }
 }
 
-function parseMessagesScope(rawScope: string | null): PollMessagesScope {
-  if (!rawScope || rawScope === "thread") {
-    return "thread";
-  }
-
-  if (rawScope === "global") {
-    return "global";
-  }
-
-  error(400, "BAD_REQUEST", `Unsupported messages scope: ${rawScope}`);
-}
-
-function inferUserType(body: unknown): string {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return "user";
-  }
-
-  const userType = (body as { userType?: unknown }).userType;
-  return typeof userType === "string" ? userType : "user";
-}
-
-function inferThreadUser(payload: MessagePayload, userType: string): string {
-  const candidate =
-    typeof payload.threadUser === "string" ? payload.threadUser.trim() : "";
-
-  if (!candidate) {
-    return payload.signedBy;
-  }
-
-  if (userType !== "dog" && candidate !== payload.signedBy) {
-    error(401, "UNAUTHORIZED", "Only dog messages can target a different thread user");
-  }
-
-  return candidate;
-}

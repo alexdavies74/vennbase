@@ -38,7 +38,6 @@ export interface Message {
   body: JsonValue;
   createdAt: number;
   signedBy: string;
-  threadUser?: string;
 }
 
 export interface InviteToken {
@@ -53,14 +52,18 @@ export interface JoinOptions {
   publicKeyUrl: string;
 }
 
-export interface SendMessageOptions {
-  threadUser?: string;
+export interface CrdtConnectCallbacks {
+  applyRemoteUpdate: (body: JsonValue, message: Message) => void;
+  produceLocalUpdate: () => JsonValue | null;
 }
 
-export type PollMessagesScope = "thread" | "global";
+export interface CrdtConnectOptions {
+  intervalMs?: number;
+}
 
-export interface PollMessagesOptions {
-  scope?: PollMessagesScope;
+export interface CrdtConnection {
+  disconnect(): void;
+  flush(): Promise<void>;
 }
 
 export interface SignerIdentity {

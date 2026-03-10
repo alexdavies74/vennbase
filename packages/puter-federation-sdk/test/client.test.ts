@@ -245,9 +245,27 @@ describe("PuterFedRooms", () => {
     expect(signerKeyStore.size).toBeGreaterThan(0);
   });
 
-  it("supports message thread routing and global poll scope", async () => {
+  it("connectCrdt polls for remote updates and sends local updates", async () => {
     const capturedBodies: unknown[] = [];
     const requestedUrls: string[] = [];
+
+    const room = {
+      id: "room_1",
+      name: "Rex",
+      owner: "owner",
+      workerUrl: "https://worker.example",
+      createdAt: 1,
+    };
+
+    const remoteMessage = {
+      id: "msg_remote",
+      roomId: "room_1",
+      body: { type: "crdt-update", data: "AAAA" },
+      createdAt: 50,
+      signedBy: "friend",
+    };
+
+    let pollCount = 0;
 
     const rooms = new PuterFedRooms({
       identityProvider: async () => ({ username: "owner" }),
@@ -266,31 +284,20 @@ describe("PuterFedRooms", () => {
         }
 
         if (url.includes("/messages")) {
-          return new Response(
-            JSON.stringify({
-              messages: [],
-            }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" },
-            },
-          );
+          pollCount++;
+          const messages = pollCount === 1 ? [remoteMessage] : [];
+          return new Response(JSON.stringify({ messages }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
 
         if (url.includes("/message")) {
-          const body = capturedBodies[capturedBodies.length - 1] as {
-            payload: { id: string; roomId: string; body: unknown; createdAt: number; signedBy: string; threadUser?: string };
-          };
-
-          return new Response(
-            JSON.stringify({
-              message: body.payload,
-            }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" },
-            },
-          );
+          const body = capturedBodies[capturedBodies.length - 1] as { payload: unknown };
+          return new Response(JSON.stringify({ message: body.payload }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
 
         return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
@@ -300,32 +307,33 @@ describe("PuterFedRooms", () => {
       },
     });
 
-    await rooms.sendMessage(
-      {
-        id: "room_1",
-        name: "Rex",
-        owner: "owner",
-        workerUrl: "https://worker.example",
-        createdAt: 1,
-      },
-      { userType: "dog", content: "woof" },
-      { threadUser: "friend" },
-    );
+    const receivedUpdates: unknown[] = [];
+    let localUpdate: unknown = { type: "crdt-update", data: "BBBB" };
 
-    await rooms.pollMessages(
-      {
-        id: "room_1",
-        name: "Rex",
-        owner: "owner",
-        workerUrl: "https://worker.example",
-        createdAt: 1,
+    const connection = rooms.connectCrdt(room, {
+      applyRemoteUpdate: (body) => { receivedUpdates.push(body); },
+      produceLocalUpdate: () => {
+        const update = localUpdate;
+        localUpdate = null;
+        return update as import("../src/types").JsonValue | null;
       },
-      123,
-      { scope: "global" },
-    );
+    });
 
-    const messageEnvelope = capturedBodies[0] as { payload?: { threadUser?: string } };
-    expect(messageEnvelope.payload?.threadUser).toBe("friend");
-    expect(requestedUrls).toContain("https://worker.example/messages?after=123&scope=global");
+    // First tick runs immediately — wait for it to complete
+    await connection.flush();
+    connection.disconnect();
+
+    // Remote message body was delivered to applyRemoteUpdate
+    expect(receivedUpdates).toHaveLength(1);
+    expect(receivedUpdates[0]).toEqual(remoteMessage.body);
+
+    // Local update was sent as a message
+    const sentEnvelope = capturedBodies.find(
+      (b) => (b as { payload?: { body?: unknown } }).payload?.body !== undefined,
+    ) as { payload: { body: unknown } } | undefined;
+    expect(sentEnvelope?.payload.body).toEqual({ type: "crdt-update", data: "BBBB" });
+
+    // Poll URL uses correct after param
+    expect(requestedUrls.some((u) => u.includes("/messages?after=0"))).toBe(true);
   });
 });

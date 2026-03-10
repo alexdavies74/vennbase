@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 
-import type { InviteToken, Message, Room, RoomSnapshot } from "puter-federation-sdk";
+import type { CrdtConnectCallbacks, InviteToken, Room, RoomSnapshot } from "puter-federation-sdk";
 import type { ChatMessage } from "@heyputer/puter.js";
 
 import { loadStoredWorkerUrl } from "../src/profile";
@@ -24,30 +25,10 @@ class MockKv {
   }
 }
 
-class MockTimer {
-  public clearCalls: number[] = [];
-
-  setInterval(): number {
-    return 42;
-  }
-
-  clearInterval(handle: number): void {
-    this.clearCalls.push(handle);
-  }
-}
-
 class MockRooms {
-  public sentMessages: Array<{
-    room: Room;
-    body: Message["body"];
-    options?: { threadUser?: string };
-  }> = [];
   public failGetRoom = false;
   public readonly members = ["alex", "friend"];
-
-  private messageCounter = 0;
-
-  private readonly globalMessages: Message[] = [];
+  public crdtCallbacks: CrdtConnectCallbacks | null = null;
 
   async whoAmI(): Promise<{ username: string }> {
     return { username: "alex" };
@@ -102,35 +83,6 @@ class MockRooms {
     return "https://keys.example/alex.json";
   }
 
-  async sendMessage(room: Room, body: Message["body"], options?: { threadUser?: string }): Promise<void> {
-    this.sentMessages.push({ room, body, options });
-
-    const createdAt = ++this.messageCounter;
-    this.globalMessages.push({
-      id: `msg_${createdAt}`,
-      roomId: room.id,
-      body,
-      createdAt,
-      signedBy: "alex",
-      threadUser: options?.threadUser ?? "alex",
-    });
-  }
-
-  async pollMessages(
-    _room: Room,
-    sinceTimestamp: number,
-    options?: { scope?: "thread" | "global" },
-  ): Promise<Message[]> {
-    const scope = options?.scope ?? "thread";
-    if (scope === "global") {
-      return this.globalMessages.filter((message) => message.createdAt > sinceTimestamp);
-    }
-
-    return this.globalMessages.filter(
-      (message) => message.createdAt > sinceTimestamp && (message.threadUser ?? message.signedBy) === "alex",
-    );
-  }
-
   async listMembers(_room: Room): Promise<string[]> {
     return this.members;
   }
@@ -146,6 +98,18 @@ class MockRooms {
 
   createInviteLink(room: Room, inviteToken: string): string {
     return `https://woof.example/?owner=${room.owner}&room=${room.id}&token=${inviteToken}`;
+  }
+
+  connectCrdt(_room: Room, callbacks: CrdtConnectCallbacks) {
+    this.crdtCallbacks = callbacks;
+    return {
+      disconnect() {},
+      flush: async () => {
+        const update = callbacks.produceLocalUpdate();
+        // In tests we don't actually send over the wire — just drain the pending update
+        void update;
+      },
+    };
   }
 }
 
@@ -225,10 +189,12 @@ describe("WoofService", () => {
 
   it("sends user and dog messages in one turn", async () => {
     const rooms = new MockRooms();
-    const service = new WoofService(rooms, new MockKv());
+    const doc = new Y.Doc();
+    const service = new WoofService(rooms, new MockKv(), doc);
     let chatInput: ChatMessage[] | undefined;
 
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat(input: ChatMessage[]) {
@@ -241,10 +207,10 @@ describe("WoofService", () => {
       },
     });
 
-    expect(rooms.sentMessages).toHaveLength(2);
-    expect(rooms.sentMessages[0].body).toEqual({ userType: "user", content: "hello" });
-    expect(rooms.sentMessages[1].body).toEqual({ userType: "dog", content: "woof!", toUser: "alex" });
-    expect(rooms.sentMessages[1].options).toEqual({ threadUser: "alex" });
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ userType: "user", content: "hello", signedBy: "alex" });
+    expect(entries[1]).toMatchObject({ userType: "dog", content: "woof!", threadUser: "alex" });
     expect(chatInput?.[0]).toEqual({
       role: "system",
       content:
@@ -268,6 +234,7 @@ describe("WoofService", () => {
     const profile = await service.joinFromInvite(
       "https://woof.example/?owner=alex&room=room_joined&token=invite_1",
     );
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat(input: ChatMessage[]) {
@@ -291,6 +258,7 @@ describe("WoofService", () => {
     const rooms = new MockRooms();
     const service = new WoofService(rooms, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
     let secondTurnChatInput: ChatMessage[] | undefined;
 
     await service.sendTurn(profile, "first", {
@@ -328,6 +296,7 @@ describe("WoofService", () => {
     const service = new WoofService(rooms, new MockKv());
 
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat() {
@@ -337,20 +306,17 @@ describe("WoofService", () => {
       },
     });
 
-    expect(rooms.sentMessages).toHaveLength(2);
-    expect(rooms.sentMessages[0].body).toEqual({ userType: "user", content: "hello" });
-    expect(rooms.sentMessages[1].body).toEqual({
-      userType: "dog",
-      content: "Rex barks happily.",
-      toUser: "alex",
-    });
-    expect(rooms.sentMessages[1].options).toEqual({ threadUser: "alex" });
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ userType: "user", content: "hello" });
+    expect(entries[1]).toMatchObject({ userType: "dog", content: "Rex barks happily.", threadUser: "alex" });
   });
 
   it("can send additional dog replies to other users", async () => {
     const rooms = new MockRooms();
     const service = new WoofService(rooms, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat() {
@@ -367,21 +333,17 @@ describe("WoofService", () => {
       },
     });
 
-    expect(rooms.sentMessages).toHaveLength(3);
-    expect(rooms.sentMessages[1]).toMatchObject({
-      body: { userType: "dog", content: "woof for alex", toUser: "alex" },
-      options: { threadUser: "alex" },
-    });
-    expect(rooms.sentMessages[2]).toMatchObject({
-      body: { userType: "dog", content: "woof for friend", toUser: "friend" },
-      options: { threadUser: "friend" },
-    });
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(3);
+    expect(entries[1]).toMatchObject({ userType: "dog", content: "woof for alex", threadUser: "alex" });
+    expect(entries[2]).toMatchObject({ userType: "dog", content: "woof for friend", threadUser: "friend" });
   });
 
   it("strips address prefix from plain-text AI replies", async () => {
     const rooms = new MockRooms();
     const service = new WoofService(rooms, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat() {
@@ -393,17 +355,16 @@ describe("WoofService", () => {
       },
     });
 
-    expect(rooms.sentMessages).toHaveLength(2);
-    expect(rooms.sentMessages[1]).toMatchObject({
-      body: { userType: "dog", content: "plain woof", toUser: "alex" },
-      options: { threadUser: "alex" },
-    });
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toMatchObject({ userType: "dog", content: "plain woof", threadUser: "alex" });
   });
 
   it("forces a reply to actor when AI omits it", async () => {
     const rooms = new MockRooms();
     const service = new WoofService(rooms, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
     await service.sendTurn(profile, "hello", {
       async chat() {
@@ -417,29 +378,62 @@ describe("WoofService", () => {
       },
     });
 
-    expect(rooms.sentMessages).toHaveLength(3);
-    expect(rooms.sentMessages[1]).toMatchObject({
-      body: { userType: "dog", content: "Rex barks in reply.", toUser: "alex" },
-      options: { threadUser: "alex" },
-    });
-    expect(rooms.sentMessages[2]).toMatchObject({
-      body: { userType: "dog", content: "hello friend", toUser: "friend" },
-      options: { threadUser: "friend" },
-    });
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(3);
+    expect(entries[1]).toMatchObject({ userType: "dog", content: "Rex barks in reply.", threadUser: "alex" });
+    expect(entries[2]).toMatchObject({ userType: "dog", content: "hello friend", threadUser: "friend" });
   });
 
-  it("relinquish clears profile and stops polling", async () => {
+  it("relinquish clears profile and disconnects CRDT", async () => {
     const rooms = new MockRooms();
     const kv = new MockKv();
-    const timer = new MockTimer();
-    const service = new WoofService(rooms, kv, timer);
+    const service = new WoofService(rooms, kv);
 
-    await service.enterChat({ dogName: "Rex" });
+    const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
 
-    service.startPolling(async () => undefined, 5000);
     await service.relinquish();
 
-    expect(timer.clearCalls).toEqual([42]);
     await expect(loadStoredWorkerUrl(kv)).resolves.toBeNull();
+  });
+
+  it("applies remote CRDT updates via applyRemoteUpdate callback", async () => {
+    const rooms = new MockRooms();
+    const doc = new Y.Doc();
+    const service = new WoofService(rooms, new MockKv(), doc);
+
+    const profile = await service.enterChat({ dogName: "Rex" });
+    service.connectToRoom(profile);
+
+    // Simulate a remote doc sending an update with one entry
+    const remoteDoc = new Y.Doc();
+    const remoteArray = remoteDoc.getArray<{ id: string; content: string; userType: string; threadUser: string | null; createdAt: number; signedBy: string }>("messages");
+    remoteArray.push([{
+      id: "remote_1",
+      content: "hello from remote",
+      userType: "user",
+      threadUser: null,
+      createdAt: 100,
+      signedBy: "friend",
+    }]);
+
+    // Encode the remote update and apply it via the callback
+    const remoteUpdate = Y.encodeStateAsUpdate(remoteDoc);
+    const encodedBody = {
+      type: "yjs-update",
+      data: btoa(Array.from(remoteUpdate, (b) => String.fromCharCode(b)).join("")),
+    };
+
+    rooms.crdtCallbacks!.applyRemoteUpdate(encodedBody, {
+      id: "msg_remote",
+      roomId: "room_created",
+      body: encodedBody,
+      createdAt: 100,
+      signedBy: "friend",
+    });
+
+    const entries = service.chatArray.toArray();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ content: "hello from remote", signedBy: "friend" });
   });
 });

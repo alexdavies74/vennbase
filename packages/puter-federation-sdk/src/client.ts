@@ -16,17 +16,19 @@ import {
 import { buildClassicWorkerScript } from "./worker/template";
 import type {
   ApiError,
+  CrdtConnectCallbacks,
+  CrdtConnectOptions,
+  CrdtConnection,
   DeployWorkerArgs,
   InviteToken,
   JoinOptions,
+  JsonValue,
   Message,
-  PollMessagesOptions,
   ParsedInviteInput,
   PuterFedRoomsOptions,
   Room,
   RoomSnapshot,
   RoomUser,
-  SendMessageOptions,
   SignedWriteEnvelope,
 } from "./types";
 
@@ -254,7 +256,7 @@ export class PuterFedRooms {
     });
   }
 
-  async sendMessage(room: Room, body: Message["body"], options: SendMessageOptions = {}): Promise<Message> {
+  async sendMessage(room: Room, body: Message["body"]): Promise<Message> {
     await this.init();
 
     const user = await this.whoAmI();
@@ -270,10 +272,6 @@ export class PuterFedRooms {
       createdAt: Date.now(),
       signedBy: user.username,
     };
-
-    if (typeof options.threadUser === "string" && options.threadUser.trim()) {
-      payload.threadUser = options.threadUser.trim();
-    }
 
     const envelope: SignedWriteEnvelope<Message> = await signEnvelope(
       "message",
@@ -296,14 +294,9 @@ export class PuterFedRooms {
     return response.message;
   }
 
-  async pollMessages(
-    room: Room,
-    sinceTimestamp: number,
-    options: PollMessagesOptions = {},
-  ): Promise<Message[]> {
-    const scope = options.scope ?? "thread";
+  async pollMessages(room: Room, sinceTimestamp: number): Promise<Message[]> {
     const response = await this.requestJson<PollMessagesResponse>(
-      `${stripTrailingSlash(room.workerUrl)}/messages?after=${encodeURIComponent(String(sinceTimestamp))}&scope=${encodeURIComponent(scope)}`,
+      `${stripTrailingSlash(room.workerUrl)}/messages?after=${encodeURIComponent(String(sinceTimestamp))}`,
       {
         method: "GET",
       },
@@ -312,6 +305,60 @@ export class PuterFedRooms {
     return response.messages.sort(
       (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
     );
+  }
+
+  connectCrdt(
+    room: Room,
+    callbacks: CrdtConnectCallbacks,
+    options: CrdtConnectOptions = {},
+  ): CrdtConnection {
+    let lastTimestamp = 0;
+    let running = true;
+    let inFlight: Promise<void> | null = null;
+
+    const runTick = async (): Promise<void> => {
+      try {
+        const messages = await this.pollMessages(room, lastTimestamp);
+        for (const message of messages) {
+          callbacks.applyRemoteUpdate(message.body, message);
+          lastTimestamp = Math.max(lastTimestamp, message.createdAt);
+        }
+        const update = callbacks.produceLocalUpdate();
+        if (update !== null) {
+          await this.sendMessage(room, update);
+        }
+      } catch {
+        // keep loop alive through transient failures
+      }
+    };
+
+    // Coalesces concurrent calls: if a tick is already in-flight, returns that same promise
+    const tick = (): Promise<void> => {
+      if (!running) return Promise.resolve();
+      if (inFlight) return inFlight;
+      inFlight = runTick().finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
+    };
+
+    const scheduleNext = (): void => {
+      if (running) {
+        setTimeout(() => {
+          tick().finally(scheduleNext);
+        }, options.intervalMs ?? 5000);
+      }
+    };
+
+    // Run first tick immediately, then schedule recurring ticks
+    tick().finally(scheduleNext);
+
+    return {
+      disconnect() {
+        running = false;
+      },
+      flush: tick,
+    };
   }
 
   createInviteLink(room: Room, inviteToken: string): string {

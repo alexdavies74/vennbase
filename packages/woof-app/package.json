@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@heyputer/puter.js": "^2.2.11",
-    "puter-federation-sdk": "workspace:*"
+    "puter-federation-sdk": "workspace:*",
+    "yjs": "^13.6.0"
   },
   "devDependencies": {
     "vite": "^6.2.0"

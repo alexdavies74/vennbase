@@ -1,6 +1,7 @@
+import * as Y from "yjs";
 import type {
   PuterFedRooms,
-  Message,
+  CrdtConnection,
   Room,
   RoomUser,
 } from "puter-federation-sdk";
@@ -13,13 +14,6 @@ import {
   type DogProfile,
 } from "./profile";
 
-type PollHandle = number;
-
-interface TimerLike {
-  setInterval(handler: () => void, ms: number): PollHandle;
-  clearInterval(handle: PollHandle): void;
-}
-
 type RoomsLike = Pick<
   PuterFedRooms,
   | "createRoom"
@@ -28,28 +22,67 @@ type RoomsLike = Pick<
   | "whoAmI"
   | "parseInviteInput"
   | "getPublicKeyUrl"
-  | "sendMessage"
-  | "pollMessages"
   | "listMembers"
   | "createInviteToken"
   | "createInviteLink"
+  | "connectCrdt"
 >;
 
 type KvLike = Pick<KV, "get" | "set" | "del">;
 
 type PuterAI = Pick<AI, "chat">;
 
+export interface ChatEntry {
+  id: string;
+  content: string;
+  userType: "user" | "dog";
+  threadUser: string | null;
+  createdAt: number;
+  signedBy: string;
+}
+
+function encodeUpdate(update: Uint8Array): { type: string; data: string } {
+  return {
+    type: "yjs-update",
+    data: btoa(Array.from(update, (b) => String.fromCharCode(b)).join("")),
+  };
+}
+
+function decodeUpdate(body: unknown): Uint8Array | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+  const record = body as Record<string, unknown>;
+  if (record.type !== "yjs-update" || typeof record.data !== "string") {
+    return null;
+  }
+  try {
+    const binary = atob(record.data);
+    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
 export class WoofService {
-  private pollHandle: PollHandle | null = null;
+  private connection: CrdtConnection | null = null;
+  private pendingUpdate: Uint8Array | null = null;
 
   constructor(
     private readonly rooms: RoomsLike,
     private readonly kv: KvLike,
-    private readonly timer: TimerLike = {
-      setInterval: (handler, ms) => globalThis.setInterval(handler, ms),
-      clearInterval: (handle) => globalThis.clearInterval(handle),
-    },
-  ) {}
+    private readonly doc: Y.Doc = new Y.Doc(),
+  ) {
+    this.doc.on("update", (update: Uint8Array) => {
+      this.pendingUpdate = this.pendingUpdate
+        ? Y.mergeUpdates([this.pendingUpdate, update])
+        : update;
+    });
+  }
+
+  get chatArray(): Y.Array<ChatEntry> {
+    return this.doc.getArray<ChatEntry>("messages");
+  }
 
   async restoreProfile(): Promise<DogProfile | null> {
     const workerUrl = await loadStoredWorkerUrl(this.kv);
@@ -99,67 +132,77 @@ export class WoofService {
     return this.rooms.createInviteLink(room, invite.token);
   }
 
+  connectToRoom(profile: DogProfile): void {
+    this.connection?.disconnect();
+    this.connection = this.rooms.connectCrdt(profile.room, {
+      applyRemoteUpdate: (body) => {
+        const update = decodeUpdate(body);
+        if (update) {
+          Y.applyUpdate(this.doc, update);
+        }
+      },
+      produceLocalUpdate: () => {
+        const update = this.pendingUpdate;
+        this.pendingUpdate = null;
+        return update ? encodeUpdate(update) : null;
+      },
+    });
+  }
+
   async sendTurn(profile: DogProfile, content: string, puterAI?: PuterAI): Promise<void> {
     const actor = await this.rooms.whoAmI();
+    const members = await this.rooms.listMembers(profile.room);
 
-    await this.rooms.sendMessage(profile.room, {
-      userType: "user",
+    const userEntry: ChatEntry = {
+      id: crypto.randomUUID(),
       content,
-    });
+      userType: "user",
+      threadUser: actor.username,
+      createdAt: Date.now(),
+      signedBy: actor.username,
+    };
 
-    const [messages, members] = await Promise.all([
-      this.rooms.pollMessages(profile.room, 0, { scope: "global" }),
-      this.rooms.listMembers(profile.room),
-    ]);
+    this.doc.transact(() => {
+      this.chatArray.push([userEntry]);
+    });
 
     const replies = await this.getDogReplies({
       actor,
       dogName: profile.room.name,
-      messages,
+      entries: this.chatArray.toArray(),
       members,
       puterAI,
     });
 
-    for (const reply of replies) {
-      await this.rooms.sendMessage(
-        profile.room,
-        {
-          userType: "dog",
-          content: reply.content,
-          toUser: reply.toUser,
-        },
-        {
-          threadUser: reply.toUser,
-        },
-      );
-    }
-  }
-
-  startPolling(callback: () => Promise<void>, intervalMs = 5000): void {
-    this.stopPolling();
-    this.pollHandle = this.timer.setInterval(() => {
-      callback().catch(() => {
-        // Keep polling alive across transient failures.
+    if (replies.length > 0) {
+      this.doc.transact(() => {
+        const now = Date.now();
+        this.chatArray.push(
+          replies.map((reply, i) => ({
+            id: crypto.randomUUID(),
+            content: reply.content,
+            userType: "dog" as const,
+            threadUser: reply.toUser,
+            createdAt: now + i,
+            signedBy: actor.username,
+          })),
+        );
       });
-    }, intervalMs);
-  }
-
-  stopPolling(): void {
-    if (this.pollHandle !== null) {
-      this.timer.clearInterval(this.pollHandle);
-      this.pollHandle = null;
     }
+
+    await this.connection?.flush();
   }
 
   async relinquish(): Promise<void> {
-    this.stopPolling();
+    this.connection?.disconnect();
+    this.connection = null;
     await clearProfile(this.kv);
   }
 
   private async getDogReplies(args: {
     actor: RoomUser;
     dogName: string;
-    messages: Message[];
+    entries: ChatEntry[];
     members: string[];
     puterAI?: PuterAI;
   }): Promise<Array<{ toUser: string; content: string }>> {
@@ -181,7 +224,7 @@ export class WoofService {
 
     try {
       const response = await args.puterAI.chat(buildDogPrompt(args));
-      console.log({response})
+      console.log({response});
 
       const extracted = extractAIText(response);
       if (extracted) {
@@ -227,25 +270,12 @@ export class WoofService {
 function buildDogPrompt(args: {
   actor: RoomUser;
   dogName: string;
-  messages: Message[];
+  entries: ChatEntry[];
   members: string[];
 }): ChatMessage[] {
-  const normalizedHistory = args.messages
-    .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
-    .map((message) => {
-      const payload = normalizeMessageBody(message.body);
-      const isDogMessage = payload.userType === "dog";
-      return {
-        id: message.id,
-        at: message.createdAt,
-        fromUser: isDogMessage ? args.dogName : message.signedBy,
-        toUser: isDogMessage
-          ? payload.toUser || message.threadUser || args.actor.username
-          : args.dogName,
-        userType: payload.userType,
-        content: payload.content,
-      };
-    });
+  const sortedEntries = [...args.entries].sort(
+    (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+  );
 
   const promptPieces: ChatMessage[] = [
     {
@@ -261,36 +291,21 @@ function buildDogPrompt(args: {
       role: "system",
       content: `Room members: ${args.members.join(", ")}. Trigger user: ${args.actor.username}.`,
     },
-    ...normalizedHistory.map((item) => ({
-      role: item.userType === "dog" ? "assistant" : "user",
-      content: `[${item.fromUser} \u2192 ${item.toUser}] ${item.content}`,
-    })),
+    ...sortedEntries.map((entry) => {
+      const fromUser = entry.userType === "dog" ? args.dogName : entry.signedBy;
+      const toUser = entry.userType === "dog"
+        ? (entry.threadUser ?? args.actor.username)
+        : args.dogName;
+      return {
+        role: entry.userType === "dog" ? "assistant" : "user",
+        content: `[${fromUser} \u2192 ${toUser}] ${entry.content}`,
+      };
+    }),
   ];
 
-  console.log({promptPieces})
+  console.log({promptPieces});
 
   return promptPieces;
-}
-
-function normalizeMessageBody(body: Message["body"]): {
-  userType: string;
-  content: string;
-  toUser: string;
-} {
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    const record = body as Record<string, Message["body"]>;
-    return {
-      userType: String(record.userType ?? "user"),
-      content: String(record.content ?? ""),
-      toUser: typeof record.toUser === "string" ? record.toUser : "",
-    };
-  }
-
-  return {
-    userType: "user",
-    content: String(body),
-    toUser: "",
-  };
 }
 
 function parseDogReplyPlan(value: string): unknown {

@@ -1,8 +1,9 @@
 import { puter } from "@heyputer/puter.js";
-import { PuterFedError, PuterFedRooms, type Message } from "puter-federation-sdk";
+import * as Y from "yjs";
+import { PuterFedError, PuterFedRooms } from "puter-federation-sdk";
 
 import type { DogProfile } from "./profile";
-import { WoofService } from "./service";
+import { WoofService, type ChatEntry } from "./service";
 
 const appElement = document.getElementById("app");
 if (!appElement) {
@@ -10,18 +11,23 @@ if (!appElement) {
 }
 const app = appElement as HTMLDivElement;
 
+const doc = new Y.Doc();
+const chatArray = doc.getArray<ChatEntry>("messages");
+
 const rooms = new PuterFedRooms({
   appBaseUrl: window.location.origin,
   puter,
 });
-const service = new WoofService(rooms, puter.kv);
+const service = new WoofService(rooms, puter.kv, doc);
 
 let currentProfile: DogProfile | null = null;
-let latestTimestamp = 0;
+let currentUsername: string | null = null;
 
 async function boot() {
   try {
     await rooms.init();
+    const me = await rooms.whoAmI();
+    currentUsername = me.username;
   } catch (error) {
     console.error("[woof-app] boot/init failed", error);
     renderSetup(getErrorMessage(error, "Could not initialize app."));
@@ -34,11 +40,9 @@ async function boot() {
       const profile = await service.joinFromInvite(inviteInput);
       clearInviteLocation();
       currentProfile = profile;
-      latestTimestamp = 0;
 
       await renderChat(profile);
-      await refreshMessages();
-      startPolling();
+      service.connectToRoom(profile);
       return;
     } catch (error) {
       console.error("[woof-app] invite join failed", {
@@ -47,7 +51,6 @@ async function boot() {
       });
       await service.relinquish();
       currentProfile = null;
-      latestTimestamp = 0;
       renderSetup(getErrorMessage(error, "Failed to join invite link."));
       return;
     }
@@ -57,11 +60,9 @@ async function boot() {
     const restored = await service.restoreProfile();
     if (restored) {
       currentProfile = restored;
-      latestTimestamp = 0;
 
       await renderChat(restored);
-      await refreshMessages();
-      startPolling();
+      service.connectToRoom(restored);
       return;
     }
   } catch (error) {
@@ -70,7 +71,6 @@ async function boot() {
     });
     await service.relinquish();
     currentProfile = null;
-    latestTimestamp = 0;
     renderSetup(getErrorMessage(error, "Could not restore saved room."));
     return;
   }
@@ -79,7 +79,7 @@ async function boot() {
 }
 
 function renderSetup(initialError = "") {
-  stopPolling();
+  service.relinquish().catch(() => {});
 
   app.innerHTML = `
     <section class="panel">
@@ -114,11 +114,9 @@ function renderSetup(initialError = "") {
         dogName,
       });
       currentProfile = profile;
-      latestTimestamp = 0;
 
       await renderChat(profile);
-      await refreshMessages();
-      startPolling();
+      service.connectToRoom(profile);
     } catch (error) {
       console.error("[woof-app] enterChat failed", {
         error,
@@ -182,13 +180,17 @@ async function renderChat(profile: DogProfile) {
   const relinquishButton = document.getElementById("relinquish") as HTMLButtonElement;
   relinquishButton.addEventListener("click", () => {
     void service.relinquish();
-    latestTimestamp = 0;
     currentProfile = null;
     renderSetup();
   });
 
   const form = document.getElementById("message-form") as HTMLFormElement;
   const chatError = document.getElementById("chat-error") as HTMLParagraphElement;
+
+  // Observe CRDT changes and re-render messages reactively
+  chatArray.observe(() => {
+    renderFromDoc(profile);
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -201,10 +203,8 @@ async function renderChat(profile: DogProfile) {
     }
 
     try {
-      await service.sendTurn(currentProfile, content, puter.ai);
-
       input.value = "";
-      await refreshMessages();
+      await service.sendTurn(currentProfile, content, puter.ai);
     } catch (error) {
       console.error("[woof-app] sendTurn failed", {
         error,
@@ -215,62 +215,28 @@ async function renderChat(profile: DogProfile) {
   });
 }
 
-async function refreshMessages() {
-  if (!currentProfile) {
-    return;
-  }
-
-  const messages = await rooms.pollMessages(currentProfile.room, latestTimestamp);
-  if (messages.length === 0) {
-    return;
-  }
-
-  renderMessages(messages);
-
-  const latest = messages[messages.length - 1];
-  latestTimestamp = Math.max(latestTimestamp, latest.createdAt);
-}
-
-function renderMessages(messages: Message[]) {
+function renderFromDoc(profile: DogProfile) {
   const container = document.getElementById("messages") as HTMLDivElement | null;
   if (!container) {
     return;
   }
 
-  const dogLabel = currentProfile?.room.name || "Dog";
+  const dogLabel = profile.room.name;
+  const myUsername = currentUsername;
 
-  for (const message of messages) {
-    const payload = normalizeMessageBody(message.body);
+  const entries = chatArray.toArray().filter(
+    (entry) => entry.threadUser === myUsername,
+  );
+
+  container.innerHTML = "";
+  for (const entry of entries) {
     const div = document.createElement("div");
-    div.className = `message ${payload.userType === "dog" ? "dog" : "user"}`;
-    div.textContent = `${payload.userType === "dog" ? dogLabel : "You"}: ${payload.content}`;
+    div.className = `message ${entry.userType === "dog" ? "dog" : "user"}`;
+    div.textContent = `${entry.userType === "dog" ? dogLabel : "You"}: ${entry.content}`;
     container.appendChild(div);
   }
 
   container.scrollTop = container.scrollHeight;
-}
-
-function normalizeMessageBody(body: Message["body"]): { userType: string; content: string } {
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    const record = body as Record<string, Message["body"]>;
-    return {
-      userType: String(record.userType ?? "user"),
-      content: String(record.content ?? ""),
-    };
-  }
-
-  return {
-    userType: "user",
-    content: String(body),
-  };
-}
-
-function startPolling() {
-  service.startPolling(refreshMessages, 5000);
-}
-
-function stopPolling() {
-  service.stopPolling();
 }
 
 function escapeHtml(value: string): string {
