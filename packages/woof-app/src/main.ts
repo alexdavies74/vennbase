@@ -237,11 +237,13 @@ function renderMessages(messages: Message[]) {
     return;
   }
 
+  const dogLabel = currentProfile?.room.name || "Dog";
+
   for (const message of messages) {
     const payload = normalizeMessageBody(message.body);
     const div = document.createElement("div");
     div.className = `message ${payload.userType === "dog" ? "dog" : "user"}`;
-    div.textContent = `${payload.userType === "dog" ? "Dog" : "You"}: ${payload.content}`;
+    div.textContent = `${payload.userType === "dog" ? dogLabel : "You"}: ${payload.content}`;
     container.appendChild(div);
   }
 
