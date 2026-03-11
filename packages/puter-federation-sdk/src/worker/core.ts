@@ -21,6 +21,7 @@ export interface WorkerKv {
   get<T = unknown>(key: string): Promise<T | null>;
   set<T = unknown>(key: string, value: T): Promise<void>;
   list(prefix: string): Promise<KvEntry[]>;
+  incr(key: string, amount?: number): Promise<number>;
 }
 
 export interface RoomWorkerConfig {
@@ -146,8 +147,25 @@ function roomGlobalMessagePrefix(roomId: string): string {
   return `room:${roomId}:global_message:`;
 }
 
+function roomMessageSequenceKey(roomId: string): string {
+  return `room:${roomId}:global_message_sequence`;
+}
+
 function sameJwk(left: JsonWebKey, right: JsonWebKey): boolean {
   return canonicalize(left) === canonicalize(right);
+}
+
+function parseRequiredNonNegativeInteger(value: string | null, name: string): number {
+  if (value === null) {
+    error(400, "BAD_REQUEST", `${name} is required`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    error(400, "BAD_REQUEST", `${name} must be a non-negative number`);
+  }
+
+  return Math.floor(parsed);
 }
 
 function inferWorkerUrlFromRequest(requestUrl: string): string {
@@ -194,8 +212,11 @@ export class RoomWorker {
       }
 
       if (request.method === "GET" && pathname === "/messages") {
-        const after = Number(searchParams.get("after") ?? 0);
-        return await this.getMessages(request, after);
+        const sinceSequence = parseRequiredNonNegativeInteger(
+          searchParams.get("sinceSequence"),
+          "sinceSequence",
+        );
+        return await this.getMessages(request, sinceSequence);
       }
 
       if (request.method === "POST" && pathname === "/join") {
@@ -235,19 +256,36 @@ export class RoomWorker {
     return jsonResponse(200, snapshot);
   }
 
-  private async getMessages(request: Request, after: number): Promise<Response> {
+  private async getMessages(
+    request: Request,
+    sinceSequence: number,
+  ): Promise<Response> {
     const requester = requesterFromHeader(request);
     await this.assertMember(requester);
+
+    const currentSequence = await this.getMessageSequence();
+    if (sinceSequence >= currentSequence) {
+      return jsonResponse(200, {
+        messages: [],
+        latestSequence: currentSequence,
+      });
+    }
 
     const messageEntries = await this.kv.list(roomGlobalMessagePrefix(this.config.roomId));
 
     const messages = messageEntries
       .map((entry) => entry.value as Message)
-      .filter((message) => message.createdAt > after)
+      .filter((message) => message.sequence > sinceSequence)
       .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
+
+    const latestSequence = messages.reduce(
+      (highest, message) => Math.max(highest, message.sequence),
+      sinceSequence,
+    );
 
     return jsonResponse(200, {
       messages,
+      latestSequence,
     });
   }
 
@@ -323,9 +361,12 @@ export class RoomWorker {
       error(400, "BAD_REQUEST", "Envelope roomId does not match worker roomId");
     }
 
+    const sequence = await this.nextMessageSequence();
+
     const message: Message = {
       ...envelope.payload,
       body: envelope.payload.body as Message["body"],
+      sequence,
     };
 
     await this.kv.set(messageGlobalKey(this.config.roomId, message), message);
@@ -374,6 +415,25 @@ export class RoomWorker {
   private async getMembers(): Promise<string[]> {
     const stored = await this.kv.get<string[]>(roomMembersKey(this.config.roomId));
     return stored ?? [];
+  }
+
+  private async getMessageSequence(): Promise<number> {
+    const stored = await this.kv.get<number>(roomMessageSequenceKey(this.config.roomId));
+    if (typeof stored !== "number" || !Number.isFinite(stored) || stored < 0) {
+      return 0;
+    }
+
+    return Math.floor(stored);
+  }
+
+  private async nextMessageSequence(): Promise<number> {
+    const key = roomMessageSequenceKey(this.config.roomId);
+    const sequence = await this.kv.incr(key, 1);
+    if (!Number.isFinite(sequence) || sequence < 1) {
+      error(500, "BAD_REQUEST", "kv.incr returned an invalid sequence");
+    }
+
+    return Math.floor(sequence);
   }
 
   private async ensureRoomMeta(requestUrl?: string): Promise<void> {
@@ -451,4 +511,3 @@ export class RoomWorker {
     error(400, "BAD_REQUEST", "Public key document format is invalid");
   }
 }
-

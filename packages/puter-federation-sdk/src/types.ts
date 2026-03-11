@@ -38,6 +38,7 @@ export interface Message {
   body: JsonValue;
   createdAt: number;
   signedBy: string;
+  sequence: number;
 }
 
 export interface InviteToken {

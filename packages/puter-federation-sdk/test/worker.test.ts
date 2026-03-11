@@ -28,6 +28,15 @@ async function jsonBody(response: Response) {
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+class CountingKv extends InMemoryKv {
+  public listCalls = 0;
+
+  override async list(prefix: string) {
+    this.listCalls += 1;
+    return super.list(prefix);
+  }
+}
+
 describe("RoomWorker", () => {
   it("enforces invite and members-only reads", async () => {
     const worker = new RoomWorker(
@@ -105,7 +114,7 @@ describe("RoomWorker", () => {
     expect(guestJoin.status).toBe(200);
 
     const outsiderRead = await worker.handle(
-      new Request("https://worker.example/messages?after=0", {
+      new Request("https://worker.example/messages?sinceSequence=0", {
         method: "GET",
         headers: { "x-puter-username": "outsider" },
       }),
@@ -291,7 +300,7 @@ describe("RoomWorker", () => {
     );
 
     const response = await worker.handle(
-      new Request("https://worker.example/messages?after=0", {
+      new Request("https://worker.example/messages?sinceSequence=0", {
         method: "GET",
         headers: { "x-puter-username": "owner" },
       }),
@@ -300,6 +309,110 @@ describe("RoomWorker", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { messages: Array<{ id: string }> };
     expect(payload.messages.map((message) => message.id)).toEqual(["a", "b"]);
+  });
+
+  it("requires sinceSequence for message polling", async () => {
+    const worker = new RoomWorker(
+      {
+        roomId: "room_req_seq",
+        roomName: "Rex",
+        owner: "owner",
+        workerUrl: "https://workers.puter.site/owner/rooms/room_req_seq",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    const owner = await createIdentity("owner");
+
+    await worker.handle(
+      new Request("https://worker.example/join", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-puter-username": "owner" },
+        body: JSON.stringify({ username: "owner", publicKeyUrl: owner.publicKeyUrl }),
+      }),
+    );
+
+    const response = await worker.handle(
+      new Request("https://worker.example/messages", {
+        method: "GET",
+        headers: { "x-puter-username": "owner" },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json())["code"]).toBe("BAD_REQUEST");
+  });
+
+  it("uses room sequence to skip list reads when nothing changed", async () => {
+    const kv = new CountingKv();
+    const worker = new RoomWorker(
+      {
+        roomId: "room_seq",
+        roomName: "Rex",
+        owner: "owner",
+        workerUrl: "https://workers.puter.site/owner/rooms/room_seq",
+      },
+      { kv },
+    );
+
+    const owner = await createIdentity("owner");
+
+    await worker.handle(
+      new Request("https://worker.example/join", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-puter-username": "owner" },
+        body: JSON.stringify({ username: "owner", publicKeyUrl: owner.publicKeyUrl }),
+      }),
+    );
+
+    const msg = await signEnvelope(
+      "message",
+      {
+        id: "msg_1",
+        roomId: "room_seq",
+        body: { userType: "user", content: "hello" },
+        createdAt: 1000,
+        signedBy: "owner",
+      },
+      {
+        username: "owner",
+        publicKeyUrl: owner.publicKeyUrl,
+      },
+      owner.keyPair.privateKey,
+      1000,
+    );
+
+    await worker.handle(
+      new Request("https://worker.example/message", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-puter-username": "owner" },
+        body: JSON.stringify(msg),
+      }),
+    );
+
+    const noChangeResponse = await worker.handle(
+      new Request("https://worker.example/messages?sinceSequence=1", {
+        method: "GET",
+        headers: { "x-puter-username": "owner" },
+      }),
+    );
+    expect(noChangeResponse.status).toBe(200);
+    const noChangePayload = (await noChangeResponse.json()) as {
+      messages: Array<Record<string, unknown>>;
+      latestSequence: number;
+    };
+    expect(noChangePayload.messages).toHaveLength(0);
+    expect(noChangePayload.latestSequence).toBe(1);
+    expect(kv.listCalls).toBe(0);
+
+    const changedResponse = await worker.handle(
+      new Request("https://worker.example/messages?sinceSequence=0", {
+        method: "GET",
+        headers: { "x-puter-username": "owner" },
+      }),
+    );
+    expect(changedResponse.status).toBe(200);
+    expect(kv.listCalls).toBe(1);
   });
 
   it("all members see all messages globally", async () => {
@@ -413,7 +526,7 @@ describe("RoomWorker", () => {
     // Both guest and owner see all messages
     for (const username of ["guest", "owner"]) {
       const response = await worker.handle(
-        new Request("https://worker.example/messages?after=0", {
+        new Request("https://worker.example/messages?sinceSequence=0", {
           method: "GET",
           headers: { "x-puter-username": username },
         }),

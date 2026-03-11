@@ -5,6 +5,7 @@ declare const me: {
     kv: {
       get<T = unknown>(key: string): Promise<T | null>;
       set<T = unknown>(key: string, value: T): Promise<void>;
+      incr(key: string, amount?: number): Promise<number>;
       list(prefix: string, includeValues?: boolean): Promise<Array<{ key: string; value: unknown }> | null>;
     };
   };
@@ -33,6 +34,9 @@ const kv: WorkerKv = {
   },
   set<T = unknown>(key: string, value: T): Promise<void> {
     return me.puter.kv.set<T>(key, value);
+  },
+  incr(key: string, amount = 1): Promise<number> {
+    return me.puter.kv.incr(key, amount);
   },
   async list(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
     const entries = await me.puter.kv.list(prefix, true);

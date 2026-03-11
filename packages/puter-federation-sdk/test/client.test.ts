@@ -263,9 +263,8 @@ describe("PuterFedRooms", () => {
       body: { type: "crdt-update", data: "AAAA" },
       createdAt: 50,
       signedBy: "friend",
+      sequence: 1,
     };
-
-    let pollCount = 0;
 
     const rooms = new PuterFedRooms({
       identityProvider: async () => ({ username: "owner" }),
@@ -284,17 +283,18 @@ describe("PuterFedRooms", () => {
         }
 
         if (url.includes("/messages")) {
-          pollCount++;
-          const messages = pollCount === 1 ? [remoteMessage] : [];
-          return new Response(JSON.stringify({ messages }), {
+          const requestUrl = new URL(url);
+          const sinceSequence = Number(requestUrl.searchParams.get("sinceSequence") ?? 0);
+          const messages = sinceSequence < 1 ? [remoteMessage] : [];
+          return new Response(JSON.stringify({ messages, latestSequence: 1 }), {
             status: 200,
             headers: { "content-type": "application/json" },
           });
         }
 
         if (url.includes("/message")) {
-          const body = capturedBodies[capturedBodies.length - 1] as { payload: unknown };
-          return new Response(JSON.stringify({ message: body.payload }), {
+          const body = capturedBodies[capturedBodies.length - 1] as { payload: Record<string, unknown> };
+          return new Response(JSON.stringify({ message: { ...body.payload, sequence: 2 } }), {
             status: 200,
             headers: { "content-type": "application/json" },
           });
@@ -321,6 +321,7 @@ describe("PuterFedRooms", () => {
 
     // First tick runs immediately — wait for it to complete
     await connection.flush();
+    await connection.flush();
     connection.disconnect();
 
     // Remote message body was delivered to applyRemoteUpdate
@@ -333,7 +334,8 @@ describe("PuterFedRooms", () => {
     ) as { payload: { body: unknown } } | undefined;
     expect(sentEnvelope?.payload.body).toEqual({ type: "crdt-update", data: "BBBB" });
 
-    // Poll URL uses correct after param
-    expect(requestedUrls.some((u) => u.includes("/messages?after=0"))).toBe(true);
+    // Poll URL carries sequence cursor
+    expect(requestedUrls.some((u) => u.includes("/messages?sinceSequence=0"))).toBe(true);
+    expect(requestedUrls.some((u) => u.includes("sinceSequence=2"))).toBe(true);
   });
 });

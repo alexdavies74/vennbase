@@ -47,6 +47,7 @@ SDK for Puter federated rooms with signed writes (append message), worker-backed
   body,
   createdAt,
   signedBy,
+  sequence, // assigned by worker
 }
 ```
 
@@ -91,12 +92,12 @@ const messages = await rooms.pollMessages(room, 0);
 - `createInviteToken(room)`
 - `listMembers(room)`
 - `sendMessage(room, body)`
-- `pollMessages(room, sinceTimestamp)`
+- `pollMessages(room, sinceSequence)`
 
 ## Worker endpoints
 
 - `GET /room`
-- `GET /messages?after=...`
+- `GET /messages?sinceSequence=...`
 - `POST /join`
 - `POST /invite-token`
 - `POST /message`

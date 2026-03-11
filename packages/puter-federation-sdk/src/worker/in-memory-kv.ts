@@ -35,4 +35,14 @@ export class InMemoryKv implements WorkerKv {
     entries.sort((a, b) => a.key.localeCompare(b.key));
     return entries;
   }
+
+  async incr(key: string, amount = 1): Promise<number> {
+    const existing = this.store.get(key);
+    const current = typeof existing === "number" && Number.isFinite(existing)
+      ? existing
+      : 0;
+    const next = current + amount;
+    this.store.set(key, next);
+    return next;
+  }
 }

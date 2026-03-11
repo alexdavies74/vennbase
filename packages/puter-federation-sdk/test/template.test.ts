@@ -15,6 +15,7 @@ describe("buildClassicWorkerScript", () => {
     expect(script).toMatch(/router\.post\((\"|')\/message(\"|')/);
     expect(script).toContain("me.puter.kv.get(");
     expect(script).toContain("me.puter.kv.set(");
+    expect(script).toContain("me.puter.kv.incr(");
     expect(script).toContain("me.puter.kv.list(");
     expect(script).toContain("\"room_1\"");
     expect(script).toContain("\"Room Name\"");

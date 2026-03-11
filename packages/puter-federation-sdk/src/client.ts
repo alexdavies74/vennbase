@@ -42,6 +42,7 @@ interface PostMessageResponse {
 
 interface PollMessagesResponse {
   messages: Message[];
+  latestSequence: number;
 }
 
 interface StoredRoomSignerKey {
@@ -265,7 +266,7 @@ export class PuterFedRooms {
       throw new Error("SDK was not initialized");
     }
 
-    const payload: Message = {
+    const payload: Omit<Message, "sequence"> = {
       id: this.createId("msg"),
       roomId: room.id,
       body,
@@ -273,7 +274,7 @@ export class PuterFedRooms {
       signedBy: user.username,
     };
 
-    const envelope: SignedWriteEnvelope<Message> = await signEnvelope(
+    const envelope: SignedWriteEnvelope<Omit<Message, "sequence">> = await signEnvelope(
       "message",
       payload,
       {
@@ -294,17 +295,19 @@ export class PuterFedRooms {
     return response.message;
   }
 
-  async pollMessages(room: Room, sinceTimestamp: number): Promise<Message[]> {
+  async pollMessages(room: Room, sinceSequence: number): Promise<PollMessagesResponse> {
     const response = await this.requestJson<PollMessagesResponse>(
-      `${stripTrailingSlash(room.workerUrl)}/messages?after=${encodeURIComponent(String(sinceTimestamp))}`,
+      `${stripTrailingSlash(room.workerUrl)}/messages?sinceSequence=${encodeURIComponent(String(sinceSequence))}`,
       {
         method: "GET",
       },
     );
 
-    return response.messages.sort(
+    response.messages.sort(
       (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
     );
+
+    return response;
   }
 
   connectCrdt(
@@ -312,20 +315,25 @@ export class PuterFedRooms {
     callbacks: CrdtConnectCallbacks,
     options: CrdtConnectOptions = {},
   ): CrdtConnection {
-    let lastTimestamp = 0;
+    let lastSequence = 0;
     let running = true;
     let inFlight: Promise<void> | null = null;
 
     const runTick = async (): Promise<void> => {
       try {
-        const messages = await this.pollMessages(room, lastTimestamp);
+        const poll = await this.pollMessages(room, lastSequence);
+        const messages = poll.messages;
+
         for (const message of messages) {
           callbacks.applyRemoteUpdate(message.body, message);
-          lastTimestamp = Math.max(lastTimestamp, message.createdAt);
         }
+
+        lastSequence = poll.latestSequence;
+
         const update = callbacks.produceLocalUpdate();
         if (update !== null) {
-          await this.sendMessage(room, update);
+          const sent = await this.sendMessage(room, update);
+          lastSequence = Math.max(lastSequence, sent.sequence);
         }
       } catch {
         // keep loop alive through transient failures
