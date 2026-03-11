@@ -21,7 +21,6 @@ type RoomsLike = Pick<
   | "joinRoom"
   | "whoAmI"
   | "parseInviteInput"
-  | "getPublicKeyUrl"
   | "listMembers"
   | "createInviteToken"
   | "createInviteLink"
@@ -109,7 +108,6 @@ export class WoofService {
     const parsed = this.rooms.parseInviteInput(inviteInput.trim());
     const room = await this.rooms.joinRoom(parsed.workerUrl, {
       inviteToken: parsed.inviteToken,
-      publicKeyUrl: this.rooms.getPublicKeyUrl(),
     });
 
     await saveStoredWorkerUrl(room, this.kv);

@@ -13,9 +13,25 @@ declare const me: {
 
 declare const router: {
   options(path: string, handler: () => Response | Promise<Response>): void;
-  get(path: string, handler: (ctx: { request: Request }) => Response | Promise<Response>): void;
-  post(path: string, handler: (ctx: { request: Request }) => Response | Promise<Response>): void;
+  get(path: string, handler: (ctx: RouterContext) => Response | Promise<Response>): void;
+  post(path: string, handler: (ctx: RouterContext) => Response | Promise<Response>): void;
 };
+
+interface RouterUserContext {
+  username?: string;
+  puter?: {
+    getUser?: () => Promise<{ username?: string } | null>;
+    auth?: {
+      whoami?: () => Promise<{ username?: string } | null>;
+      getUser?: () => Promise<{ username?: string } | null>;
+    };
+  };
+}
+
+interface RouterContext {
+  request: Request;
+  user?: RouterUserContext;
+}
 
 const ROOM_ID = "__PUTER_FED_ROOM_ID__";
 const ROOM_NAME = "__PUTER_FED_ROOM_NAME__";
@@ -54,8 +70,44 @@ const worker = new RoomWorker(
   { kv },
 );
 
-function route({ request }: { request: Request }): Promise<Response> {
-  return worker.handle(request);
+async function resolveRequesterFromAuth(user?: RouterUserContext): Promise<string | null> {
+  if (!user) {
+    return null;
+  }
+
+  if (typeof user.username === "string" && user.username) {
+    return user.username;
+  }
+
+  let candidate: { username?: string } | null = null;
+  if (user.puter?.getUser) {
+    candidate = await user.puter.getUser().catch(() => null);
+  }
+
+  if (!candidate?.username && user.puter?.auth?.getUser) {
+    candidate = await user.puter.auth.getUser().catch(() => candidate);
+  }
+
+  if (!candidate?.username && user.puter?.auth?.whoami) {
+    candidate = await user.puter.auth.whoami().catch(() => candidate);
+  }
+
+  return candidate?.username ?? null;
+}
+
+function withRequesterHeader(request: Request, requester: string | null): Request {
+  if (!requester) {
+    return request;
+  }
+
+  const headers = new Headers(request.headers);
+  headers.set("x-puter-username", requester);
+  return new Request(request, { headers });
+}
+
+async function route({ request, user }: RouterContext): Promise<Response> {
+  const requester = await resolveRequesterFromAuth(user);
+  return worker.handle(withRequesterHeader(request, requester));
 }
 
 router.options("/room", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));

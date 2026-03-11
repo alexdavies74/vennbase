@@ -44,7 +44,7 @@ class MockRooms {
     };
   }
 
-  async joinRoom(workerUrl: string, _options: { inviteToken?: string; publicKeyUrl: string }): Promise<Room> {
+  async joinRoom(workerUrl: string, _options: { inviteToken?: string }): Promise<Room> {
     return {
       id: "room_joined",
       name: "Joined",
@@ -77,10 +77,6 @@ class MockRooms {
       createdAt: joined ? 2 : 1,
       members: ["alex"],
     };
-  }
-
-  getPublicKeyUrl(): string {
-    return "https://keys.example/alex.json";
   }
 
   async listMembers(_room: Room): Promise<string[]> {

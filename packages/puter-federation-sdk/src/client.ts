@@ -1,12 +1,3 @@
-import {
-  buildPublicKeyProofDocument,
-  encodeProofDocumentAsDataUrl,
-  exportPrivateJwk,
-  exportPublicJwk,
-  generateP256KeyPair,
-  importP256KeyPair,
-  signEnvelope,
-} from "./crypto";
 import { PuterFedError, toApiError } from "./errors";
 import {
   createInviteLink,
@@ -22,14 +13,12 @@ import type {
   DeployWorkerArgs,
   InviteToken,
   JoinOptions,
-  JsonValue,
   Message,
   ParsedInviteInput,
   PuterFedRoomsOptions,
   Room,
   RoomSnapshot,
   RoomUser,
-  SignedWriteEnvelope,
 } from "./types";
 
 interface PostInviteResponse {
@@ -45,15 +34,10 @@ interface PollMessagesResponse {
   latestSequence: number;
 }
 
-interface StoredRoomSignerKey {
-  version: 1;
-  username: string;
-  createdAt: number;
-  publicKeyJwk: JsonWebKey;
-  privateKeyJwk: JsonWebKey;
-}
-
-const SIGNER_KEY_KV_PREFIX = "puter-fed:room-signer:v1";
+type PuterWorkersExec = (
+  workerUrl: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export class PuterFedRooms {
   private readonly options: PuterFedRoomsOptions;
@@ -64,10 +48,6 @@ export class PuterFedRooms {
 
   private identity: RoomUser | null = null;
 
-  private keyPair: CryptoKeyPair | null = null;
-
-  private publicKeyUrl: string | null = null;
-
   constructor(options: PuterFedRoomsOptions = {}) {
     this.options = options;
     this.fetchFn = options.fetchFn ?? fetch;
@@ -75,21 +55,11 @@ export class PuterFedRooms {
 
   async init(): Promise<void> {
     this.puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
-    if (typeof this.fetchFn !== "function") {
-      throw new Error("fetch is required");
+    if (typeof this.fetchFn !== "function" && !this.resolveWorkersExec()) {
+      throw new Error("fetch is required when puter.workers.exec is unavailable");
     }
 
-    const user = await this.whoAmI();
-
-    if (!this.keyPair) {
-      this.keyPair = await this.loadOrCreateKeyPair(user.username);
-    }
-
-    if (!this.publicKeyUrl) {
-      const publicKeyJwk = await exportPublicJwk(this.keyPair.publicKey);
-      const proofDocument = buildPublicKeyProofDocument(user.username, publicKeyJwk);
-      this.publicKeyUrl = encodeProofDocumentAsDataUrl(proofDocument);
-    }
+    await this.whoAmI();
   }
 
   async whoAmI(): Promise<RoomUser> {
@@ -135,14 +105,6 @@ export class PuterFedRooms {
     return this.identity;
   }
 
-  getPublicKeyUrl(): string {
-    if (!this.publicKeyUrl) {
-      throw new Error("Call init() before getting the public key URL");
-    }
-
-    return this.publicKeyUrl;
-  }
-
   async createRoom(name: string): Promise<Room> {
     await this.init();
 
@@ -171,9 +133,7 @@ export class PuterFedRooms {
 
     const activeWorkerUrl = stripTrailingSlash(deployedWorkerUrl ?? resolvedWorkerUrl);
 
-    await this.joinRoom(activeWorkerUrl, {
-      publicKeyUrl: this.getPublicKeyUrl(),
-    });
+    await this.joinRoom(activeWorkerUrl, {});
 
     const room = await this.getRoom(activeWorkerUrl);
     return {
@@ -185,7 +145,7 @@ export class PuterFedRooms {
     };
   }
 
-  async joinRoom(workerUrl: string, options: JoinOptions): Promise<Room> {
+  async joinRoom(workerUrl: string, options: JoinOptions = {}): Promise<Room> {
     await this.init();
 
     const user = await this.whoAmI();
@@ -194,7 +154,6 @@ export class PuterFedRooms {
       method: "POST",
       body: {
         username: user.username,
-        publicKeyUrl: options.publicKeyUrl,
         inviteToken: options.inviteToken,
       },
     });
@@ -211,12 +170,7 @@ export class PuterFedRooms {
 
   async createInviteToken(room: Room): Promise<InviteToken> {
     await this.init();
-
     const user = await this.whoAmI();
-
-    if (!this.keyPair || !this.publicKeyUrl) {
-      throw new Error("SDK was not initialized");
-    }
 
     const payload: InviteToken = {
       token: this.createId("invite"),
@@ -225,21 +179,11 @@ export class PuterFedRooms {
       createdAt: Date.now(),
     };
 
-    const envelope = await signEnvelope(
-      "invite-token",
-      payload,
-      {
-        username: user.username,
-        publicKeyUrl: this.publicKeyUrl,
-      },
-      this.keyPair.privateKey,
-    );
-
     const response = await this.requestJson<PostInviteResponse>(
       `${stripTrailingSlash(room.workerUrl)}/invite-token`,
       {
         method: "POST",
-        body: envelope,
+        body: payload,
       },
     );
 
@@ -260,35 +204,18 @@ export class PuterFedRooms {
   async sendMessage(room: Room, body: Message["body"]): Promise<Message> {
     await this.init();
 
-    const user = await this.whoAmI();
-
-    if (!this.keyPair || !this.publicKeyUrl) {
-      throw new Error("SDK was not initialized");
-    }
-
-    const payload: Omit<Message, "sequence"> = {
+    const payload: Omit<Message, "sequence" | "signedBy"> = {
       id: this.createId("msg"),
       roomId: room.id,
       body,
       createdAt: Date.now(),
-      signedBy: user.username,
     };
-
-    const envelope: SignedWriteEnvelope<Omit<Message, "sequence">> = await signEnvelope(
-      "message",
-      payload,
-      {
-        username: user.username,
-        publicKeyUrl: this.publicKeyUrl,
-      },
-      this.keyPair.privateKey,
-    );
 
     const response = await this.requestJson<PostMessageResponse>(
       `${stripTrailingSlash(room.workerUrl)}/message`,
       {
         method: "POST",
-        body: envelope,
+        body: payload,
       },
     );
 
@@ -383,77 +310,6 @@ export class PuterFedRooms {
     );
   }
 
-  private async loadOrCreateKeyPair(username: string): Promise<CryptoKeyPair> {
-    const restored = await this.loadKeyPairFromPuterKv(username);
-    if (restored) {
-      return restored;
-    }
-
-    const created = await generateP256KeyPair();
-    await this.saveKeyPairToPuterKv(username, created);
-    return created;
-  }
-
-  private async loadKeyPairFromPuterKv(username: string): Promise<CryptoKeyPair | null> {
-    const kv = this.puter?.kv;
-    if (!kv?.get) {
-      return null;
-    }
-
-    const key = this.keyPairKvKey(username);
-    const stored = await kv.get<unknown>(key).catch(() => undefined);
-    if (!isStoredRoomSignerKey(stored, username)) {
-      return null;
-    }
-
-    try {
-      return await importP256KeyPair({
-        publicKeyJwk: stored.publicKeyJwk,
-        privateKeyJwk: stored.privateKeyJwk,
-      });
-    } catch (error) {
-      console.warn("[puter-fed-sdk] Failed to import signer key from puter.kv", {
-        error,
-        username,
-        key,
-      });
-      return null;
-    }
-  }
-
-  private async saveKeyPairToPuterKv(username: string, keyPair: CryptoKeyPair): Promise<void> {
-    const kv = this.puter?.kv;
-    if (!kv?.set) {
-      return;
-    }
-
-    const key = this.keyPairKvKey(username);
-    try {
-      const [publicKeyJwk, privateKeyJwk] = await Promise.all([
-        exportPublicJwk(keyPair.publicKey),
-        exportPrivateJwk(keyPair.privateKey),
-      ]);
-
-      await kv.set(key, {
-        version: 1,
-        username,
-        createdAt: Date.now(),
-        publicKeyJwk,
-        privateKeyJwk,
-      } satisfies StoredRoomSignerKey);
-    } catch (error) {
-      console.warn("[puter-fed-sdk] Failed to persist signer key in puter.kv", {
-        error,
-        username,
-        key,
-      });
-    }
-  }
-
-  private keyPairKvKey(username: string): string {
-    return `${SIGNER_KEY_KV_PREFIX}:${username}`;
-  }
-
   private async requestJson<T>(
     url: string,
     options: {
@@ -461,17 +317,18 @@ export class PuterFedRooms {
       body?: object;
     },
   ): Promise<T> {
-    const user = await this.whoAmI();
-    const fetchFn = this.fetchFn;
+    const body = options.body ? JSON.stringify(options.body) : undefined;
+    const workersExec = this.resolveWorkersExec();
 
-    const response = await fetchFn(url, {
-      method: options.method,
-      headers: {
-        "content-type": "application/json",
-        "x-puter-username": user.username,
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    const response = workersExec
+      ? await workersExec(url, {
+          method: options.method,
+          headers: {
+            "content-type": "application/json",
+          },
+          body,
+        })
+      : await this.requestJsonViaFetch(url, options.method, body);
 
     if (!response.ok) {
       const maybeApiError = await response
@@ -481,6 +338,33 @@ export class PuterFedRooms {
     }
 
     return (await response.json()) as T;
+  }
+
+  private async requestJsonViaFetch(
+    url: string,
+    method: "GET" | "POST",
+    body?: string,
+  ): Promise<Response> {
+    const user = await this.whoAmI();
+    const fetchFn = this.fetchFn;
+
+    return fetchFn(url, {
+      method,
+      headers: {
+        "content-type": "application/json",
+        "x-puter-username": user.username,
+      },
+      body,
+    });
+  }
+
+  private resolveWorkersExec(): PuterWorkersExec | null {
+    if (!this.puter) {
+      this.puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    }
+
+    const exec = (this.puter?.workers as { exec?: unknown } | undefined)?.exec;
+    return typeof exec === "function" ? (exec as PuterWorkersExec) : null;
   }
 
   private async deployWorker(args: DeployWorkerArgs): Promise<string | undefined> {
@@ -530,20 +414,4 @@ export class PuterFedRooms {
 
 function stripTrailingSlash(input: string): string {
   return input.replace(/\/+$/g, "");
-}
-
-function isStoredRoomSignerKey(value: unknown, expectedUsername: string): value is StoredRoomSignerKey {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const record = value as Partial<StoredRoomSignerKey>;
-  return (
-    record.version === 1 &&
-    record.username === expectedUsername &&
-    !!record.publicKeyJwk &&
-    typeof record.publicKeyJwk === "object" &&
-    !!record.privateKeyJwk &&
-    typeof record.privateKeyJwk === "object"
-  );
 }

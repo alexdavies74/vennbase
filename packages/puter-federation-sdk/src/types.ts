@@ -30,6 +30,7 @@ export interface Room {
   owner: string;
   workerUrl: string;
   createdAt: number;
+  parentRooms?: string[];
 }
 
 export interface Message {
@@ -50,7 +51,6 @@ export interface InviteToken {
 
 export interface JoinOptions {
   inviteToken?: string;
-  publicKeyUrl: string;
 }
 
 export interface CrdtConnectCallbacks {
