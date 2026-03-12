@@ -82,6 +82,66 @@ button.secondary {
   margin-bottom: 12px;
 }
 
+.tag-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+
+.tag-section h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.tag-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tag-item {
+  border: 1px solid var(--border);
+  background: #fdf0e4;
+  border-radius: 999px;
+  padding: 4px 10px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag-label {
+  font-weight: 600;
+}
+
+.tag-meta {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.tag-empty {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.tag-form {
+  margin-bottom: 4px;
+}
+
+.tag-form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag-form-row input {
+  margin-bottom: 0;
+}
+
 #messages {
   max-height: 340px;
   overflow: auto;
@@ -124,5 +184,10 @@ button.secondary {
   .panel {
     border-radius: 12px;
     padding: 12px;
+  }
+
+  .tag-form-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

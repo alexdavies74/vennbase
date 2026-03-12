@@ -50,6 +50,36 @@ function stripTrailingSlash(input: string): string {
   return input.replace(/\/+$/g, "");
 }
 
+function roomEndpointUrl(
+  row: Pick<DbRowRef, "id" | "workerUrl">,
+  endpoint: string,
+  searchParams?: URLSearchParams,
+): string {
+  const workerUrl = new URL(stripTrailingSlash(row.workerUrl));
+  const segments = workerUrl.pathname.split("/").filter(Boolean);
+  const roomsIndex = segments.indexOf("rooms");
+
+  if (roomsIndex < 0 || roomsIndex + 1 >= segments.length) {
+    throw new Error(
+      `Unsupported room worker URL: ${row.workerUrl}. Legacy non-federated room URLs are no longer supported.`,
+    );
+  }
+
+  const routeRoomId = decodeURIComponent(segments[roomsIndex + 1]);
+  if (routeRoomId !== row.id) {
+    throw new Error(
+      `Room worker URL/id mismatch: ${row.workerUrl} does not match row id ${row.id}.`,
+    );
+  }
+
+  const prefix = segments.slice(0, roomsIndex + 2).join("/");
+  workerUrl.pathname = `/${prefix}/${endpoint}`;
+
+  workerUrl.search = searchParams?.toString() ?? "";
+  workerUrl.hash = "";
+  return workerUrl.toString();
+}
+
 function parseRoomRefFromWorkerUrl(workerUrl: string): Pick<DbRowRef, "id" | "owner"> {
   const url = new URL(workerUrl);
   const segments = url.pathname.split("/").filter(Boolean);
@@ -109,7 +139,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
     const payload = this.applyDefaults(collectionSpec, fields);
 
-    await this.requestRoomJson(`${rowRef.workerUrl}/fields`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(rowRef, "fields"), "POST", {
       fields: payload,
       collection,
     });
@@ -128,7 +158,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
   ): Promise<RowHandle> {
     await this.init();
     const rowRef = await this.resolveRowRef(collection, row);
-    await this.requestRoomJson(`${rowRef.workerUrl}/fields`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(rowRef, "fields"), "POST", {
       fields,
       merge: true,
       collection,
@@ -173,10 +203,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
         params.set("where", JSON.stringify(options.where));
       }
 
-      return this.requestRoomJson<DbQueryResponse>(
-        `${stripTrailingSlash(parent.workerUrl)}/db-query?${params.toString()}`,
-        "GET",
-      );
+      return this.requestRoomJson<DbQueryResponse>(roomEndpointUrl(parent, "db-query", params), "GET");
     }));
 
     const deduped = new Map<string, DbQueryRow>();
@@ -216,7 +243,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
     const childFields = await this.refreshFields(child);
     const childSchema = this.getCollectionSpec(child.collection);
 
-    await this.requestRoomJson(`${stripTrailingSlash(parent.workerUrl)}/register-child`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(parent, "register-child"), "POST", {
       childRowId: child.id,
       childOwner: child.owner,
       childWorkerUrl: child.workerUrl,
@@ -227,7 +254,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
       },
     });
 
-    await this.requestRoomJson(`${stripTrailingSlash(child.workerUrl)}/link-parent`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(child, "link-parent"), "POST", {
       parentWorkerUrl: parent.workerUrl,
     });
   }
@@ -235,13 +262,13 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async removeParent(child: DbRowRef, parent: DbRowRef): Promise<void> {
     await this.init();
 
-    await this.requestRoomJson(`${stripTrailingSlash(parent.workerUrl)}/unregister-child`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(parent, "unregister-child"), "POST", {
       childRowId: child.id,
       childOwner: child.owner,
       collection: child.collection,
     });
 
-    await this.requestRoomJson(`${stripTrailingSlash(child.workerUrl)}/unlink-parent`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(child, "unlink-parent"), "POST", {
       parentWorkerUrl: parent.workerUrl,
     });
   }
@@ -263,7 +290,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   async addMember(row: DbRowRef, username: string, role: MemberRole): Promise<void> {
     await this.init();
-    await this.requestRoomJson(`${stripTrailingSlash(row.workerUrl)}/members-add`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(row, "members-add"), "POST", {
       username,
       role,
     });
@@ -271,7 +298,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   async removeMember(row: DbRowRef, username: string): Promise<void> {
     await this.init();
-    await this.requestRoomJson(`${stripTrailingSlash(row.workerUrl)}/members-remove`, "POST", {
+    await this.requestRoomJson(roomEndpointUrl(row, "members-remove"), "POST", {
       username,
     });
   }
@@ -279,7 +306,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async listDirectMembers(row: DbRowRef): Promise<Array<{ username: string; role: MemberRole }>> {
     await this.init();
     const payload = await this.requestRoomJson<ListMembersResponse>(
-      `${stripTrailingSlash(row.workerUrl)}/members-direct`,
+      roomEndpointUrl(row, "members-direct"),
       "GET",
     );
     return payload.members;
@@ -288,7 +315,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async listEffectiveMembers(row: DbRowRef): Promise<DbMemberInfo[]> {
     await this.init();
     const payload = await this.requestRoomJson<EffectiveMembersResponse>(
-      `${stripTrailingSlash(row.workerUrl)}/members-effective`,
+      roomEndpointUrl(row, "members-effective"),
       "GET",
     );
     return payload.members;
@@ -297,7 +324,7 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async refreshFields(row: DbRowRef): Promise<Record<string, JsonValue>> {
     await this.init();
     const response = await this.requestRoomJson<GetFieldsResponse>(
-      `${stripTrailingSlash(row.workerUrl)}/fields`,
+      roomEndpointUrl(row, "fields"),
       "GET",
     );
     return response.fields;

@@ -144,4 +144,23 @@ describe("PuterDb", () => {
 
     expect(tasks.some((task) => task.id === bobTask.id)).toBe(true);
   });
+
+  it("rejects legacy room-worker URLs without /rooms/{id}", async () => {
+    const network = new TestWorkerNetwork();
+    const db = buildDb({ username: "alice", network });
+
+    const project = await db.insert("projects", { name: "Website" });
+    await db.insert("tasks", { title: "Ship v2", status: "todo" }, { in: project.toRef() });
+
+    const directRoomWorkerUrl = `https://alice-room-${project.id}.example`;
+    await expect(
+      db.query("tasks", {
+        in: {
+          ...project.toRef(),
+          workerUrl: directRoomWorkerUrl,
+        },
+        where: { status: "todo" },
+      }),
+    ).rejects.toThrow("Legacy non-federated room URLs are no longer supported");
+  });
 });

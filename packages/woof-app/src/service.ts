@@ -1,10 +1,13 @@
 import * as Y from "yjs";
 import type {
+  DbRowRef,
   PuterFedRooms,
   CrdtConnection,
+  JsonValue,
   Room,
   RoomUser,
 } from "puter-federation-sdk";
+import { resolveWorkerUrl } from "puter-federation-sdk";
 import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
 
 import {
@@ -31,6 +34,29 @@ type KvLike = Pick<KV, "get" | "set" | "del">;
 
 type PuterAI = Pick<AI, "chat">;
 
+interface TagRowLike {
+  id: string;
+  fields: Record<string, JsonValue>;
+}
+
+interface TagDbLike {
+  insert(
+    collection: "tags",
+    fields: Record<string, JsonValue>,
+    options: { in: DbRowRef },
+  ): Promise<unknown>;
+  query(
+    collection: "tags",
+    options: {
+      in: DbRowRef;
+      index?: string;
+      order?: "asc" | "desc";
+      limit?: number;
+      where?: Record<string, JsonValue>;
+    },
+  ): Promise<TagRowLike[]>;
+}
+
 export interface ChatEntry {
   id: string;
   content: string;
@@ -38,6 +64,13 @@ export interface ChatEntry {
   threadUser: string | null;
   createdAt: number;
   signedBy: string;
+}
+
+export interface DogTag {
+  id: string;
+  label: string;
+  createdBy: string | null;
+  createdAt: number | null;
 }
 
 function encodeUpdate(update: Uint8Array): { type: string; data: string } {
@@ -71,6 +104,7 @@ export class WoofService {
     private readonly rooms: RoomsLike,
     private readonly kv: KvLike,
     private readonly doc: Y.Doc = new Y.Doc(),
+    private readonly db: TagDbLike | null = null,
   ) {
     this.doc.on("update", (update: Uint8Array) => {
       this.pendingUpdate = this.pendingUpdate
@@ -191,10 +225,84 @@ export class WoofService {
     await this.connection?.flush();
   }
 
+  async listTags(profile: DogProfile): Promise<DogTag[]> {
+    if (!this.db) {
+      return [];
+    }
+
+    const rows = await this.db.query("tags", {
+      in: this.dogRowRef(profile),
+      index: "byCreatedAt",
+      order: "asc",
+      limit: 100,
+    });
+
+    const tags: DogTag[] = rows
+      .map((row) => {
+        const label = typeof row.fields.label === "string"
+          ? row.fields.label.trim()
+          : "";
+        if (!label) {
+          return null;
+        }
+
+        return {
+          id: row.id,
+          label,
+          createdBy: typeof row.fields.createdBy === "string"
+            ? row.fields.createdBy
+            : null,
+          createdAt: typeof row.fields.createdAt === "number"
+            ? row.fields.createdAt
+            : null,
+        } satisfies DogTag;
+      })
+      .filter((row): row is DogTag => row !== null);
+
+    return tags;
+  }
+
+  async createTag(profile: DogProfile, label: string): Promise<void> {
+    if (!this.db) {
+      throw new Error("Tag database is unavailable.");
+    }
+
+    const trimmed = label.trim();
+    if (!trimmed) {
+      throw new Error("Tag text is required.");
+    }
+
+    if (trimmed.length > 32) {
+      throw new Error("Tag text must be 32 characters or fewer.");
+    }
+
+    const actor = await this.rooms.whoAmI();
+    await this.db.insert(
+      "tags",
+      {
+        label: trimmed,
+        createdBy: actor.username,
+        createdAt: Date.now(),
+      },
+      {
+        in: this.dogRowRef(profile),
+      },
+    );
+  }
+
   async relinquish(): Promise<void> {
     this.connection?.disconnect();
     this.connection = null;
     await clearProfile(this.kv);
+  }
+
+  private dogRowRef(profile: DogProfile): DbRowRef {
+    return {
+      id: profile.room.id,
+      collection: "dogs",
+      owner: profile.room.owner,
+      workerUrl: resolveWorkerUrl(profile.room.owner, profile.room.id),
+    };
   }
 
   private async getDogReplies(args: {
@@ -272,7 +380,7 @@ function buildDogPrompt(args: {
   members: string[];
 }): ChatMessage[] {
   const sortedEntries = [...args.entries].sort(
-    (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+    (left, right) => left.createdAt - right.createdAt,
   );
 
   const promptPieces: ChatMessage[] = [

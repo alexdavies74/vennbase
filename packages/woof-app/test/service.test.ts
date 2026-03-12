@@ -109,6 +109,28 @@ class MockRooms {
   }
 }
 
+class MockTagDb {
+  public insertCalls: Array<{
+    collection: string;
+    fields: Record<string, unknown>;
+    options: { in: { id: string; collection: string; owner: string; workerUrl: string } };
+  }> = [];
+
+  public queryRows: Array<{ id: string; fields: Record<string, unknown> }> = [];
+
+  async insert(
+    collection: "tags",
+    fields: Record<string, unknown>,
+    options: { in: { id: string; collection: string; owner: string; workerUrl: string } },
+  ): Promise<void> {
+    this.insertCalls.push({ collection, fields, options });
+  }
+
+  async query(): Promise<Array<{ id: string; fields: Record<string, unknown> }>> {
+    return this.queryRows;
+  }
+}
+
 describe("WoofService", () => {
   it("creates room on first-run adopt flow", async () => {
     const rooms = new MockRooms();
@@ -143,6 +165,58 @@ describe("WoofService", () => {
     const restored = await service.restoreProfile();
 
     expect(restored?.room.name).toBe("Rex Canonical");
+  });
+
+  it("creates tags as DB child rows under the dog room", async () => {
+    const rooms = new MockRooms();
+    const tagDb = new MockTagDb();
+    const service = new WoofService(rooms, new MockKv(), new Y.Doc(), tagDb);
+    const profile = await service.enterChat({ dogName: "Rex" });
+
+    await service.createTag(profile, "friendly");
+
+    expect(tagDb.insertCalls).toHaveLength(1);
+    expect(tagDb.insertCalls[0].collection).toBe("tags");
+    expect(tagDb.insertCalls[0].fields.label).toBe("friendly");
+    expect(tagDb.insertCalls[0].options.in).toMatchObject({
+      id: profile.room.id,
+      collection: "dogs",
+      owner: profile.room.owner,
+      workerUrl: "https://alex-federation.puter.work/rooms/room_created",
+    });
+  });
+
+  it("loads tags from DB rows", async () => {
+    const rooms = new MockRooms();
+    const tagDb = new MockTagDb();
+    tagDb.queryRows = [
+      {
+        id: "tag_1",
+        fields: {
+          label: "playful",
+          createdBy: "alex",
+          createdAt: 100,
+        },
+      },
+      {
+        id: "tag_2",
+        fields: {
+          label: "",
+        },
+      },
+    ];
+
+    const service = new WoofService(rooms, new MockKv(), new Y.Doc(), tagDb);
+    const profile = await service.enterChat({ dogName: "Rex" });
+    const tags = await service.listTags(profile);
+
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toMatchObject({
+      id: "tag_1",
+      label: "playful",
+      createdBy: "alex",
+      createdAt: 100,
+    });
   });
 
   it("refreshes saved profile with canonical room metadata", async () => {

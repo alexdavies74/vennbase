@@ -1,6 +1,6 @@
 import { puter } from "@heyputer/puter.js";
 import * as Y from "yjs";
-import { PuterFedError, PuterFedRooms } from "puter-federation-sdk";
+import { PuterDb, PuterFedError, PuterFedRooms } from "puter-federation-sdk";
 
 import type { DogProfile } from "./profile";
 import { WoofService, type ChatEntry } from "./service";
@@ -18,10 +18,28 @@ const rooms = new PuterFedRooms({
   appBaseUrl: window.location.origin,
   puter,
 });
-const service = new WoofService(rooms, puter.kv, doc);
+const db = new PuterDb({
+  rooms,
+  puter,
+  schema: {
+    tags: {
+      in: ["dogs"],
+      fields: {
+        label: { type: "string" },
+        createdBy: { type: "string" },
+        createdAt: { type: "number" },
+      },
+      indexes: {
+        byCreatedAt: { fields: ["createdAt"] },
+      },
+    },
+  },
+});
+const service = new WoofService(rooms, puter.kv, doc, db);
 
 let currentProfile: DogProfile | null = null;
 let currentUsername: string | null = null;
+let tagsRefreshInterval: number | null = null;
 
 async function boot() {
   try {
@@ -79,6 +97,7 @@ async function boot() {
 }
 
 function renderSetup(initialError = "") {
+  clearTagsRefreshInterval();
   service.relinquish().catch(() => {});
 
   app.innerHTML = `
@@ -132,6 +151,8 @@ function renderSetup(initialError = "") {
 }
 
 async function renderChat(profile: DogProfile) {
+  clearTagsRefreshInterval();
+
   app.innerHTML = `
     <section class="panel">
       <h1>${escapeHtml(profile.room.name)}'s Room</h1>
@@ -143,6 +164,18 @@ async function renderChat(profile: DogProfile) {
         <a id="invite-link" href="#"></a>
         <span id="invite-status"></span>
       </p>
+      <section class="tag-section">
+        <h2>Tags</h2>
+        <ul id="tag-list" class="tag-list"></ul>
+        <form id="tag-form" class="tag-form">
+          <label for="tag-input">Add tag</label>
+          <div class="tag-form-row">
+            <input id="tag-input" name="tag" maxlength="32" placeholder="friendly" />
+            <button class="secondary" type="submit">Add tag</button>
+          </div>
+        </form>
+        <p id="tag-error" class="muted"></p>
+      </section>
       <div id="messages"></div>
       <form id="message-form">
         <label for="message-input">Message</label>
@@ -181,8 +214,87 @@ async function renderChat(profile: DogProfile) {
   relinquishButton.addEventListener("click", () => {
     void service.relinquish();
     currentProfile = null;
+    clearTagsRefreshInterval();
     renderSetup();
   });
+
+  const tagList = document.getElementById("tag-list") as HTMLUListElement;
+  const tagForm = document.getElementById("tag-form") as HTMLFormElement;
+  const tagInput = document.getElementById("tag-input") as HTMLInputElement;
+  const tagError = document.getElementById("tag-error") as HTMLParagraphElement;
+  let loadingTags = false;
+
+  const refreshTags = async () => {
+    if (loadingTags) {
+      return;
+    }
+
+    loadingTags = true;
+    try {
+      const tags = await service.listTags(profile);
+      tagList.innerHTML = "";
+
+      if (tags.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "tag-empty";
+        empty.textContent = "No tags yet.";
+        tagList.appendChild(empty);
+        return;
+      }
+
+      for (const tag of tags) {
+        const item = document.createElement("li");
+        item.className = "tag-item";
+
+        const label = document.createElement("span");
+        label.className = "tag-label";
+        label.textContent = tag.label;
+        item.appendChild(label);
+
+        if (tag.createdBy) {
+          const meta = document.createElement("span");
+          meta.className = "tag-meta";
+          meta.textContent = `by ${tag.createdBy}`;
+          item.appendChild(meta);
+        }
+
+        tagList.appendChild(item);
+      }
+
+      tagError.textContent = "";
+    } catch (error) {
+      tagError.textContent = getErrorMessage(error, "Failed to load tags.");
+    } finally {
+      loadingTags = false;
+    }
+  };
+
+  tagForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!currentProfile) {
+      return;
+    }
+
+    const value = tagInput.value.trim();
+    if (!value) {
+      tagError.textContent = "Tag text is required.";
+      return;
+    }
+
+    tagError.textContent = "";
+    try {
+      await service.createTag(currentProfile, value);
+      tagInput.value = "";
+      await refreshTags();
+    } catch (error) {
+      tagError.textContent = getErrorMessage(error, "Failed to add tag.");
+    }
+  });
+
+  await refreshTags();
+  tagsRefreshInterval = window.setInterval(() => {
+    void refreshTags();
+  }, 5000);
 
   const form = document.getElementById("message-form") as HTMLFormElement;
   const chatError = document.getElementById("chat-error") as HTMLParagraphElement;
@@ -213,6 +325,15 @@ async function renderChat(profile: DogProfile) {
       chatError.textContent = getErrorMessage(error, "Failed to send message.");
     }
   });
+}
+
+function clearTagsRefreshInterval() {
+  if (tagsRefreshInterval === null) {
+    return;
+  }
+
+  window.clearInterval(tagsRefreshInterval);
+  tagsRefreshInterval = null;
 }
 
 function renderFromDoc(profile: DogProfile) {
