@@ -303,7 +303,7 @@ describe("PuterFedRooms", () => {
     await rooms.createRoom("Rex");
 
     expect(deployCalls).toBe(1);
-    await expect(kv.get("puter-fed:federation-worker-version:v1:owner")).resolves.toBe(1);
+    await expect(kv.get("puter-fed:federation-worker-version:v1:owner")).resolves.toBe(2);
     await expect(kv.get("puter-fed:federation-worker-url:v1:owner")).resolves.toBe(deployedWorkerBase);
   });
 

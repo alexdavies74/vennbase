@@ -40,7 +40,7 @@ type PuterWorkersExec = (
 ) => Promise<Response>;
 
 const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
-const FEDERATION_WORKER_VERSION = 1;
+const FEDERATION_WORKER_VERSION = 2;
 const FEDERATION_WORKER_VERSION_KV_PREFIX = "puter-fed:federation-worker-version:v1";
 const FEDERATION_WORKER_URL_KV_PREFIX = "puter-fed:federation-worker-url:v1";
 

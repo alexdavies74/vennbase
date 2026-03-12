@@ -45,4 +45,8 @@ export class InMemoryKv implements WorkerKv {
     this.store.set(key, next);
     return next;
   }
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
 }

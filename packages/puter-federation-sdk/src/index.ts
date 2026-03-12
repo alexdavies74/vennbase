@@ -1,4 +1,6 @@
 export { PuterFedRooms } from "./client";
+export { PuterDb } from "./db/client";
+export { RowHandle } from "./db/row-handle";
 export { PuterFedError } from "./errors";
 export {
   createInviteLink,
@@ -40,3 +42,16 @@ export type {
   SignedWriteEnvelope,
   SignerIdentity,
 } from "./types";
+export type {
+  DbCollectionSpec,
+  DbFieldSpec,
+  DbIndexSpec,
+  DbInsertOptions,
+  DbMemberInfo,
+  DbQueryOptions,
+  DbRow,
+  DbRowRef,
+  DbSchema,
+  FieldType,
+  MemberRole,
+} from "./db/types";
