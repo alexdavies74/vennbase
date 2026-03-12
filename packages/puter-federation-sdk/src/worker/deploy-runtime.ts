@@ -18,19 +18,22 @@ declare const router: {
 };
 
 interface RouterUserContext {
-  username?: string;
-  puter?: {
+  username: string;
+  puter: {
     getUser?: () => Promise<{ username?: string } | null>;
     auth?: {
       whoami?: () => Promise<{ username?: string } | null>;
       getUser?: () => Promise<{ username?: string } | null>;
+    };
+    workers?: {
+      exec: (url: string, init?: RequestInit) => Promise<Response>;
     };
   };
 }
 
 interface RouterContext {
   request: Request;
-  user?: RouterUserContext;
+  user: RouterUserContext;
 }
 
 const ROOM_ID = "__PUTER_FED_ROOM_ID__";
@@ -107,7 +110,9 @@ function withRequesterHeader(request: Request, requester: string | null): Reques
 
 async function route({ request, user }: RouterContext): Promise<Response> {
   const requester = await resolveRequesterFromAuth(user);
-  return worker.handle(withRequesterHeader(request, requester));
+  return worker.handle(withRequesterHeader(request, requester), {
+    workersExec: (url, init) => user.puter!.workers!.exec(url, init)
+  });
 }
 
 router.options("/room", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
@@ -116,8 +121,10 @@ router.options("/join", () => new Response(null, { status: 204, headers: CORS_PR
 router.options("/invite-token", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/message", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
+router.options("/is-member", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.get("/room", route);
 router.get("/messages", route);
+router.get("/is-member", route);
 router.post("/join", route);
 router.post("/invite-token", route);
 router.post("/message", route);

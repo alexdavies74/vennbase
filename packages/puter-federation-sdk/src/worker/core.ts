@@ -73,7 +73,7 @@ const CORS_PREFLIGHT_HEADERS = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
 };
 
-const WORKER_ROUTE_SEGMENTS = new Set(["room", "messages", "join", "invite-token", "message"]);
+const WORKER_ROUTE_SEGMENTS = new Set(["room", "messages", "join", "invite-token", "message", "is-member", "parent-rooms"]);
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -130,6 +130,22 @@ function roomMessageSequenceKey(roomId: string): string {
   return `room:${roomId}:global_message_sequence`;
 }
 
+function roomParentRoomsKey(roomId: string): string {
+  return `room:${roomId}:parent_rooms`;
+}
+
+function stripTrailingSlash(input: string): string {
+  return input.replace(/\/+$/g, "");
+}
+
+type WorkersExec = (url: string, init?: RequestInit) => Promise<Response>;
+
+interface WorkerRequestContext {
+  workersExec: WorkersExec;
+}
+
+const DEFAULT_PARENT_ROOM_TTL = 5;
+
 function parseRequiredNonNegativeInteger(value: string | null, name: string): number {
   if (value === null) {
     error(400, "BAD_REQUEST", `${name} is required`);
@@ -168,7 +184,7 @@ export class RoomWorker {
     this.now = deps.now ?? (() => Date.now());
   }
 
-  async handle(request: Request): Promise<Response> {
+  async handle(request: Request, ctx: WorkerRequestContext): Promise<Response> {
     try {
       if (request.method === "OPTIONS") {
         return new Response(null, {
@@ -180,7 +196,7 @@ export class RoomWorker {
       const { pathname, searchParams } = new URL(request.url);
 
       if (request.method === "GET" && pathname === "/room") {
-        return await this.getRoom(request);
+        return await this.getRoom(request, ctx);
       }
 
       if (request.method === "GET" && pathname === "/messages") {
@@ -188,7 +204,7 @@ export class RoomWorker {
           searchParams.get("sinceSequence"),
           "sinceSequence",
         );
-        return await this.getMessages(request, sinceSequence);
+        return await this.getMessages(request, sinceSequence, ctx);
       }
 
       if (request.method === "POST" && pathname === "/join") {
@@ -196,11 +212,15 @@ export class RoomWorker {
       }
 
       if (request.method === "POST" && pathname === "/invite-token") {
-        return await this.createInviteToken(request);
+        return await this.createInviteToken(request, ctx);
       }
 
       if (request.method === "POST" && pathname === "/message") {
-        return await this.postMessage(request);
+        return await this.postMessage(request, ctx);
+      }
+
+      if (request.method === "GET" && pathname === "/is-member") {
+        return await this.isMember(request, ctx);
       }
 
       return jsonResponse(404, {
@@ -220,9 +240,9 @@ export class RoomWorker {
     }
   }
 
-  private async getRoom(request: Request): Promise<Response> {
+  private async getRoom(request: Request, ctx: WorkerRequestContext): Promise<Response> {
     const requester = requesterFromHeader(request);
-    await this.assertMember(requester);
+    await this.assertMember(requester, ctx);
 
     const snapshot = await this.snapshot(request.url);
     return jsonResponse(200, snapshot);
@@ -231,9 +251,10 @@ export class RoomWorker {
   private async getMessages(
     request: Request,
     sinceSequence: number,
+    ctx: WorkerRequestContext,
   ): Promise<Response> {
     const requester = requesterFromHeader(request);
-    await this.assertMember(requester);
+    await this.assertMember(requester, ctx);
 
     const currentSequence = await this.getMessageSequence();
     if (sinceSequence >= currentSequence) {
@@ -299,11 +320,11 @@ export class RoomWorker {
     return jsonResponse(200, await this.snapshot(request.url));
   }
 
-  private async createInviteToken(request: Request): Promise<Response> {
+  private async createInviteToken(request: Request, ctx: WorkerRequestContext): Promise<Response> {
     const requester = requesterFromHeader(request);
     const payload = await parseJson<InvitePayload>(request);
 
-    await this.assertMember(requester);
+    await this.assertMember(requester, ctx);
 
     if (payload.roomId !== this.config.roomId) {
       error(400, "BAD_REQUEST", "Payload roomId does not match worker roomId");
@@ -323,11 +344,11 @@ export class RoomWorker {
     });
   }
 
-  private async postMessage(request: Request): Promise<Response> {
+  private async postMessage(request: Request, ctx: WorkerRequestContext): Promise<Response> {
     const requester = requesterFromHeader(request);
     const payload = await parseJson<MessagePayload>(request);
 
-    await this.assertMember(requester);
+    await this.assertMember(requester, ctx);
 
     if (payload.roomId !== this.config.roomId) {
       error(400, "BAD_REQUEST", "Payload roomId does not match worker roomId");
@@ -349,9 +370,40 @@ export class RoomWorker {
     });
   }
 
-  private async assertMember(username: string): Promise<void> {
+  private async isMember(request: Request, ctx: WorkerRequestContext): Promise<Response> {
+    const requester = requesterFromHeader(request);
+    const ttlParam = new URL(request.url).searchParams.get("ttl");
+    const ttl = ttlParam !== null ? Math.max(0, Math.floor(Number(ttlParam))) : undefined;
+    await this.assertMember(requester, ctx, ttl );
+    return jsonResponse(200, { isMember: true });
+  }
+
+  private async getParentRoomUrls(): Promise<string[]> {
+    return (await this.kv.get<string[]>(roomParentRoomsKey(this.config.roomId))) ?? [];
+  }
+
+  private async assertMember(username: string, ctx: WorkerRequestContext, ttl: number = DEFAULT_PARENT_ROOM_TTL): Promise<void> {
     const members = await this.getMembers();
-    if (!members.includes(username)) {
+    if (members.includes(username)) return;
+
+    const parentRoomUrls = await this.getParentRoomUrls();
+    if (ttl === 0 || parentRoomUrls.length === 0) {
+      error(401, "UNAUTHORIZED", "Members only");
+    }
+
+    const checks = parentRoomUrls.map(async (parentUrl): Promise<boolean> => {
+      try {
+        const res = await ctx.workersExec(
+          `${stripTrailingSlash(parentUrl)}/is-member?ttl=${ttl - 1}`,
+          { method: "GET" },
+        );
+        return res.ok;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!(await Promise.all(checks)).some(Boolean)) {
       error(401, "UNAUTHORIZED", "Members only");
     }
   }
@@ -417,6 +469,7 @@ export class RoomWorker {
     return {
       ...room,
       members,
+      parentRooms: await this.getParentRoomUrls(),
     };
   }
 }

@@ -115,4 +115,5 @@ export interface PuterFedRoomsOptions {
 
 export interface RoomSnapshot extends Room {
   members: string[];
+  parentRooms: string[];
 }
