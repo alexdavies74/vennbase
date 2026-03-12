@@ -303,7 +303,42 @@ describe("PuterFedRooms", () => {
     await rooms.createRoom("Rex");
 
     expect(deployCalls).toBe(1);
-    await expect(kv.get("puter-fed:federation-worker-version:v1:owner")).resolves.toBe(2);
+    await expect(kv.get("puter-fed:federation-worker-version:v1:owner")).resolves.toBe(7);
+    await expect(kv.get("puter-fed:federation-worker-url:v1:owner")).resolves.toBe(deployedWorkerBase);
+  });
+
+  it("redeploys worker during init when stored version is stale", async () => {
+    const kv = new MapKv();
+    const deployedWorkerBase = "https://workers.example/owner-federation";
+    let deployCalls = 0;
+
+    await kv.set("puter-fed:federation-worker-version:v1:owner", 0);
+    await kv.set("puter-fed:federation-worker-url:v1:owner", "https://workers.example/old-worker");
+
+    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+      fs: {
+        mkdir: async () => undefined,
+        write: async () => undefined,
+      },
+      workers: {
+        create: async () => {
+          deployCalls += 1;
+          return { success: true, url: deployedWorkerBase };
+        },
+      },
+      kv,
+    };
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      puter,
+      fetchFn: (() => Promise.reject(new Error("fetch should not be used in init"))) as typeof fetch,
+    });
+
+    await rooms.init();
+
+    expect(deployCalls).toBe(1);
+    await expect(kv.get("puter-fed:federation-worker-version:v1:owner")).resolves.toBe(7);
     await expect(kv.get("puter-fed:federation-worker-url:v1:owner")).resolves.toBe(deployedWorkerBase);
   });
 

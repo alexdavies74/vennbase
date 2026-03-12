@@ -889,7 +889,7 @@ export class RoomWorker {
       error(401, "UNAUTHORIZED", "Only child owner can register child");
     }
 
-    await this.assertWriterOrAdmin(parentRoomId, requester, ctx);
+    await this.assertMember(parentRoomId, requester, ctx);
 
     const schema = this.normalizeChildSchema(body.schema);
     if (schema) {

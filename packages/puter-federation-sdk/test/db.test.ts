@@ -132,7 +132,7 @@ describe("PuterDb", () => {
     const bobDb = buildDb({ username: "bob", network });
 
     const aliceProject = await aliceDb.insert("projects", { name: "Roadmap" });
-    await aliceProject.members.add("bob", { role: "writer" });
+    await aliceProject.members.add("bob", { role: "reader" });
 
     const bobProject = await bobDb.insert("projects", { name: "Bob scope" });
     const bobTask = await bobDb.insert("tasks", { title: "Review" }, { in: bobProject.toRef() });

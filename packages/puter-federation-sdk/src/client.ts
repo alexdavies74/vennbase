@@ -40,7 +40,7 @@ type PuterWorkersExec = (
 ) => Promise<Response>;
 
 const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
-const FEDERATION_WORKER_VERSION = 2;
+const FEDERATION_WORKER_VERSION = 7;
 const FEDERATION_WORKER_VERSION_KV_PREFIX = "puter-fed:federation-worker-version:v1";
 const FEDERATION_WORKER_URL_KV_PREFIX = "puter-fed:federation-worker-url:v1";
 
@@ -66,7 +66,8 @@ export class PuterFedRooms {
       throw new Error("fetch is required when puter.workers.exec is unavailable");
     }
 
-    await this.whoAmI();
+    const user = await this.whoAmI();
+    await this.ensureFederationWorkerOnInit(user.username);
   }
 
   async whoAmI(): Promise<RoomUser> {
@@ -414,6 +415,30 @@ export class PuterFedRooms {
     const activeWorkerUrl = stripTrailingSlash(deployedWorkerUrl ?? resolvedBaseUrl);
     await this.saveFederationWorkerMetadata(username, activeWorkerUrl);
     return activeWorkerUrl;
+  }
+
+  private async ensureFederationWorkerOnInit(username: string): Promise<void> {
+    if (!this.canDeployFederationWorker()) {
+      return;
+    }
+
+    try {
+      this.federationWorkerUrl = await this.ensureFederationWorkerUrl(username);
+    } catch (error) {
+      console.warn("[puter-fed-sdk] failed to ensure federation worker during init", {
+        username,
+        error,
+      });
+    }
+  }
+
+  private canDeployFederationWorker(): boolean {
+    if (typeof this.options.deployWorker === "function") {
+      return true;
+    }
+
+    const workers = this.puter?.workers as { create?: unknown } | undefined;
+    return typeof workers?.create === "function";
   }
 
   private async deployWorker(args: DeployWorkerArgs): Promise<string | undefined> {
