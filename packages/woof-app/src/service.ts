@@ -35,6 +35,8 @@ export interface WatchTagsCallbacks {
   onError?(error: unknown): void;
 }
 
+type ResolvedWoofRow = Awaited<ReturnType<WoofDb["getRowByUrl"]>>;
+
 function encodeUpdate(update: Uint8Array): { type: string; data: string } {
   return {
     type: "yjs-update",
@@ -56,6 +58,14 @@ function decodeUpdate(body: unknown): Uint8Array | null {
   } catch {
     return null;
   }
+}
+
+function expectDogRow(row: ResolvedWoofRow): DogRowHandle {
+  if (row.collection !== "dogs") {
+    throw new Error(`Expected dogs row, got ${row.collection}`);
+  }
+
+  return row as unknown as DogRowHandle;
 }
 
 export class WoofService {
@@ -85,7 +95,7 @@ export class WoofService {
     }
 
     try {
-      const row = await this.db.getRowByUrl(workerUrl) as unknown as DogRowHandle;
+      const row = expectDogRow(await this.db.getRowByUrl(workerUrl));
       return { row };
     } catch (error) {
       await clearProfile(this.kv);
@@ -101,9 +111,9 @@ export class WoofService {
 
   async joinFromInvite(inviteInput: string): Promise<DogProfile> {
     const parsed = this.db.parseInviteInput(inviteInput.trim());
-    const row = await this.db.joinRow(parsed.workerUrl, {
+    const row = expectDogRow(await this.db.joinRow(parsed.workerUrl, {
       inviteToken: parsed.inviteToken,
-    }) as unknown as DogRowHandle;
+    }));
 
     await saveStoredWorkerUrl(row, this.kv);
     return { row };
@@ -111,7 +121,7 @@ export class WoofService {
 
   async refreshProfileCanonical(profile: DogProfile): Promise<DogProfile> {
     try {
-      const row = await this.db.getRowByUrl(profile.row.workerUrl) as unknown as DogRowHandle;
+      const row = expectDogRow(await this.db.getRowByUrl(profile.row.workerUrl));
       await saveStoredWorkerUrl(row, this.kv);
       return { row };
     } catch (error) {

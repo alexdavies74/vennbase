@@ -154,6 +154,73 @@ describe("PutBase rows", () => {
     expect(tasks.some((task) => task.id === bobTask.id)).toBe(true);
   });
 
+  it("lists canonical parent refs that can be reused in schema-aware queries", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = buildDb({ username: "alice", network });
+    const bobDb = buildDb({ username: "bob", network });
+
+    const aliceProject = await aliceDb.put("projects", { name: "Roadmap" });
+    await aliceProject.members.add("bob", { role: "reader" });
+
+    const bobProject = await bobDb.put("projects", { name: "Bob scope" });
+    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.toRef() });
+    await bobTask.in.add(aliceProject.toRef());
+
+    const parents = await bobTask.in.list();
+    expect(parents).toHaveLength(2);
+    expect(parents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: aliceProject.id,
+        collection: "projects",
+        owner: "alice",
+      }),
+      expect.objectContaining({
+        id: bobProject.id,
+        collection: "projects",
+        owner: "bob",
+      }),
+    ]));
+
+    const aliceParent = parents.find((parent) => parent.id === aliceProject.id);
+    expect(aliceParent).toBeTruthy();
+
+    const tasks = await aliceDb.query("tasks", { in: aliceParent!, limit: 20 });
+    expect(tasks.some((task) => task.id === bobTask.id)).toBe(true);
+  });
+
+  it("returns effective-member ancestry via canonical parent refs", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = buildDb({ username: "alice", network });
+    const bobDb = buildDb({ username: "bob", network });
+
+    const aliceProject = await aliceDb.put("projects", { name: "Roadmap" });
+    await aliceProject.members.add("bob", { role: "reader" });
+
+    const bobProject = await bobDb.put("projects", { name: "Bob scope" });
+    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.toRef() });
+    await bobTask.in.add(aliceProject.toRef());
+
+    const aliceTask = await aliceDb.getRowByUrl(bobTask.workerUrl);
+    expect(aliceTask.collection).toBe("tasks");
+    if (aliceTask.collection !== "tasks") {
+      throw new Error(`Expected tasks row, got ${aliceTask.collection}`);
+    }
+
+    const members = await aliceTask.members.effective();
+    const aliceMember = members.find((member) => member.username === "alice");
+
+    expect(aliceMember).toMatchObject({
+      username: "alice",
+      role: "admin",
+      via: {
+        id: aliceProject.id,
+        collection: "projects",
+        owner: "alice",
+        workerUrl: aliceProject.workerUrl,
+      },
+    });
+  });
+
   it("rejects legacy room-worker URLs without /rooms/{id}", async () => {
     const network = new TestWorkerNetwork();
     const db = buildDb({ username: "alice", network });

@@ -1,6 +1,6 @@
 import { PuterFedError, toApiError } from "./errors";
 import type { PuterFedRoomsOptions } from "./types";
-import type { DbRowRef } from "./schema";
+import type { DbRowLocator } from "./schema";
 
 export type PuterWorkersExec = (
   workerUrl: string,
@@ -12,7 +12,7 @@ export function stripTrailingSlash(input: string): string {
 }
 
 export function roomEndpointUrl(
-  row: Pick<DbRowRef, "id" | "workerUrl">,
+  row: Pick<DbRowLocator, "id" | "workerUrl">,
   endpoint: string,
   searchParams?: URLSearchParams,
 ): string {

@@ -60,7 +60,9 @@ describe("PutBase", () => {
               owner: "owner",
               workerUrl: "https://worker.example/rooms/room_public",
               createdAt: 1,
+              collection: "rows",
               members: ["owner", "friend"],
+              parentRefs: [],
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
@@ -82,9 +84,90 @@ describe("PutBase", () => {
 
     const row = await db.getRowByUrl("https://worker.example/rooms/room_public");
     expect(row.id).toBe("room_public");
+    expect(row.collection).toBe("rows");
     expect(row.owner).toBe("owner");
     expect(row.workerUrl).toBe("https://worker.example/rooms/room_public");
     expect(row.fields.name).toBe("Rex");
+  });
+
+  it("fails getRowByUrl when the worker omits collection metadata", async () => {
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+
+        if (url.endsWith("/room")) {
+          return new Response(
+            JSON.stringify({
+              id: "room_public",
+              name: "Rex",
+              owner: "owner",
+              workerUrl: "https://worker.example/rooms/room_public",
+              createdAt: 1,
+              collection: null,
+              members: ["owner"],
+              parentRefs: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (url.endsWith("/fields")) {
+          return new Response(
+            JSON.stringify({ fields: { name: "Rex" }, collection: null }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    await expect(db.getRowByUrl("https://worker.example/rooms/room_public")).rejects.toThrow("Row collection is missing");
+  });
+
+  it("fails getRowByUrl when the worker collection is off-schema", async () => {
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+
+        if (url.endsWith("/room")) {
+          return new Response(
+            JSON.stringify({
+              id: "room_public",
+              name: "Rex",
+              owner: "owner",
+              workerUrl: "https://worker.example/rooms/room_public",
+              createdAt: 1,
+              collection: "foreign",
+              members: ["owner"],
+              parentRefs: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (url.endsWith("/fields")) {
+          return new Response(
+            JSON.stringify({ fields: { name: "Rex" }, collection: "foreign" }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    await expect(db.getRowByUrl("https://worker.example/rooms/room_public")).rejects.toThrow("Unknown collection: foreign");
   });
 
   it("calls provided fetchFn without binding `this` to SDK instance", async () => {
@@ -115,7 +198,9 @@ describe("PutBase", () => {
               owner: "owner",
               workerUrl: "https://workers.puter.site/owner-federation/rooms/room_1",
               createdAt: 1,
+              collection: "rows",
               members: ["owner"],
+              parentRefs: [],
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
@@ -207,8 +292,9 @@ describe("PutBase", () => {
             owner: "owner",
             workerUrl: `${deployedWorkerBase}/rooms/${roomId}`,
             createdAt: 1,
+            collection: null,
             members: [],
-            parentRooms: [],
+            parentRefs: [],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -229,8 +315,9 @@ describe("PutBase", () => {
             owner: "owner",
             workerUrl: `${deployedWorkerBase}/rooms/${roomId}`,
             createdAt: 1,
+            collection: null,
             members: ["owner"],
-            parentRooms: [],
+            parentRefs: [],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -406,15 +493,16 @@ describe("PutBase", () => {
 
           if (url.endsWith("/room")) {
             return new Response(
-              JSON.stringify({
-                id: "room_exec",
-                name: "Rex",
-                owner: "owner",
-                workerUrl: "https://worker.example/rooms/room_exec",
-                createdAt: 1,
-                members: ["owner"],
-                parentRooms: [],
-              }),
+            JSON.stringify({
+              id: "room_exec",
+              name: "Rex",
+              owner: "owner",
+              workerUrl: "https://worker.example/rooms/room_exec",
+              createdAt: 1,
+              collection: "rows",
+              members: ["owner"],
+              parentRefs: [],
+            }),
               { status: 200, headers: { "content-type": "application/json" } },
             );
           }

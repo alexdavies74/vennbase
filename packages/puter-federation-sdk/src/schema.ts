@@ -109,15 +109,17 @@ export function index<const TFields extends string | readonly string[]>(
   };
 }
 
-export interface DbCollectionDefinition<
+export type DbCollectionDefinition<
   TFields extends Record<string, AnyDbFieldBuilder> = Record<string, AnyDbFieldBuilder>,
   TParents extends readonly string[] | undefined = undefined,
   TIndexes extends Record<string, DbIndexDefinition> | undefined = undefined,
-> {
+> = {
   readonly fields: TFields;
-  readonly in?: TParents;
-  readonly indexes?: TIndexes;
-}
+} & (
+  TParents extends readonly string[] ? { readonly in: TParents } : { readonly in?: undefined }
+) & (
+  TIndexes extends Record<string, DbIndexDefinition> ? { readonly indexes: TIndexes } : { readonly indexes?: undefined }
+);
 
 type AnyDbCollectionDefinition = DbCollectionDefinition<
   Record<string, AnyDbFieldBuilder>,
@@ -129,6 +131,24 @@ export type DbSchema = Record<string, AnyDbCollectionDefinition>;
 
 export function collection<
   const TFields extends Record<string, AnyDbFieldBuilder>,
+  const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
+>(definition: {
+  fields: TFields;
+  indexes?: TIndexes;
+}): DbCollectionDefinition<TFields, undefined, TIndexes>;
+
+export function collection<
+  const TFields extends Record<string, AnyDbFieldBuilder>,
+  const TParents extends readonly string[],
+  const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
+>(definition: {
+  fields: TFields;
+  in: TParents;
+  indexes?: TIndexes;
+}): DbCollectionDefinition<TFields, TParents, TIndexes>;
+
+export function collection<
+  const TFields extends Record<string, AnyDbFieldBuilder>,
   const TParents extends readonly string[] | undefined = undefined,
   const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
 >(definition: {
@@ -136,7 +156,7 @@ export function collection<
   in?: TParents;
   indexes?: TIndexes;
 }): DbCollectionDefinition<TFields, TParents, TIndexes> {
-  return definition;
+  return definition as unknown as DbCollectionDefinition<TFields, TParents, TIndexes>;
 }
 
 export function defineSchema<const TSchema extends DbSchema>(schema: TSchema): TSchema {
@@ -204,12 +224,19 @@ export type AllowedParentCollections<
   ? NonNullable<Schema[TCollection]["in"]>[number]
   : never;
 
-export interface DbRowRef<TCollection extends string = string> {
+export interface DbRowLocator {
   id: string;
-  collection: TCollection;
   owner: string;
   workerUrl: string;
 }
+
+export type DbRowRef<TCollection extends string = string> = DbRowLocator & {
+  collection: TCollection;
+};
+
+export type AnyRowRef<Schema extends DbSchema> = {
+  [TCollection in CollectionName<Schema>]: DbRowRef<TCollection>;
+}[CollectionName<Schema>];
 
 type ParentInput<TCollection extends string> =
   [TCollection] extends [never] ? never : DbRowRef<TCollection> | DbRowRef<TCollection>[];
@@ -225,6 +252,10 @@ export interface DbRow<
 > extends DbRowRef<TCollection> {
   fields: TFields;
 }
+
+export type AnyRow<Schema extends DbSchema> = {
+  [TCollection in CollectionName<Schema>]: DbRow<TCollection, RowFields<Schema, TCollection>>;
+}[CollectionName<Schema>];
 
 export interface DbPutOptions<
   Schema extends DbSchema = DbSchema,
@@ -312,10 +343,10 @@ export interface DbQueryWatchHandle {
 
 export type MemberRole = "admin" | "writer" | "reader";
 
-export interface DbMemberInfo {
+export interface DbMemberInfo<Schema extends DbSchema = DbSchema> {
   username: string;
   role: MemberRole;
-  via: "direct" | DbRowRef;
+  via: "direct" | AnyRowRef<Schema>;
 }
 
 export function getCollectionSpec<
@@ -327,6 +358,21 @@ export function getCollectionSpec<
     throw new Error(`Unknown collection: ${collection}`);
   }
   return spec;
+}
+
+export function resolveCollectionName<Schema extends DbSchema>(
+  schema: Schema,
+  collection: string | null | undefined,
+): CollectionName<Schema> {
+  if (!collection) {
+    throw new Error("Row collection is missing");
+  }
+
+  if (!(collection in schema)) {
+    throw new Error(`Unknown collection: ${collection}`);
+  }
+
+  return collection as CollectionName<Schema>;
 }
 
 export function applyDefaults<

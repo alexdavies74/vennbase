@@ -2,7 +2,7 @@ import type { Identity } from "./identity";
 import type { Transport } from "./transport";
 import { stripTrailingSlash } from "./transport";
 import type { InviteToken, ParsedInviteInput, PuterFedRoomsOptions } from "./types";
-import type { DbRowRef } from "./schema";
+import type { DbRowLocator } from "./schema";
 
 interface GetInviteResponse {
   inviteToken: InviteToken | null;
@@ -32,7 +32,7 @@ export class Invites {
     private readonly identity: Identity,
   ) {}
 
-  async getExistingInviteToken(row: DbRowRef): Promise<InviteToken | null> {
+  async getExistingInviteToken(row: DbRowLocator): Promise<InviteToken | null> {
     const response = await this.transport.request<GetInviteResponse>(
       `${stripTrailingSlash(row.workerUrl)}/invite-token`,
       "GET",
@@ -40,7 +40,7 @@ export class Invites {
     return response.inviteToken;
   }
 
-  async createInviteToken(row: DbRowRef): Promise<InviteToken> {
+  async createInviteToken(row: DbRowLocator): Promise<InviteToken> {
     const user = await this.identity.whoAmI();
 
     const payload: InviteToken = {
@@ -59,7 +59,7 @@ export class Invites {
     return response.inviteToken;
   }
 
-  createInviteLink(row: Pick<DbRowRef, "workerUrl">, inviteToken: string): string {
+  createInviteLink(row: Pick<DbRowLocator, "workerUrl">, inviteToken: string): string {
     const appBaseUrl =
       this.options.appBaseUrl ??
       (typeof window !== "undefined" ? window.location.origin : "http://localhost:5173");

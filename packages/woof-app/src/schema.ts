@@ -31,5 +31,5 @@ export type WoofSchema = typeof woofSchema;
 export type WoofDb = PutBase<WoofSchema>;
 export type DogFields = RowFields<WoofSchema, "dogs">;
 export type TagFields = RowFields<WoofSchema, "tags">;
-export type DogRowHandle = RowHandle<"dogs", DogFields, never>;
-export type TagRowHandle = RowHandle<"tags", TagFields, "dogs">;
+export type DogRowHandle = RowHandle<"dogs", DogFields, never, WoofSchema>;
+export type TagRowHandle = RowHandle<"tags", TagFields, "dogs", WoofSchema>;

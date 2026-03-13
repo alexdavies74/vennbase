@@ -1,4 +1,5 @@
 import type { Puter } from "@heyputer/puter.js";
+import type { DbRowRef } from "./schema";
 
 export type JsonValue =
   | string
@@ -109,6 +110,7 @@ export interface PuterFedRoomsOptions {
 }
 
 export interface RoomSnapshot extends Room {
+  collection: string | null;
   members: string[];
-  parentRooms: string[];
+  parentRefs: DbRowRef[];
 }

@@ -1,4 +1,5 @@
 import { encodeCompositeFieldValues } from "../key-encoding";
+import type { DbRowRef } from "../schema";
 import type {
   ApiError,
   InviteToken,
@@ -91,7 +92,7 @@ interface UpdateIndexRequest {
 }
 
 interface ParentLinkRequest {
-  parentWorkerUrl: string;
+  parentRef: DbRowRef;
 }
 
 interface MemberMutationRequest {
@@ -127,7 +128,7 @@ interface IndexEntry {
 interface EffectiveMember {
   username: string;
   role: MemberRole;
-  via: "direct" | { id: string; collection: string; owner: string; workerUrl: string };
+  via: "direct" | DbRowRef;
 }
 
 export interface RoomWorkerDeps {
@@ -225,8 +226,8 @@ function roomMessageSequenceKey(roomId: string): string {
   return `room:${roomId}:global_message_sequence`;
 }
 
-function roomParentRoomsKey(roomId: string): string {
-  return `room:${roomId}:parent_rooms`;
+function roomParentRefsKey(roomId: string): string {
+  return `room:${roomId}:parent_refs`;
 }
 
 function rowFieldsKey(rowId: string): string {
@@ -381,6 +382,35 @@ function toJsonRecord(value: unknown): Record<string, JsonValue> {
   }
 
   return output;
+}
+
+function normalizeRowRef(value: unknown, fieldName: string): DbRowRef {
+  if (!isRecord(value)) {
+    error(400, "BAD_REQUEST", `${fieldName} must be an object`);
+  }
+
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const collection = typeof value.collection === "string" ? value.collection.trim() : "";
+  const owner = typeof value.owner === "string" ? value.owner.trim() : "";
+  const workerUrl = typeof value.workerUrl === "string" ? stripTrailingSlash(value.workerUrl) : "";
+
+  if (!id || !collection || !owner || !workerUrl) {
+    error(400, "BAD_REQUEST", `${fieldName} must include id, collection, owner, and workerUrl`);
+  }
+
+  return {
+    id,
+    collection,
+    owner,
+    workerUrl,
+  };
+}
+
+function sameRowRef(left: DbRowRef, right: DbRowRef): boolean {
+  return left.id === right.id
+    && left.collection === right.collection
+    && left.owner === right.owner
+    && stripTrailingSlash(left.workerUrl) === stripTrailingSlash(right.workerUrl);
 }
 
 function roleRank(role: MemberRole | null): number {
@@ -864,12 +894,12 @@ export class RoomWorker {
 
     if (finalCollection && ctx.workersExec) {
       const meta = await this.getRoomMeta(roomId, request.url);
-      const parentRoomUrls = await this.getParentRoomUrls(roomId);
+      const parentRefs = await this.getParentRefs(roomId);
       const results = await Promise.all(
-        parentRoomUrls.map(async (parentWorkerUrl): Promise<boolean> => {
+        parentRefs.map(async (parentRef): Promise<boolean> => {
           try {
             const response = await ctx.workersExec!(
-              `${stripTrailingSlash(parentWorkerUrl)}/update-index`,
+              `${stripTrailingSlash(parentRef.workerUrl)}/update-index`,
               {
                 method: "POST",
                 headers: {
@@ -1084,19 +1114,16 @@ export class RoomWorker {
     await this.assertWriterOrAdmin(roomId, requester, ctx);
     const body = await parseJson<ParentLinkRequest>(request);
 
-    const parentWorkerUrl = stripTrailingSlash(body.parentWorkerUrl ?? "");
-    if (!parentWorkerUrl) {
-      error(400, "BAD_REQUEST", "parentWorkerUrl is required");
-    }
+    const parentRef = normalizeRowRef(body.parentRef, "parentRef");
 
-    const parentRooms = await this.getParentRoomUrls(roomId);
-    if (!parentRooms.includes(parentWorkerUrl)) {
-      parentRooms.push(parentWorkerUrl);
-      await this.kv.set(roomParentRoomsKey(roomId), parentRooms);
+    const parentRefs = await this.getParentRefs(roomId);
+    if (!parentRefs.some((existing) => sameRowRef(existing, parentRef))) {
+      parentRefs.push(parentRef);
+      await this.kv.set(roomParentRefsKey(roomId), parentRefs);
     }
 
     return jsonResponse(200, {
-      parentRooms,
+      parentRefs,
     });
   }
 
@@ -1109,17 +1136,14 @@ export class RoomWorker {
     await this.assertWriterOrAdmin(roomId, requester, ctx);
     const body = await parseJson<ParentLinkRequest>(request);
 
-    const parentWorkerUrl = stripTrailingSlash(body.parentWorkerUrl ?? "");
-    if (!parentWorkerUrl) {
-      error(400, "BAD_REQUEST", "parentWorkerUrl is required");
-    }
+    const parentRef = normalizeRowRef(body.parentRef, "parentRef");
 
-    const parentRooms = await this.getParentRoomUrls(roomId);
-    const next = parentRooms.filter((url) => stripTrailingSlash(url) !== parentWorkerUrl);
-    await this.kv.set(roomParentRoomsKey(roomId), next);
+    const parentRefs = await this.getParentRefs(roomId);
+    const next = parentRefs.filter((existing) => !sameRowRef(existing, parentRef));
+    await this.kv.set(roomParentRefsKey(roomId), next);
 
     return jsonResponse(200, {
-      parentRooms: next,
+      parentRefs: next,
     });
   }
 
@@ -1224,11 +1248,11 @@ export class RoomWorker {
     }
 
     if (ttl > 0 && ctx.workersExec) {
-      const parentRoomUrls = await this.getParentRoomUrls(roomId);
-      await Promise.all(parentRoomUrls.map(async (parentWorkerUrl) => {
+      const parentRefs = await this.getParentRefs(roomId);
+      await Promise.all(parentRefs.map(async (parentRef) => {
         try {
           const response = await ctx.workersExec!(
-            `${stripTrailingSlash(parentWorkerUrl)}/members-effective?ttl=${ttl - 1}`,
+            `${stripTrailingSlash(parentRef.workerUrl)}/members-effective?ttl=${ttl - 1}`,
             {
               method: "GET",
               headers: {
@@ -1241,32 +1265,13 @@ export class RoomWorker {
           }
 
           const payload = (await response.json()) as { members?: EffectiveMember[] };
-          const parentRoomResponse = await ctx.workersExec!(
-            `${stripTrailingSlash(parentWorkerUrl)}/room`,
-            {
-              method: "GET",
-              headers: {
-                "x-puter-username": requester,
-              },
-            },
-          );
-          if (!parentRoomResponse.ok) {
-            return;
-          }
-          const parentRoom = (await parentRoomResponse.json()) as RoomSnapshot;
-
           for (const member of payload.members ?? []) {
             const existing = members.get(member.username);
             if (!existing || roleRank(member.role) > roleRank(existing.role)) {
               members.set(member.username, {
                 username: member.username,
                 role: member.role,
-                via: {
-                  id: parentRoom.id,
-                  collection: "unknown",
-                  owner: parentRoom.owner,
-                  workerUrl: stripTrailingSlash(parentRoom.workerUrl),
-                },
+                via: parentRef,
               });
             }
           }
@@ -1458,8 +1463,8 @@ export class RoomWorker {
     return stored;
   }
 
-  private async getParentRoomUrls(roomId: string): Promise<string[]> {
-    return (await this.kv.get<string[]>(roomParentRoomsKey(roomId))) ?? [];
+  private async getParentRefs(roomId: string): Promise<DbRowRef[]> {
+    return (await this.kv.get<DbRowRef[]>(roomParentRefsKey(roomId))) ?? [];
   }
 
   private async assertMember(
@@ -1514,16 +1519,16 @@ export class RoomWorker {
       return bestRole;
     }
 
-    const parentRoomUrls = await this.getParentRoomUrls(roomId);
-    if (parentRoomUrls.length === 0) {
+    const parentRefs = await this.getParentRefs(roomId);
+    if (parentRefs.length === 0) {
       return bestRole;
     }
 
     const parentRoles = await Promise.all(
-      parentRoomUrls.map(async (parentUrl): Promise<MemberRole | null> => {
+      parentRefs.map(async (parentRef): Promise<MemberRole | null> => {
         try {
           const response = await ctx.workersExec!(
-            `${stripTrailingSlash(parentUrl)}/member-role?ttl=${ttl - 1}`,
+            `${stripTrailingSlash(parentRef.workerUrl)}/member-role?ttl=${ttl - 1}`,
             {
               method: "GET",
               headers: {
@@ -1670,8 +1675,9 @@ export class RoomWorker {
     const members = await this.getMembers(roomId);
     return {
       ...room,
+      collection: await this.getRowCollection(roomId),
       members,
-      parentRooms: await this.getParentRoomUrls(roomId),
+      parentRefs: await this.getParentRefs(roomId),
     };
   }
 }

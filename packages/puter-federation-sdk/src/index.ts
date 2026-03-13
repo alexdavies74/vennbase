@@ -1,5 +1,6 @@
 export { PutBase } from "./putbase";
 export { RowHandle } from "./row-handle";
+export type { AnyRowHandle } from "./row-handle";
 export { PuterFedError } from "./errors";
 export { RoomWorker } from "./worker/core";
 export { InMemoryKv } from "./worker/in-memory-kv";
@@ -31,6 +32,8 @@ export type {
 export type {
   AllowedParentCollections,
   AllowedParentRef,
+  AnyRow,
+  AnyRowRef,
   CollectionIndexes,
   CollectionName,
   DbCollectionDefinition,
@@ -43,6 +46,7 @@ export type {
   DbQueryWatchHandle,
   DbRowFields,
   DbRow,
+  DbRowLocator,
   DbRowRef,
   DbSchema,
   FieldType,

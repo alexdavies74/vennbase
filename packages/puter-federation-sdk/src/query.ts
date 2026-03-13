@@ -65,13 +65,13 @@ export class Query<Schema extends DbSchema> {
     private readonly transport: Transport,
     private readonly rows: Rows<Schema>,
     private readonly schema: Schema,
-    private readonly backend: RowHandleBackend,
+    private readonly backend: RowHandleBackend<Schema>,
   ) {}
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>> {
+  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>> {
     const parentRefs = normalizeParents(options.in);
     if (parentRefs.length === 0) {
       throw new Error("query requires at least one parent in scope");
@@ -130,7 +130,8 @@ export class Query<Schema extends DbSchema> {
           return new RowHandle<
             TCollection,
             RowFields<Schema, TCollection>,
-            AllowedParentCollections<Schema, TCollection>
+            AllowedParentCollections<Schema, TCollection>,
+            Schema
           >(
             this.backend,
             rowRef,
@@ -146,7 +147,7 @@ export class Query<Schema extends DbSchema> {
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;
 

@@ -1,12 +1,12 @@
 import { createAdaptivePoller } from "./polling";
 import type { Rooms } from "./rooms";
 import type { CrdtConnectCallbacks, CrdtConnection, Message } from "./types";
-import type { DbRowRef } from "./schema";
+import type { DbRowLocator } from "./schema";
 
 export class Sync {
   constructor(private readonly rooms: Rooms) {}
 
-  connectCrdt(row: DbRowRef, callbacks: CrdtConnectCallbacks): CrdtConnection {
+  connectCrdt(row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection {
     let lastSequence = 0;
 
     const poller = createAdaptivePoller({

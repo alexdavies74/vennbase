@@ -78,16 +78,31 @@ void db.put("tasks", { title: "Ship v2" }, { in: projectRef }).then((task) => {
   void status;
   void maybePoints;
   void task.in.add(projectRef);
+  void task.in.list().then((parents) => {
+    const firstParent = parents[0];
+    if (firstParent) {
+      const name: "projects" = firstParent.collection;
+      void name;
+    }
+  });
 
   // @ts-expect-error tasks can only link to projects
   void task.in.add(teamRef);
 });
 
 void db.getRowByUrl("https://workers.example/rooms/room_1").then((row) => {
-  const collection: string = row.collection;
-  const maybeName = row.fields.name;
+  const collection: "projects" | "teams" | "tasks" = row.collection;
   void collection;
-  void maybeName;
+
+  if (row.collection === "projects" || row.collection === "teams") {
+    const name: string = row.fields.name;
+    void name;
+  }
+
+  if (row.collection === "tasks") {
+    const title: string = row.fields.title;
+    void title;
+  }
 });
 
 export {};

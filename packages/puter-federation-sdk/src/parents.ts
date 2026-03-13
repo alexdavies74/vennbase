@@ -31,7 +31,7 @@ export class Parents {
     });
 
     await this.transport.request(roomEndpointUrl(child, "link-parent"), "POST", {
-      parentWorkerUrl: parent.workerUrl,
+      parentRef: parent,
     });
   }
 
@@ -43,22 +43,15 @@ export class Parents {
     });
 
     await this.transport.request(roomEndpointUrl(child, "unlink-parent"), "POST", {
-      parentWorkerUrl: parent.workerUrl,
+      parentRef: parent,
     });
   }
 
-  async list(child: DbRowRef): Promise<DbRowRef[]> {
+  async list<TParentCollection extends string>(child: DbRowRef): Promise<Array<DbRowRef<TParentCollection>>> {
     const room = await this.rooms.getRoom(child.workerUrl);
-
-    const parentSnapshots = await Promise.all(
-      room.parentRooms.map((workerUrl) => this.rooms.getRoom(workerUrl)),
-    );
-
-    return parentSnapshots.map((parentRoom) => ({
-      id: parentRoom.id,
-      owner: parentRoom.owner,
-      workerUrl: stripTrailingSlash(parentRoom.workerUrl),
-      collection: "unknown",
-    } satisfies DbRowRef));
+    return room.parentRefs.map((parentRef) => ({
+      ...parentRef,
+      workerUrl: stripTrailingSlash(parentRef.workerUrl),
+    })) as Array<DbRowRef<TParentCollection>>;
   }
 }

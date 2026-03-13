@@ -182,6 +182,105 @@ describe("RoomWorker", () => {
     expect((await jsonBody(spoofedJoin)).code).toBe("UNAUTHORIZED");
   });
 
+  it("stores canonical parent refs in room snapshots and unlinks by full ref", async () => {
+    const worker = new RoomWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    await createRoom(worker, "project_1", "Project");
+    await createRoom(worker, "task_1", "Task");
+
+    await worker.handle(
+      authedRequest({
+        url: roomEndpoint("project_1", "join"),
+        method: "POST",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+    await worker.handle(
+      authedRequest({
+        url: roomEndpoint("task_1", "join"),
+        method: "POST",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+
+    await worker.handle(
+      authedRequest({
+        url: roomEndpoint("project_1", "fields"),
+        method: "POST",
+        username: "owner",
+        body: {
+          fields: { name: "Project" },
+          collection: "projects",
+        },
+      }),
+    );
+    await worker.handle(
+      authedRequest({
+        url: roomEndpoint("task_1", "fields"),
+        method: "POST",
+        username: "owner",
+        body: {
+          fields: { title: "Task" },
+          collection: "tasks",
+        },
+      }),
+    );
+
+    const parentRef = {
+      id: "project_1",
+      collection: "projects",
+      owner: "owner",
+      workerUrl: "https://worker.example/rooms/project_1",
+    };
+
+    const link = await worker.handle(
+      authedRequest({
+        url: roomEndpoint("task_1", "link-parent"),
+        method: "POST",
+        username: "owner",
+        body: { parentRef },
+      }),
+    );
+
+    expect(link.status).toBe(200);
+    expect((await jsonBody(link)).parentRefs).toEqual([parentRef]);
+
+    const snapshot = await worker.handle(
+      authedRequest({
+        url: roomEndpoint("task_1", "room"),
+        method: "GET",
+        username: "owner",
+      }),
+    );
+
+    expect(snapshot.status).toBe(200);
+    expect((await jsonBody(snapshot))).toMatchObject({
+      id: "task_1",
+      collection: "tasks",
+      parentRefs: [parentRef],
+    });
+
+    const unlink = await worker.handle(
+      authedRequest({
+        url: roomEndpoint("task_1", "unlink-parent"),
+        method: "POST",
+        username: "owner",
+        body: { parentRef },
+      }),
+    );
+
+    expect(unlink.status).toBe(200);
+    expect((await jsonBody(unlink)).parentRefs).toEqual([]);
+  });
+
   it("stamps message sender from authenticated requester", async () => {
     const worker = new RoomWorker(
       {

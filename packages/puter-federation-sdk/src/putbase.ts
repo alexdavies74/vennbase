@@ -4,24 +4,25 @@ import { Members } from "./members";
 import { Parents } from "./parents";
 import { Provisioning } from "./provisioning";
 import { Query } from "./query";
-import { RowHandle, type RowHandleBackend } from "./row-handle";
+import { RowHandle, type AnyRowHandle, type RowHandleBackend } from "./row-handle";
 import { Rooms } from "./rooms";
 import { Rows } from "./rows";
 import type {
   AllowedParentCollections,
   CollectionName,
   DbMemberInfo,
+  DbRowLocator,
   DbPutOptions,
   DbQueryOptions,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
-  DbRowFields,
   DbRowRef,
   DbSchema,
   InsertFields,
   MemberRole,
   RowFields,
 } from "./schema";
+import { resolveCollectionName } from "./schema";
 import { stripTrailingSlash } from "./transport";
 import { Transport } from "./transport";
 import type {
@@ -40,14 +41,14 @@ export interface PutBaseOptions<Schema extends DbSchema = DbSchema>
   schema: Schema;
 }
 
-export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBackend {
+export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBackend<Schema> {
   private readonly transport: Transport;
   private readonly identity: Identity;
   private readonly provisioning: Provisioning;
   private readonly roomsModule: Rooms;
   private readonly invitesModule: Invites;
   private readonly syncModule: Sync;
-  private readonly membersModule: Members;
+  private readonly membersModule: Members<Schema>;
   private readonly parentsModule: Parents;
   private readonly rowsModule: Rows<Schema>;
   private readonly queryModule: Query<Schema>;
@@ -59,7 +60,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.roomsModule = new Rooms(this.transport, this.identity, this.provisioning);
     this.invitesModule = new Invites(options, this.transport, this.identity);
     this.syncModule = new Sync(this.roomsModule);
-    this.membersModule = new Members(this.transport);
+    this.membersModule = new Members<Schema>(this.transport);
     this.rowsModule = new Rows(
       this.transport,
       this.roomsModule,
@@ -94,7 +95,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     collection: TCollection,
     fields: InsertFields<Schema, TCollection>,
     options?: DbPutOptions<Schema, TCollection>,
-  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>> {
     return this.rowsModule.put(collection, fields, options);
   }
 
@@ -102,43 +103,40 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     collection: TCollection,
     row: DbRowRef<TCollection>,
     fields: Partial<RowFields<Schema, TCollection>>,
-  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>> {
     return this.rowsModule.update(collection, row, fields);
   }
 
   async getRow<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     row: DbRowRef<TCollection>,
-  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>> {
     return this.rowsModule.getRow(collection, row);
   }
 
-  async getRowByUrl(workerUrl: string): Promise<RowHandle<string, DbRowFields>> {
+  async getRowByUrl(workerUrl: string): Promise<AnyRowHandle<Schema>> {
     const snapshot = await this.roomsModule.getRoom(workerUrl);
-    const bareRef = {
+    const locator: DbRowLocator = {
       id: snapshot.id,
       owner: snapshot.owner,
       workerUrl: stripTrailingSlash(workerUrl),
     };
-    const { fields, collection } = await this.rowsModule.fetchWithCollection(bareRef);
-    const rowRef: DbRowRef = {
-      ...bareRef,
-      collection: collection ?? "unknown",
-    };
-    return new RowHandle(this, rowRef, fields);
+    const { fields, collection: discoveredCollection } = await this.rowsModule.fetchWithCollection(locator);
+    const collection = resolveCollectionName(this.options.schema, discoveredCollection ?? snapshot.collection);
+    return this.createRuntimeRowHandle(collection, locator, fields);
   }
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>> {
+  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>> {
     return this.queryModule.query(collection, options);
   }
 
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);
   }
@@ -151,7 +149,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.invitesModule.createInviteToken(row);
   }
 
-  createInviteLink(row: Pick<DbRowRef, "workerUrl">, inviteToken: string): string {
+  createInviteLink(row: Pick<DbRowLocator, "workerUrl">, inviteToken: string): string {
     return this.invitesModule.createInviteLink(row, inviteToken);
   }
 
@@ -162,12 +160,12 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async joinRow(
     workerUrl: string,
     options: { inviteToken?: string } = {},
-  ): Promise<RowHandle<string, DbRowFields>> {
+  ): Promise<AnyRowHandle<Schema>> {
     await this.roomsModule.joinRoom(workerUrl, options);
     return this.getRowByUrl(workerUrl);
   }
 
-  async listMembers(row: DbRowRef): Promise<string[]> {
+  async listMembers(row: DbRowLocator): Promise<string[]> {
     return this.roomsModule.listMembers(row.workerUrl);
   }
 
@@ -179,31 +177,53 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.parentsModule.remove(child, parent);
   }
 
-  async listParents(child: DbRowRef): Promise<DbRowRef[]> {
-    return this.parentsModule.list(child);
+  async listParents<TParentCollection extends string>(child: DbRowRef): Promise<Array<DbRowRef<TParentCollection>>> {
+    return this.parentsModule.list<TParentCollection>(child);
   }
 
-  async addMember(row: DbRowRef, username: string, role: MemberRole): Promise<void> {
+  async addMember(row: DbRowLocator, username: string, role: MemberRole): Promise<void> {
     return this.membersModule.add(row, username, role);
   }
 
-  async removeMember(row: DbRowRef, username: string): Promise<void> {
+  async removeMember(row: DbRowLocator, username: string): Promise<void> {
     return this.membersModule.remove(row, username);
   }
 
-  async listDirectMembers(row: DbRowRef): Promise<Array<{ username: string; role: MemberRole }>> {
+  async listDirectMembers(row: DbRowLocator): Promise<Array<{ username: string; role: MemberRole }>> {
     return this.membersModule.listDirect(row);
   }
 
-  async listEffectiveMembers(row: DbRowRef): Promise<DbMemberInfo[]> {
+  async listEffectiveMembers(row: DbRowLocator): Promise<Array<DbMemberInfo<Schema>>> {
     return this.membersModule.listEffective(row);
   }
 
-  async refreshFields(row: DbRowRef): Promise<Record<string, JsonValue>> {
+  async refreshFields(row: DbRowLocator): Promise<Record<string, JsonValue>> {
     return this.rowsModule.refreshFields(row);
   }
 
-  connectCrdt(row: DbRowRef, callbacks: CrdtConnectCallbacks): CrdtConnection {
+  connectCrdt(row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection {
     return this.syncModule.connectCrdt(row, callbacks);
+  }
+
+  private createRuntimeRowHandle<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    locator: DbRowLocator,
+    fields: Record<string, JsonValue>,
+  ): AnyRowHandle<Schema> {
+    const rowRef: DbRowRef<TCollection> = {
+      ...locator,
+      collection,
+    };
+
+    return new RowHandle<
+      TCollection,
+      RowFields<Schema, TCollection>,
+      AllowedParentCollections<Schema, TCollection>,
+      Schema
+    >(
+      this,
+      rowRef,
+      fields as RowFields<Schema, TCollection>,
+    ) as unknown as AnyRowHandle<Schema>;
   }
 }
