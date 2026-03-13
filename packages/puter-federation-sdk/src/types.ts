@@ -63,28 +63,6 @@ export interface CrdtConnection {
   flush(): Promise<void>;
 }
 
-export interface SignerIdentity {
-  username: string;
-  publicKeyUrl: string;
-}
-
-export type SignedAction = "message" | "invite-token";
-
-export interface SignedWriteEnvelope<TPayload extends object> {
-  action: SignedAction;
-  payload: TPayload;
-  signer: SignerIdentity;
-  signedAt: number;
-  algorithm: "ECDSA_P256_SHA256";
-  signature: string;
-}
-
-export interface PublicKeyProofDocument {
-  username: string;
-  createdAt: number;
-  publicKeyJwk: JsonWebKey;
-}
-
 export interface ParsedInviteInput {
   workerUrl: string;
   inviteToken?: string;
