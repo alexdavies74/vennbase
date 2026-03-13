@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import type {
+  DbQueryWatchHandle,
   DbRowRef,
   PuterFedRooms,
   CrdtConnection,
@@ -55,6 +56,20 @@ interface TagDbLike {
       where?: Record<string, JsonValue>;
     },
   ): Promise<TagRowLike[]>;
+  watchQuery(
+    collection: "tags",
+    options: {
+      in: DbRowRef;
+      index?: string;
+      order?: "asc" | "desc";
+      limit?: number;
+      where?: Record<string, JsonValue>;
+    },
+    callbacks: {
+      onChange(rows: TagRowLike[]): void;
+      onError?(error: unknown): void;
+    },
+  ): DbQueryWatchHandle;
 }
 
 export interface ChatEntry {
@@ -71,6 +86,11 @@ export interface DogTag {
   label: string;
   createdBy: string | null;
   createdAt: number | null;
+}
+
+export interface WatchTagsCallbacks {
+  onChange(tags: DogTag[]): void;
+  onError?(error: unknown): void;
 }
 
 function encodeUpdate(update: Uint8Array): { type: string; data: string } {
@@ -238,7 +258,33 @@ export class WoofService {
       limit: 100,
     });
 
-    const tags: DogTag[] = rows
+    return this.mapTags(rows);
+  }
+
+  watchTags(profile: DogProfile, callbacks: WatchTagsCallbacks): DbQueryWatchHandle {
+    if (!this.db) {
+      callbacks.onChange([]);
+      return {
+        disconnect() {},
+        refresh: async () => undefined,
+      };
+    }
+
+    return this.db.watchQuery("tags", {
+      in: this.dogRowRef(profile),
+      index: "byCreatedAt",
+      order: "asc",
+      limit: 100,
+    }, {
+      onChange: (rows) => {
+        callbacks.onChange(this.mapTags(rows));
+      },
+      onError: callbacks.onError,
+    });
+  }
+
+  private mapTags(rows: TagRowLike[]): DogTag[] {
+    return rows
       .map((row) => {
         const label = typeof row.fields.label === "string"
           ? row.fields.label.trim()
@@ -259,8 +305,6 @@ export class WoofService {
         } satisfies DogTag;
       })
       .filter((row): row is DogTag => row !== null);
-
-    return tags;
   }
 
   async createTag(profile: DogProfile, label: string): Promise<void> {

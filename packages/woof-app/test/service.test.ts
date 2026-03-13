@@ -118,6 +118,12 @@ class MockTagDb {
   }> = [];
 
   public queryRows: Array<{ id: string; fields: Record<string, unknown> }> = [];
+  public refreshCalls = 0;
+  public disconnectCalls = 0;
+  public watchCallbacks: {
+    onChange(rows: Array<{ id: string; fields: Record<string, unknown> }>): void;
+    onError?(error: unknown): void;
+  } | null = null;
 
   async put(
     collection: "tags",
@@ -129,6 +135,28 @@ class MockTagDb {
 
   async query(): Promise<Array<{ id: string; fields: Record<string, unknown> }>> {
     return this.queryRows;
+  }
+
+  watchQuery(
+    _collection: "tags",
+    _options: Record<string, unknown>,
+    callbacks: {
+      onChange(rows: Array<{ id: string; fields: Record<string, unknown> }>): void;
+      onError?(error: unknown): void;
+    },
+  ) {
+    this.watchCallbacks = callbacks;
+    callbacks.onChange(this.queryRows);
+
+    return {
+      disconnect: () => {
+        this.disconnectCalls += 1;
+      },
+      refresh: async () => {
+        this.refreshCalls += 1;
+        callbacks.onChange(this.queryRows);
+      },
+    };
   }
 }
 
@@ -218,6 +246,68 @@ describe("WoofService", () => {
       createdBy: "alex",
       createdAt: 100,
     });
+  });
+
+  it("watches tags and maps DB rows", async () => {
+    const rooms = new MockRooms();
+    const tagDb = new MockTagDb();
+    tagDb.queryRows = [
+      {
+        id: "tag_1",
+        fields: {
+          label: "playful",
+          createdBy: "alex",
+          createdAt: 100,
+        },
+      },
+      {
+        id: "tag_2",
+        fields: {
+          label: " ",
+        },
+      },
+    ];
+
+    const service = new WoofService(rooms, new MockKv(), new Y.Doc(), tagDb);
+    const profile = await service.enterChat({ dogName: "Rex" });
+    const updates: Array<Array<{ id: string; label: string }>> = [];
+
+    service.watchTags(profile, {
+      onChange: (tags) => {
+        updates.push(tags.map((tag) => ({ id: tag.id, label: tag.label })));
+      },
+    });
+
+    expect(updates).toEqual([[{ id: "tag_1", label: "playful" }]]);
+  });
+
+  it("supports refreshing and disconnecting tag watches after tag creation", async () => {
+    const rooms = new MockRooms();
+    const tagDb = new MockTagDb();
+    tagDb.queryRows = [
+      {
+        id: "tag_1",
+        fields: {
+          label: "friendly",
+          createdBy: "alex",
+          createdAt: 100,
+        },
+      },
+    ];
+
+    const service = new WoofService(rooms, new MockKv(), new Y.Doc(), tagDb);
+    const profile = await service.enterChat({ dogName: "Rex" });
+    const watcher = service.watchTags(profile, {
+      onChange() {},
+    });
+
+    await service.createTag(profile, "friendly");
+    await watcher.refresh();
+    watcher.disconnect();
+
+    expect(tagDb.putCalls).toHaveLength(1);
+    expect(tagDb.refreshCalls).toBe(1);
+    expect(tagDb.disconnectCalls).toBe(1);
   });
 
   it("refreshes saved profile with canonical room metadata", async () => {

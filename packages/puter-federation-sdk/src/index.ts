@@ -24,7 +24,6 @@ export { InMemoryKv } from "./worker/in-memory-kv";
 export type {
   ApiError,
   CrdtConnectCallbacks,
-  CrdtConnectOptions,
   CrdtConnection,
   DeployWorkerArgs,
   InviteToken,
@@ -48,6 +47,8 @@ export type {
   DbPutOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryWatchCallbacks,
+  DbQueryWatchHandle,
   DbRow,
   DbRowRef,
   DbSchema,

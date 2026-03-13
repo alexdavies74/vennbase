@@ -3,11 +3,11 @@ import {
   createInviteLink,
   parseInviteInput,
 } from "./invite";
+import { createAdaptivePoller } from "./polling";
 import { buildClassicWorkerScript } from "./worker/template";
 import type {
   ApiError,
   CrdtConnectCallbacks,
-  CrdtConnectOptions,
   CrdtConnection,
   DeployWorkerArgs,
   InviteToken,
@@ -248,19 +248,19 @@ export class PuterFedRooms {
   connectCrdt(
     room: Room,
     callbacks: CrdtConnectCallbacks,
-    options: CrdtConnectOptions = {},
   ): CrdtConnection {
     let lastSequence = 0;
-    let running = true;
-    let inFlight: Promise<void> | null = null;
-
-    const runTick = async (): Promise<void> => {
-      try {
+    const poller = createAdaptivePoller({
+      run: async ({ markActivity }) => {
         const poll = await this.pollMessages(room, lastSequence);
         const messages = poll.messages;
 
         for (const message of messages) {
           callbacks.applyRemoteUpdate(message.body, message);
+        }
+
+        if (messages.length > 0) {
+          markActivity();
         }
 
         lastSequence = poll.latestSequence;
@@ -269,38 +269,16 @@ export class PuterFedRooms {
         if (update !== null) {
           const sent = await this.sendMessage(room, update);
           lastSequence = Math.max(lastSequence, sent.sequence);
+          markActivity();
         }
-      } catch {
-        // keep loop alive through transient failures
-      }
-    };
-
-    // Coalesces concurrent calls: if a tick is already in-flight, returns that same promise
-    const tick = (): Promise<void> => {
-      if (!running) return Promise.resolve();
-      if (inFlight) return inFlight;
-      inFlight = runTick().finally(() => {
-        inFlight = null;
-      });
-      return inFlight;
-    };
-
-    const scheduleNext = (): void => {
-      if (running) {
-        setTimeout(() => {
-          tick().finally(scheduleNext);
-        }, options.intervalMs ?? 5000);
-      }
-    };
-
-    // Run first tick immediately, then schedule recurring ticks
-    tick().finally(scheduleNext);
+      },
+    });
 
     return {
       disconnect() {
-        running = false;
+        poller.disconnect();
       },
-      flush: tick,
+      flush: () => poller.refresh(),
     };
   }
 

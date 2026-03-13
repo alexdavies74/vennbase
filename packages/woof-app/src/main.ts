@@ -1,6 +1,6 @@
 import { puter } from "@heyputer/puter.js";
 import * as Y from "yjs";
-import { PuterDb, PuterFedError, PuterFedRooms } from "puter-federation-sdk";
+import { PuterDb, PuterFedError, PuterFedRooms, type DbQueryWatchHandle } from "puter-federation-sdk";
 
 import type { DogProfile } from "./profile";
 import { WoofService, type ChatEntry } from "./service";
@@ -39,7 +39,7 @@ const service = new WoofService(rooms, puter.kv, doc, db);
 
 let currentProfile: DogProfile | null = null;
 let currentUsername: string | null = null;
-let tagsRefreshInterval: number | null = null;
+let tagsWatcher: DbQueryWatchHandle | null = null;
 
 async function boot() {
   try {
@@ -97,7 +97,7 @@ async function boot() {
 }
 
 function renderSetup(initialError = "") {
-  clearTagsRefreshInterval();
+  clearTagsWatcher();
   service.relinquish().catch(() => {});
 
   app.innerHTML = `
@@ -151,7 +151,7 @@ function renderSetup(initialError = "") {
 }
 
 async function renderChat(profile: DogProfile) {
-  clearTagsRefreshInterval();
+  clearTagsWatcher();
 
   app.innerHTML = `
     <section class="panel">
@@ -214,7 +214,7 @@ async function renderChat(profile: DogProfile) {
   relinquishButton.addEventListener("click", () => {
     void service.relinquish();
     currentProfile = null;
-    clearTagsRefreshInterval();
+    clearTagsWatcher();
     renderSetup();
   });
 
@@ -222,52 +222,54 @@ async function renderChat(profile: DogProfile) {
   const tagForm = document.getElementById("tag-form") as HTMLFormElement;
   const tagInput = document.getElementById("tag-input") as HTMLInputElement;
   const tagError = document.getElementById("tag-error") as HTMLParagraphElement;
-  let loadingTags = false;
 
-  const refreshTags = async () => {
-    if (loadingTags) {
+  const renderTags = (tags: Awaited<ReturnType<typeof service.listTags>>) => {
+    if (currentProfile?.room.id !== profile.room.id) {
       return;
     }
 
-    loadingTags = true;
-    try {
-      const tags = await service.listTags(profile);
-      tagList.innerHTML = "";
+    tagList.innerHTML = "";
 
-      if (tags.length === 0) {
-        const empty = document.createElement("li");
-        empty.className = "tag-empty";
-        empty.textContent = "No tags yet.";
-        tagList.appendChild(empty);
+    if (tags.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "tag-empty";
+      empty.textContent = "No tags yet.";
+      tagList.appendChild(empty);
+      tagError.textContent = "";
+      return;
+    }
+
+    for (const tag of tags) {
+      const item = document.createElement("li");
+      item.className = "tag-item";
+
+      const label = document.createElement("span");
+      label.className = "tag-label";
+      label.textContent = tag.label;
+      item.appendChild(label);
+
+      if (tag.createdBy) {
+        const meta = document.createElement("span");
+        meta.className = "tag-meta";
+        meta.textContent = `by ${tag.createdBy}`;
+        item.appendChild(meta);
+      }
+
+      tagList.appendChild(item);
+    }
+
+    tagError.textContent = "";
+  };
+
+  tagsWatcher = service.watchTags(profile, {
+    onChange: renderTags,
+    onError: (error) => {
+      if (currentProfile?.room.id !== profile.room.id) {
         return;
       }
-
-      for (const tag of tags) {
-        const item = document.createElement("li");
-        item.className = "tag-item";
-
-        const label = document.createElement("span");
-        label.className = "tag-label";
-        label.textContent = tag.label;
-        item.appendChild(label);
-
-        if (tag.createdBy) {
-          const meta = document.createElement("span");
-          meta.className = "tag-meta";
-          meta.textContent = `by ${tag.createdBy}`;
-          item.appendChild(meta);
-        }
-
-        tagList.appendChild(item);
-      }
-
-      tagError.textContent = "";
-    } catch (error) {
       tagError.textContent = getErrorMessage(error, "Failed to load tags.");
-    } finally {
-      loadingTags = false;
-    }
-  };
+    },
+  });
 
   tagForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -285,16 +287,11 @@ async function renderChat(profile: DogProfile) {
     try {
       await service.createTag(currentProfile, value);
       tagInput.value = "";
-      await refreshTags();
+      await tagsWatcher?.refresh();
     } catch (error) {
       tagError.textContent = getErrorMessage(error, "Failed to add tag.");
     }
   });
-
-  await refreshTags();
-  tagsRefreshInterval = window.setInterval(() => {
-    void refreshTags();
-  }, 5000);
 
   const form = document.getElementById("message-form") as HTMLFormElement;
   const chatError = document.getElementById("chat-error") as HTMLParagraphElement;
@@ -327,13 +324,13 @@ async function renderChat(profile: DogProfile) {
   });
 }
 
-function clearTagsRefreshInterval() {
-  if (tagsRefreshInterval === null) {
+function clearTagsWatcher() {
+  if (tagsWatcher === null) {
     return;
   }
 
-  window.clearInterval(tagsRefreshInterval);
-  tagsRefreshInterval = null;
+  tagsWatcher.disconnect();
+  tagsWatcher = null;
 }
 
 function renderFromDoc(profile: DogProfile) {

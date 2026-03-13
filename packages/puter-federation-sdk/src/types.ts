@@ -57,10 +57,6 @@ export interface CrdtConnectCallbacks {
   produceLocalUpdate: () => JsonValue | null;
 }
 
-export interface CrdtConnectOptions {
-  intervalMs?: number;
-}
-
 export interface CrdtConnection {
   disconnect(): void;
   flush(): Promise<void>;

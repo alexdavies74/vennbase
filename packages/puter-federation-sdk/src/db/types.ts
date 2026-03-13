@@ -48,6 +48,16 @@ export interface DbQueryOptions {
   limit?: number;
 }
 
+export interface DbQueryWatchCallbacks<TRow> {
+  onChange(rows: TRow[]): void;
+  onError?(error: unknown): void;
+}
+
+export interface DbQueryWatchHandle {
+  disconnect(): void;
+  refresh(): Promise<void>;
+}
+
 export interface DbMemberInfo {
   username: string;
   role: MemberRole;

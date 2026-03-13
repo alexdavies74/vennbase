@@ -1,10 +1,13 @@
 import { PuterFedRooms } from "../client";
 import { PuterFedError, toApiError } from "../errors";
+import { createAdaptivePoller } from "../polling";
 import type { JsonValue, PuterFedRoomsOptions } from "../types";
 import { encodeFieldValue } from "./key-encoding";
 import { RowHandle, type RowHandleBackend } from "./row-handle";
 import type {
   DbCollectionSpec,
+  DbQueryWatchCallbacks,
+  DbQueryWatchHandle,
   DbPutOptions,
   DbMemberInfo,
   DbQueryOptions,
@@ -43,6 +46,42 @@ interface ListMembersResponse {
 
 interface EffectiveMembersResponse {
   members: DbMemberInfo[];
+}
+
+interface RowSnapshot {
+  id: string;
+  collection: string;
+  owner: string;
+  workerUrl: string;
+  fields: JsonValue;
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonStringify).join(",")}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  const entries = Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
+function snapshotRows(rows: RowHandle[]): string {
+  const snapshot: RowSnapshot[] = rows.map((row) => ({
+    id: row.id,
+    collection: row.collection,
+    owner: row.owner,
+    workerUrl: row.workerUrl,
+    fields: row.fields,
+  }));
+
+  return stableJsonStringify(snapshot);
 }
 
 function stripTrailingSlash(input: string): string {
@@ -224,6 +263,41 @@ export class PuterDb<Schema extends DbSchema = DbSchema> implements RowHandleBac
     }));
 
     return hydrated;
+  }
+
+  watchQuery(
+    collection: keyof Schema & string,
+    options: DbQueryOptions,
+    callbacks: DbQueryWatchCallbacks<RowHandle>,
+  ): DbQueryWatchHandle {
+    let lastSnapshot: string | null = null;
+
+    const poller = createAdaptivePoller({
+      run: async ({ markActivity }) => {
+        const rows = await this.query(collection, options);
+        const nextSnapshot = snapshotRows(rows);
+
+        if (lastSnapshot === nextSnapshot) {
+          return;
+        }
+
+        lastSnapshot = nextSnapshot;
+        callbacks.onChange(rows);
+        markActivity();
+      },
+      onError: (error) => {
+        callbacks.onError?.(error);
+      },
+    });
+
+    return {
+      disconnect() {
+        poller.disconnect();
+      },
+      refresh() {
+        return poller.refresh();
+      },
+    };
   }
 
   async addParent(child: DbRowRef, parent: DbRowRef): Promise<void> {

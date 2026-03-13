@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PuterFedRooms } from "../src/client";
 import type { PuterFedRoomsOptions } from "../src/types";
@@ -22,6 +22,11 @@ function hashHostname(hostname: string): string {
   return hash.toString(16).padStart(8, "0");
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 class MapKv {
   private readonly store = new Map<string, unknown>();
 
@@ -35,6 +40,10 @@ class MapKv {
 }
 
 describe("PuterFedRooms", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("gets room snapshot via public getRoom API", async () => {
     const rooms = new PuterFedRooms({
       identityProvider: async () => ({ username: "owner" }),
@@ -569,5 +578,221 @@ describe("PuterFedRooms", () => {
 
     expect(requestedUrls.some((u) => u.includes("/messages?sinceSequence=0"))).toBe(true);
     expect(requestedUrls.some((u) => u.includes("sinceSequence=2"))).toBe(true);
+  });
+
+  it("connectCrdt polls immediately and stops after disconnect", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T00:00:00.000Z"));
+
+    const requestedAt: number[] = [];
+    const room = {
+      id: "room_1",
+      name: "Rex",
+      owner: "owner",
+      workerUrl: "https://worker.example/rooms/room_1",
+      createdAt: 1,
+    };
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+        if (url.includes("/messages")) {
+          requestedAt.push(Date.now());
+          return new Response(JSON.stringify({ messages: [], latestSequence: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const connection = rooms.connectCrdt(room, {
+      applyRemoteUpdate() {},
+      produceLocalUpdate: () => null,
+    });
+
+    await flushMicrotasks();
+    expect(requestedAt).toEqual([Date.parse("2026-03-13T00:00:00.000Z")]);
+
+    connection.disconnect();
+    await vi.advanceTimersByTimeAsync(300_000);
+
+    expect(requestedAt).toHaveLength(1);
+  });
+
+  it("connectCrdt backs off to five minute polling after prolonged idleness", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T00:00:00.000Z"));
+
+    const requestedAt: number[] = [];
+    const room = {
+      id: "room_1",
+      name: "Rex",
+      owner: "owner",
+      workerUrl: "https://worker.example/rooms/room_1",
+      createdAt: 1,
+    };
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+        if (url.includes("/messages")) {
+          requestedAt.push(Date.now());
+          return new Response(JSON.stringify({ messages: [], latestSequence: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const connection = rooms.connectCrdt(room, {
+      applyRemoteUpdate() {},
+      produceLocalUpdate: () => null,
+    });
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1_800_000);
+
+    const pollsBeforeNextWindow = requestedAt.length;
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(requestedAt).toHaveLength(pollsBeforeNextWindow);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:35:00.000Z"));
+
+    connection.disconnect();
+  });
+
+  it("connectCrdt resets back to five second polling after remote activity", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T00:00:00.000Z"));
+
+    const requestedAt: number[] = [];
+    const room = {
+      id: "room_1",
+      name: "Rex",
+      owner: "owner",
+      workerUrl: "https://worker.example/rooms/room_1",
+      createdAt: 1,
+    };
+
+    const remoteMessage = {
+      id: "msg_remote",
+      roomId: "room_1",
+      body: { type: "crdt-update", data: "AAAA" },
+      createdAt: 75_000,
+      signedBy: "friend",
+      sequence: 1,
+    };
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+        if (url.includes("/messages")) {
+          requestedAt.push(Date.now());
+          const messages = Date.now() === Date.parse("2026-03-13T00:01:15.000Z")
+            ? [remoteMessage]
+            : [];
+          return new Response(JSON.stringify({
+            messages,
+            latestSequence: messages.length > 0 ? 1 : remoteMessage.sequence,
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const connection = rooms.connectCrdt(room, {
+      applyRemoteUpdate() {},
+      produceLocalUpdate: () => null,
+    });
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(75_000);
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:01:15.000Z"));
+
+    const pollCountAfterRemote = requestedAt.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(requestedAt).toHaveLength(pollCountAfterRemote);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:01:20.000Z"));
+
+    connection.disconnect();
+  });
+
+  it("connectCrdt flush resets polling back to five seconds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T00:00:00.000Z"));
+
+    const requestedAt: number[] = [];
+    const room = {
+      id: "room_1",
+      name: "Rex",
+      owner: "owner",
+      workerUrl: "https://worker.example/rooms/room_1",
+      createdAt: 1,
+    };
+
+    const rooms = new PuterFedRooms({
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+        if (url.includes("/messages")) {
+          requestedAt.push(Date.now());
+          return new Response(JSON.stringify({ messages: [], latestSequence: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const connection = rooms.connectCrdt(room, {
+      applyRemoteUpdate() {},
+      produceLocalUpdate: () => null,
+    });
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(74_000);
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:01:00.000Z"));
+
+    await connection.flush();
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:01:14.000Z"));
+
+    const pollCountAfterFlush = requestedAt.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(requestedAt).toHaveLength(pollCountAfterFlush);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(requestedAt.at(-1)).toBe(Date.parse("2026-03-13T00:01:19.000Z"));
+
+    connection.disconnect();
   });
 });
