@@ -1,6 +1,8 @@
 import type { Puter } from "@heyputer/puter.js";
 import type { DbRowRef } from "./schema";
 
+export type BackendClient = Pick<Puter, "auth" | "getUser" | "fs" | "workers" | "kv">;
+
 export type JsonValue =
   | string
   | number
@@ -80,7 +82,7 @@ export interface DeployWorkerArgs {
 }
 
 export interface PuterFedRoomsOptions {
-  puter?: Pick<Puter, "auth" | "getUser" | "fs" | "workers" | "kv">;
+  puter?: BackendClient;
   fetchFn?: typeof fetch;
   appBaseUrl?: string;
   identityProvider?: () => Promise<RoomUser>;

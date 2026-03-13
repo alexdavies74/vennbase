@@ -1,5 +1,5 @@
 import { PuterFedError, toApiError } from "./errors";
-import type { PuterFedRoomsOptions } from "./types";
+import type { BackendClient, PuterFedRoomsOptions } from "./types";
 import type { DbRowLocator } from "./schema";
 
 export type PuterWorkersExec = (
@@ -42,7 +42,7 @@ export function roomEndpointUrl(
 }
 
 export class Transport {
-  private puter: PuterFedRoomsOptions["puter"];
+  private backend: BackendClient | undefined;
   private readonly fetchFn: typeof fetch;
   private readonly getUsername: () => Promise<string>;
 
@@ -50,13 +50,13 @@ export class Transport {
     options: PuterFedRoomsOptions,
     getUsername: () => Promise<string>,
   ) {
-    this.puter = options.puter;
+    this.backend = options.puter;
     this.fetchFn = options.fetchFn ?? fetch;
     this.getUsername = getUsername;
   }
 
-  setPuter(puter: PuterFedRoomsOptions["puter"]): void {
-    this.puter = puter;
+  setPuter(backend: BackendClient | undefined): void {
+    this.backend = backend;
   }
 
   async request<T>(
@@ -102,17 +102,17 @@ export class Transport {
   }
 
   resolveWorkersExec(): PuterWorkersExec | null {
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const exec = (this.puter?.workers as { exec?: unknown } | undefined)?.exec;
+    const exec = (this.backend?.workers as { exec?: unknown } | undefined)?.exec;
     if (typeof exec === "function") {
       return exec as PuterWorkersExec;
     }
 
-    const globalPuter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
-    const globalExec = (globalPuter?.workers as { exec?: unknown } | undefined)?.exec;
+    const globalBackend = (globalThis as { puter?: BackendClient }).puter;
+    const globalExec = (globalBackend?.workers as { exec?: unknown } | undefined)?.exec;
     return typeof globalExec === "function" ? (globalExec as PuterWorkersExec) : null;
   }
 

@@ -99,5 +99,5 @@ The supported root exports are:
 - `PuterFedError`
 - `collection`, `defineSchema`, `field`, `index`
 - `PutBaseOptions`
-- `CrdtConnectCallbacks`, `CrdtConnection`, `DeployWorkerArgs`, `InviteToken`, `JsonValue`, `ParsedInviteInput`, `RoomUser`
+- `CrdtConnectCallbacks`, `CrdtConnection`, `DeployWorkerArgs`, `InviteToken`, `JsonValue`, `ParsedInviteInput`, `BackendClient`, `RoomUser`
 - Schema and query helper types such as `DbRowRef`, `DbQueryOptions`, `DbQueryWatchHandle`, `MemberRole`, and `RowFields`

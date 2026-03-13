@@ -1,15 +1,15 @@
-import type { PuterFedRoomsOptions, RoomUser } from "./types";
+import type { BackendClient, PuterFedRoomsOptions, RoomUser } from "./types";
 
 export class Identity {
   private cached: RoomUser | null = null;
-  private puter: PuterFedRoomsOptions["puter"];
+  private backend: BackendClient | undefined;
 
   constructor(private readonly options: PuterFedRoomsOptions) {
-    this.puter = options.puter;
+    this.backend = options.puter;
   }
 
-  setPuter(puter: PuterFedRoomsOptions["puter"]): void {
-    this.puter = puter;
+  setPuter(backend: BackendClient | undefined): void {
+    this.backend = backend;
   }
 
   async whoAmI(): Promise<RoomUser> {
@@ -22,11 +22,11 @@ export class Identity {
       return this.cached;
     }
 
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const auth = this.puter?.auth;
+    const auth = this.backend?.auth;
     let candidate: { username?: string } | null = null;
 
     if (auth?.getUser) {
@@ -44,8 +44,8 @@ export class Identity {
       );
     }
 
-    if (!candidate && this.puter?.getUser) {
-      candidate = await this.puter.getUser().catch(() => null);
+    if (!candidate && this.backend?.getUser) {
+      candidate = await this.backend.getUser().catch(() => null);
     }
 
     const username = candidate?.username;

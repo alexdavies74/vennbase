@@ -26,6 +26,7 @@ import { resolveCollectionName } from "./schema";
 import { stripTrailingSlash } from "./transport";
 import { Transport } from "./transport";
 import type {
+  BackendClient,
   CrdtConnectCallbacks,
   CrdtConnection,
   InviteToken,
@@ -210,10 +211,10 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   }
 
   private syncRuntime(): void {
-    const puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
-    this.identity.setPuter(puter);
-    this.transport.setPuter(puter);
-    this.provisioning.setPuter(puter);
+    const backend = this.options.puter ?? (globalThis as { puter?: BackendClient }).puter;
+    this.identity.setPuter(backend);
+    this.transport.setPuter(backend);
+    this.provisioning.setPuter(backend);
   }
 
   private startPrewarm(): void {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PutBase } from "../src/putbase";
 import { RowHandle } from "../src/row-handle";
 import { collection, defineSchema } from "../src/schema";
-import type { PuterFedRoomsOptions } from "../src/types";
+import type { BackendClient } from "../src/types";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 import { RoomWorker } from "../src/worker/core";
 
@@ -261,7 +261,7 @@ describe("PutBase", () => {
     let createdName: string | null = null;
     const createStarted = deferred<void>();
 
-    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+    const backend: BackendClient = {
       fs: {
         mkdir: async () => undefined,
         write: async () => undefined,
@@ -280,7 +280,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: `https://${appHost}`,
-      puter,
+      puter: backend,
       fetchFn: (() => Promise.reject(new Error("fetch should not be used in ensureReady"))) as typeof fetch,
     });
 
@@ -385,7 +385,7 @@ describe("PutBase", () => {
       });
     };
 
-    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+    const backend: BackendClient = {
       fs: { mkdir: async () => undefined, write: async () => undefined },
       workers: { create: async () => ({ success: true, url: deployedWorkerBase }) },
       kv: new MapKv(),
@@ -395,7 +395,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: "https://deployed-worker.example",
-      puter,
+      puter: backend,
       fetchFn: fetchFn as typeof fetch,
     });
 
@@ -518,7 +518,7 @@ describe("PutBase", () => {
       return worker.handle(request);
     };
 
-    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+    const backend: BackendClient = {
       fs: { mkdir: async () => undefined, write: async () => undefined },
       workers: {
         create: async () => {
@@ -533,7 +533,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: "https://reuse-kv.example",
-      puter,
+      puter: backend,
       fetchFn: fetchFn as typeof fetch,
     });
 
@@ -541,7 +541,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: "https://reuse-kv.example",
-      puter,
+      puter: backend,
       fetchFn: fetchFn as typeof fetch,
     });
 
@@ -571,7 +571,7 @@ describe("PutBase", () => {
       return worker.handle(request);
     };
 
-    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+    const backend: BackendClient = {
       fs: { mkdir: async () => undefined, write: async () => undefined },
       workers: {
         get: async () => {
@@ -590,7 +590,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: "https://reuse-existing.example",
-      puter,
+      puter: backend,
       fetchFn: fetchFn as typeof fetch,
     });
 
@@ -603,7 +603,7 @@ describe("PutBase", () => {
 
   it("fails hard when scoped worker name collides", async () => {
     const kv = new MapKv();
-    const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
+    const backend: BackendClient = {
       fs: { mkdir: async () => undefined, write: async () => undefined },
       workers: {
         create: async () => {
@@ -620,7 +620,7 @@ describe("PutBase", () => {
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: "https://collision.example",
-      puter,
+      puter: backend,
       fetchFn: (() => Promise.reject(new Error("fetch should not be used"))) as typeof fetch,
     });
 
@@ -668,7 +668,7 @@ describe("PutBase", () => {
   it("uses puter.workers.exec when available", async () => {
     const execCalls: Array<{ url: string; init?: RequestInit }> = [];
 
-    const puter = {
+    const backend = {
       workers: {
         exec: async (url: string, init?: RequestInit): Promise<Response> => {
           execCalls.push({ url, init });
@@ -702,7 +702,7 @@ describe("PutBase", () => {
           });
         },
       },
-    } as PuterFedRoomsOptions["puter"];
+    } as BackendClient;
 
     const fetchFn = (): Promise<Response> => {
       throw new Error("fetch should not be called when workers.exec is available");
@@ -711,7 +711,7 @@ describe("PutBase", () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      puter,
+      puter: backend,
       fetchFn: fetchFn as typeof fetch,
     });
 

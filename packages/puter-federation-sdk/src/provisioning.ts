@@ -2,7 +2,7 @@ import { buildClassicWorkerScript } from "./worker/template";
 import type { Identity } from "./identity";
 import type { Transport } from "./transport";
 import { stripTrailingSlash } from "./transport";
-import type { DeployWorkerArgs, PuterFedRoomsOptions } from "./types";
+import type { BackendClient, DeployWorkerArgs, PuterFedRoomsOptions } from "./types";
 
 const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
 const FEDERATION_WORKER_VERSION = 12;
@@ -14,18 +14,18 @@ const sharedFederationWorkerUrls = new Map<string, string>();
 export class Provisioning {
   private federationWorkerUrl: string | null = null;
   private federationWorkerPromise: Promise<string> | null = null;
-  private puter: PuterFedRoomsOptions["puter"];
+  private backend: BackendClient | undefined;
 
   constructor(
     private readonly options: PuterFedRoomsOptions,
     private readonly transport: Transport,
     private readonly identity: Identity,
   ) {
-    this.puter = options.puter;
+    this.backend = options.puter;
   }
 
-  setPuter(puter: PuterFedRoomsOptions["puter"]): void {
-    this.puter = puter;
+  setPuter(backend: BackendClient | undefined): void {
+    this.backend = backend;
   }
 
   async ensureFederationWorkerForCurrentUser(): Promise<void> {
@@ -148,11 +148,11 @@ export class Provisioning {
       return true;
     }
 
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const workers = this.puter?.workers as { create?: unknown } | undefined;
+    const workers = this.backend?.workers as { create?: unknown } | undefined;
     return typeof workers?.create === "function";
   }
 
@@ -170,12 +170,12 @@ export class Provisioning {
       return undefined;
     }
 
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const puter = this.puter;
-    if (!puter) {
+    const backend = this.backend;
+    if (!backend) {
       throw new Error("Puter SDK is unavailable");
     }
 
@@ -183,7 +183,7 @@ export class Provisioning {
     const workerDir = "puter-fed/workers";
     const workerFilePath = `${workerDir}/${workerName}.js`;
 
-    const workers = puter.workers as
+    const workers = backend.workers as
       | {
           create?: (name: string, filePath: string) => Promise<{ url?: unknown }>;
           get?: (name: string) => Promise<{ url?: unknown } | null>;
@@ -195,13 +195,13 @@ export class Provisioning {
     }
 
     try {
-      await puter.fs.mkdir(workerDir, {
+      await backend.fs.mkdir(workerDir, {
         recursive: true,
         createMissingParents: true,
         overwrite: true,
         dedupeName: false,
       });
-      await puter.fs.write(workerFilePath, args.script, {
+      await backend.fs.write(workerFilePath, args.script, {
         overwrite: true,
         createMissingParents: true,
         createMissingAncestors: true,
@@ -265,11 +265,11 @@ export class Provisioning {
   }
 
   private async loadFederationWorkerVersion(username: string, appHostHash: string): Promise<number> {
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const kv = this.puter?.kv;
+    const kv = this.backend?.kv;
     if (!kv?.get) {
       return 0;
     }
@@ -285,11 +285,11 @@ export class Provisioning {
   }
 
   private async loadFederationWorkerUrl(username: string, appHostHash: string): Promise<string | null> {
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const kv = this.puter?.kv;
+    const kv = this.backend?.kv;
     if (!kv?.get) {
       return null;
     }
@@ -305,12 +305,12 @@ export class Provisioning {
   }
 
   private async loadExistingFederationWorkerUrl(workerName: string): Promise<string | null> {
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const puter = this.puter;
-    const workers = puter?.workers as
+    const backend = this.backend;
+    const workers = backend?.workers as
       | {
           get?: (name: string) => Promise<{ url?: unknown } | null>;
         }
@@ -333,11 +333,11 @@ export class Provisioning {
     appHostHash: string,
     workerUrl: string,
   ): Promise<void> {
-    if (!this.puter) {
-      this.puter = (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    if (!this.backend) {
+      this.backend = (globalThis as { puter?: BackendClient }).puter;
     }
 
-    const kv = this.puter?.kv;
+    const kv = this.backend?.kv;
     if (!kv?.set) {
       return;
     }

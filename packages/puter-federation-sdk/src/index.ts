@@ -5,6 +5,7 @@ export { PuterFedError } from "./errors";
 export { collection, defineSchema, field, index } from "./schema";
 export type { PutBaseOptions } from "./putbase";
 export type {
+  BackendClient,
   CrdtConnectCallbacks,
   CrdtConnection,
   DeployWorkerArgs,
