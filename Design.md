@@ -69,7 +69,7 @@ SDK for Puter federated rooms with signed writes (append message), worker-backed
 import { PuterFedRooms } from 'puter-federation-sdk';
 
 const rooms = new PuterFedRooms();
-await rooms.init();
+await rooms.ensureReady();
 
 const room = await rooms.createRoom('Rex');
 
@@ -86,7 +86,7 @@ const messages = await rooms.pollMessages(room, 0);
 
 ### Methods
 
-- `init()`
+- `ensureReady()`
 - `whoAmI()`
 - `createRoom(name)`
 - `joinRoom(workerUrl, { inviteToken?, publicKeyUrl })`

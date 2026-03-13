@@ -28,11 +28,10 @@ let tagsWatcher: DbQueryWatchHandle | null = null;
 
 async function boot() {
   try {
-    await db.init();
     const me = await db.whoAmI();
     currentUsername = me.username;
   } catch (error) {
-    console.error("[woof-app] boot/init failed", error);
+    console.error("[woof-app] boot failed", error);
     renderSetup(getErrorMessage(error, "Could not initialize app."));
     return;
   }

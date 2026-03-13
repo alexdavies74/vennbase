@@ -36,6 +36,21 @@ class MapKv {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 const MINIMAL_SCHEMA = defineSchema({
   rows: collection({ fields: {} }),
 });
@@ -237,13 +252,14 @@ describe("PutBase", () => {
     expect(contexts.every((value) => value === undefined)).toBe(true);
   });
 
-  it("provisions a host-scoped federation worker during init", async () => {
+  it("starts provisioning a host-scoped federation worker from constructor prewarm", async () => {
     const kv = new MapKv();
     const appHost = "woof.example";
     const hostHash = hashHostname(appHost);
     const expectedWorkerName = `owner-${hostHash}-federation`;
     const deployedWorkerBase = `https://workers.example/${expectedWorkerName}`;
     let createdName: string | null = null;
+    const createStarted = deferred<void>();
 
     const puter: NonNullable<PuterFedRoomsOptions["puter"]> = {
       fs: {
@@ -253,6 +269,7 @@ describe("PutBase", () => {
       workers: {
         create: async (name: string) => {
           createdName = name;
+          createStarted.resolve();
           return { success: true, url: deployedWorkerBase };
         },
       },
@@ -264,14 +281,46 @@ describe("PutBase", () => {
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: `https://${appHost}`,
       puter,
-      fetchFn: (() => Promise.reject(new Error("fetch should not be used in init"))) as typeof fetch,
+      fetchFn: (() => Promise.reject(new Error("fetch should not be used in ensureReady"))) as typeof fetch,
     });
 
-    await db.init();
+    await createStarted.promise;
+    await db.ensureReady();
 
     expect(createdName).toBe(expectedWorkerName);
     await expect(kv.get(`puter-fed:federation-worker-version:v2:owner:${hostHash}`)).resolves.toBe(12);
     await expect(kv.get(`puter-fed:federation-worker-url:v2:owner:${hostHash}`)).resolves.toBe(deployedWorkerBase);
+  });
+
+  it("shares constructor prewarm with ensureReady", async () => {
+    const releaseCreate = deferred<{ url: string }>();
+    const createStarted = deferred<void>();
+    let deployCalls = 0;
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: "https://prewarm-ensure.example",
+      puter: {
+        fs: { mkdir: async () => undefined, write: async () => undefined },
+        workers: {
+          create: async () => {
+            deployCalls += 1;
+            createStarted.resolve();
+            return releaseCreate.promise;
+          },
+        },
+        kv: new MapKv(),
+      },
+    });
+
+    const readyPromise = db.ensureReady();
+    await createStarted.promise;
+    expect(deployCalls).toBe(1);
+
+    releaseCreate.resolve({ url: "https://workers.example/owner-1234abcd-federation" });
+    await expect(readyPromise).resolves.toBeUndefined();
+    expect(deployCalls).toBe(1);
   });
 
   it("uses deployed shared worker URL returned by puter.workers.create", async () => {
@@ -345,7 +394,7 @@ describe("PutBase", () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: "https://woof.example",
+      appBaseUrl: "https://deployed-worker.example",
       puter,
       fetchFn: fetchFn as typeof fetch,
     });
@@ -356,6 +405,101 @@ describe("PutBase", () => {
     expect(requestedUrls).toContain(`${deployedWorkerBase}/rooms`);
     expect(requestedUrls.some((url) => url.endsWith("/join"))).toBe(true);
     expect(requestedUrls.some((url) => url.endsWith("/room"))).toBe(true);
+  });
+
+  it("shares constructor prewarm with put when provisioning the federation worker", async () => {
+    const requestedUrls: string[] = [];
+    const deployedWorkerBase = "https://workers.example/owner-1234abcd-federation";
+    const releaseCreate = deferred<{ url: string }>();
+    const createStarted = deferred<void>();
+    let deployCalls = 0;
+    let roomId: string | null = null;
+
+    const fetchFn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = asUrl(input);
+      requestedUrls.push(url);
+
+      if (url === `${deployedWorkerBase}/rooms` && init?.body && typeof init.body === "string") {
+        roomId = (JSON.parse(init.body) as { roomId: string }).roomId;
+        return new Response(
+          JSON.stringify({
+            id: roomId,
+            name: "Rex",
+            owner: "owner",
+            workerUrl: `${deployedWorkerBase}/rooms/${roomId}`,
+            createdAt: 1,
+            collection: null,
+            members: [],
+            parentRefs: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (roomId && url === `${deployedWorkerBase}/rooms/${roomId}/join`) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (roomId && url === `${deployedWorkerBase}/rooms/${roomId}/room`) {
+        return new Response(
+          JSON.stringify({
+            id: roomId,
+            name: "Rex",
+            owner: "owner",
+            workerUrl: `${deployedWorkerBase}/rooms/${roomId}`,
+            createdAt: 1,
+            collection: null,
+            members: ["owner"],
+            parentRefs: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (roomId && url === `${deployedWorkerBase}/rooms/${roomId}/fields`) {
+        return new Response(
+          JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: "https://prewarm-put.example",
+      puter: {
+        fs: { mkdir: async () => undefined, write: async () => undefined },
+        workers: {
+          create: async () => {
+            deployCalls += 1;
+            createStarted.resolve();
+            return releaseCreate.promise;
+          },
+        },
+        kv: new MapKv(),
+      },
+      fetchFn: fetchFn as typeof fetch,
+    });
+
+    const rowPromise = db.put("rows", { name: "Rex" });
+    await createStarted.promise;
+    expect(deployCalls).toBe(1);
+
+    releaseCreate.resolve({ url: deployedWorkerBase });
+    const row = await rowPromise;
+
+    expect(deployCalls).toBe(1);
+    expect(row.workerUrl.startsWith(`${deployedWorkerBase}/rooms/`)).toBe(true);
+    expect(requestedUrls).toContain(`${deployedWorkerBase}/rooms`);
   });
 
   it("reuses shared worker from KV across SDK instances for same app host", async () => {
@@ -388,7 +532,7 @@ describe("PutBase", () => {
     const firstDb = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: "https://woof.example",
+      appBaseUrl: "https://reuse-kv.example",
       puter,
       fetchFn: fetchFn as typeof fetch,
     });
@@ -396,7 +540,7 @@ describe("PutBase", () => {
     const secondDb = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: "https://woof.example",
+      appBaseUrl: "https://reuse-kv.example",
       puter,
       fetchFn: fetchFn as typeof fetch,
     });
@@ -445,7 +589,7 @@ describe("PutBase", () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: "https://woof.example",
+      appBaseUrl: "https://reuse-existing.example",
       puter,
       fetchFn: fetchFn as typeof fetch,
     });
@@ -475,12 +619,54 @@ describe("PutBase", () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: "https://woof.example",
+      appBaseUrl: "https://collision.example",
       puter,
       fetchFn: (() => Promise.reject(new Error("fetch should not be used"))) as typeof fetch,
     });
 
     await expect(db.put("rows", { name: "Rex" })).rejects.toThrow("Federation worker name collision");
+  });
+
+  it("surfaces prewarm failures through ensureReady and retries on a later call", async () => {
+    const firstAttemptStarted = deferred<void>();
+    let deployCalls = 0;
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: "https://retry.example",
+      puter: {
+        fs: { mkdir: async () => undefined, write: async () => undefined },
+        workers: {
+          create: async () => {
+            deployCalls += 1;
+            if (deployCalls === 1) {
+              firstAttemptStarted.resolve();
+              throw {
+                success: false,
+                error: { code: "already_in_use", message: "already in use", status: 409 },
+              };
+            }
+
+            return { url: "https://workers.example/owner-1234abcd-federation" };
+          },
+        },
+        kv: new MapKv(),
+      },
+    });
+
+    await firstAttemptStarted.promise;
+    await vi.waitFor(() => {
+      expect(
+        (db as unknown as { pendingReadinessError: unknown | null }).pendingReadinessError,
+      ).not.toBeNull();
+    });
+
+    await expect(db.ensureReady()).rejects.toThrow("Federation worker name collision");
+    expect(deployCalls).toBe(1);
+
+    await expect(db.ensureReady()).resolves.toBeUndefined();
+    expect(deployCalls).toBe(2);
   });
 
   it("uses puter.workers.exec when available", async () => {
@@ -540,7 +726,7 @@ describe("PutBase", () => {
     expect(new Headers(execCalls[0].init?.headers).get("x-puter-username")).toBeNull();
   });
 
-  it("can flush CRDT updates after client re-init", async () => {
+  it("can flush CRDT updates after client recreation", async () => {
     const worker = new RoomWorker(
       { owner: "owner", workerUrl: "https://worker.example" },
       { kv: new InMemoryKv() },
@@ -571,7 +757,6 @@ describe("PutBase", () => {
       identityProvider: async () => ({ username: "owner" }),
       fetchFn: fetchFn as typeof fetch,
     });
-    await firstDb.init();
 
     const row1 = new RowHandle(firstDb, rowRef, {});
     const conn1 = row1.connectCrdt({
@@ -586,7 +771,6 @@ describe("PutBase", () => {
       identityProvider: async () => ({ username: "owner" }),
       fetchFn: fetchFn as typeof fetch,
     });
-    await secondDb.init();
 
     const row2 = new RowHandle(secondDb, rowRef, {});
     const conn2 = row2.connectCrdt({

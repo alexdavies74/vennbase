@@ -8,9 +8,12 @@ const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
 const FEDERATION_WORKER_VERSION = 12;
 const FEDERATION_WORKER_VERSION_KV_PREFIX = "puter-fed:federation-worker-version:v2";
 const FEDERATION_WORKER_URL_KV_PREFIX = "puter-fed:federation-worker-url:v2";
+const sharedFederationWorkerPromises = new Map<string, Promise<string>>();
+const sharedFederationWorkerUrls = new Map<string, string>();
 
 export class Provisioning {
   private federationWorkerUrl: string | null = null;
+  private federationWorkerPromise: Promise<string> | null = null;
   private puter: PuterFedRoomsOptions["puter"];
 
   constructor(
@@ -25,20 +28,13 @@ export class Provisioning {
     this.puter = puter;
   }
 
-  async init(): Promise<void> {
+  async ensureFederationWorkerForCurrentUser(): Promise<void> {
     if (!this.canDeployFederationWorker()) {
       return;
     }
 
     const user = await this.identity.whoAmI();
-    try {
-      await this.getFederationWorkerUrl(user.username);
-    } catch (error) {
-      console.warn("[putbase] failed to ensure federation worker during init", {
-        username: user.username,
-        error,
-      });
-    }
+    await this.getFederationWorkerUrl(user.username);
   }
 
   async getFederationWorkerUrl(username: string): Promise<string> {
@@ -48,13 +44,56 @@ export class Provisioning {
 
     const appHostname = this.resolveAppHostname();
     const appHostHash = hashHostname(appHostname);
+    const cacheKey = `${username}:${appHostHash}`;
 
-    this.federationWorkerUrl = await this.ensureFederationWorkerUrl(
-      username,
-      appHostname,
-      appHostHash,
-    );
-    return this.federationWorkerUrl;
+    const sharedWorkerUrl = sharedFederationWorkerUrls.get(cacheKey);
+    if (sharedWorkerUrl) {
+      this.federationWorkerUrl = sharedWorkerUrl;
+      return sharedWorkerUrl;
+    }
+
+    if (this.federationWorkerPromise) {
+      return this.federationWorkerPromise;
+    }
+
+    const sharedPromise =
+      sharedFederationWorkerPromises.get(cacheKey) ??
+      this.createSharedFederationWorkerPromise(username, appHostname, appHostHash, cacheKey);
+
+    const promise = sharedPromise
+      .then((workerUrl) => {
+        this.federationWorkerUrl = workerUrl;
+        return workerUrl;
+      })
+      .finally(() => {
+        if (this.federationWorkerPromise === promise) {
+          this.federationWorkerPromise = null;
+        }
+      });
+
+    this.federationWorkerPromise = promise;
+    return promise;
+  }
+
+  private createSharedFederationWorkerPromise(
+    username: string,
+    appHostname: string,
+    appHostHash: string,
+    cacheKey: string,
+  ): Promise<string> {
+    const sharedPromise = this.ensureFederationWorkerUrl(username, appHostname, appHostHash)
+      .then((workerUrl) => {
+        sharedFederationWorkerUrls.set(cacheKey, workerUrl);
+        return workerUrl;
+      })
+      .finally(() => {
+        if (sharedFederationWorkerPromises.get(cacheKey) === sharedPromise) {
+          sharedFederationWorkerPromises.delete(cacheKey);
+        }
+      });
+
+    sharedFederationWorkerPromises.set(cacheKey, sharedPromise);
+    return sharedPromise;
   }
 
   private async ensureFederationWorkerUrl(

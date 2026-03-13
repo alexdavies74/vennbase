@@ -13,9 +13,12 @@ export class Rooms {
     private readonly transport: Transport,
     private readonly identity: Identity,
     private readonly provisioning: Provisioning,
+    private readonly ensureReady: () => Promise<void>,
   ) {}
 
   async createRoom(name: string): Promise<Room> {
+    await this.ensureReady();
+
     const user = await this.identity.whoAmI();
     const federationWorkerUrl = await this.provisioning.getFederationWorkerUrl(user.username);
     const roomId = this.transport.createId("room");

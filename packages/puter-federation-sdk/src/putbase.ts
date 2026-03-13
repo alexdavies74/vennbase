@@ -52,12 +52,21 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   private readonly parentsModule: Parents;
   private readonly rowsModule: Rows<Schema>;
   private readonly queryModule: Query<Schema>;
+  private ready = false;
+  private readinessPromise: Promise<void> | null = null;
+  private pendingReadinessError: unknown | null = null;
 
   constructor(private readonly options: PutBaseOptions<Schema>) {
     this.identity = new Identity(options);
     this.transport = new Transport(options, () => this.identity.whoAmI().then((u) => u.username));
     this.provisioning = new Provisioning(options, this.transport, this.identity);
-    this.roomsModule = new Rooms(this.transport, this.identity, this.provisioning);
+    this.syncRuntime();
+    this.roomsModule = new Rooms(
+      this.transport,
+      this.identity,
+      this.provisioning,
+      () => this.awaitSharedReadiness(),
+    );
     this.invitesModule = new Invites(options, this.transport, this.identity);
     this.syncModule = new Sync(this.roomsModule);
     this.membersModule = new Members<Schema>(this.transport);
@@ -75,16 +84,11 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       (row) => this.rowsModule.refreshFields(row),
     );
     this.queryModule = new Query(this.transport, this.rowsModule, options.schema);
+    this.startPrewarm();
   }
 
-  async init(): Promise<void> {
-    const puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
-    this.identity.setPuter(puter);
-    this.transport.setPuter(puter);
-    this.provisioning.setPuter(puter);
-
-    await this.identity.whoAmI();
-    await this.provisioning.init();
+  async ensureReady(): Promise<void> {
+    await this.awaitSharedReadiness();
   }
 
   async whoAmI(): Promise<RoomUser> {
@@ -203,6 +207,63 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   connectCrdt(row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection {
     return this.syncModule.connectCrdt(row, callbacks);
+  }
+
+  private syncRuntime(): void {
+    const puter = this.options.puter ?? (globalThis as { puter?: PuterFedRoomsOptions["puter"] }).puter;
+    this.identity.setPuter(puter);
+    this.transport.setPuter(puter);
+    this.provisioning.setPuter(puter);
+  }
+
+  private startPrewarm(): void {
+    void this.startReadiness().catch(() => undefined);
+  }
+
+  private async awaitSharedReadiness(): Promise<void> {
+    if (this.ready) {
+      return;
+    }
+
+    if (this.pendingReadinessError !== null) {
+      const error = this.pendingReadinessError;
+      this.pendingReadinessError = null;
+      throw error;
+    }
+
+    await this.startReadiness();
+  }
+
+  private startReadiness(): Promise<void> {
+    if (this.ready) {
+      return Promise.resolve();
+    }
+
+    if (this.readinessPromise) {
+      return this.readinessPromise;
+    }
+
+    this.syncRuntime();
+
+    const promise = (async () => {
+      await this.identity.whoAmI();
+      await this.provisioning.ensureFederationWorkerForCurrentUser();
+      this.ready = true;
+      this.pendingReadinessError = null;
+    })()
+      .catch((error) => {
+        this.ready = false;
+        this.pendingReadinessError = error;
+        throw error;
+      })
+      .finally(() => {
+        if (this.readinessPromise === promise) {
+          this.readinessPromise = null;
+        }
+      });
+
+    this.readinessPromise = promise;
+    return promise;
   }
 
   private createRuntimeRowHandle<TCollection extends CollectionName<Schema>>(
