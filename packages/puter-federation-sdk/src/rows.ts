@@ -1,6 +1,15 @@
 import { RowHandle, type RowHandleBackend } from "./row-handle";
 import type { Rooms } from "./rooms";
-import type { DbPutOptions, DbRowRef, DbSchema } from "./schema";
+import type {
+  AllowedParentCollections,
+  CollectionName,
+  DbPutOptions,
+  DbRowFields,
+  DbRowRef,
+  DbSchema,
+  InsertFields,
+  RowFields,
+} from "./schema";
 import { applyDefaults, assertPutParents, getCollectionSpec } from "./schema";
 import type { Transport } from "./transport";
 import { roomEndpointUrl, stripTrailingSlash } from "./transport";
@@ -11,21 +20,20 @@ interface GetFieldsResponse {
   collection: string | null;
 }
 
-export class Rows {
+export class Rows<Schema extends DbSchema> {
   constructor(
     private readonly transport: Transport,
     private readonly rooms: Rooms,
-    private readonly schema: DbSchema,
+    private readonly schema: Schema,
     private readonly backend: RowHandleBackend,
     private readonly addParent: (child: DbRowRef, parent: DbRowRef) => Promise<void>,
   ) {}
 
-  async put(
-    collection: string,
-    fields: Record<string, JsonValue>,
-    options: DbPutOptions = {},
-  ): Promise<RowHandle> {
-
+  async put<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    fields: InsertFields<Schema, TCollection>,
+    options: DbPutOptions<Schema, TCollection> = {},
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const parentRefs = normalizeParents(options.in);
     assertPutParents(collection, collectionSpec, parentRefs);
@@ -33,14 +41,17 @@ export class Rows {
     const room = await this.rooms.createRoom(
       options.name ?? `${collection}-${crypto.randomUUID().slice(0, 8)}`,
     );
-    const rowRef: DbRowRef = {
+    const rowRef: DbRowRef<TCollection> = {
       id: room.id,
       collection,
       owner: room.owner,
       workerUrl: stripTrailingSlash(room.workerUrl),
     };
 
-    const payload = applyDefaults(collectionSpec, fields);
+    const payload = applyDefaults(
+      collectionSpec,
+      fields as InsertFields<Schema, TCollection> & DbRowFields,
+    ) as Record<string, JsonValue>;
 
     await this.transport.request(roomEndpointUrl(rowRef, "fields"), "POST", {
       fields: payload,
@@ -51,15 +62,23 @@ export class Rows {
       await this.addParent(rowRef, parent);
     }
 
-    return new RowHandle(this.backend, rowRef, payload);
+    return new RowHandle<
+      TCollection,
+      RowFields<Schema, TCollection>,
+      AllowedParentCollections<Schema, TCollection>
+    >(
+      this.backend,
+      rowRef,
+      payload as RowFields<Schema, TCollection>,
+    );
   }
 
-  async update(
-    collection: string,
-    row: DbRowRef,
-    fields: Record<string, JsonValue>,
-  ): Promise<RowHandle> {
-    const rowRef: DbRowRef = { ...row, collection };
+  async update<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    row: DbRowRef<TCollection>,
+    fields: Partial<RowFields<Schema, TCollection>>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
+    const rowRef: DbRowRef<TCollection> = { ...row, collection };
     await this.transport.request(roomEndpointUrl(rowRef, "fields"), "POST", {
       fields,
       merge: true,
@@ -69,10 +88,17 @@ export class Rows {
     return this.getRow(collection, rowRef);
   }
 
-  async getRow(collection: string, row: DbRowRef): Promise<RowHandle> {
-    const rowRef: DbRowRef = { ...row, collection };
+  async getRow<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    row: DbRowRef<TCollection>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
+    const rowRef: DbRowRef<TCollection> = { ...row, collection };
     const fields = await this.refreshFields(rowRef);
-    return new RowHandle(this.backend, rowRef, fields);
+    return new RowHandle<
+      TCollection,
+      RowFields<Schema, TCollection>,
+      AllowedParentCollections<Schema, TCollection>
+    >(this.backend, rowRef, fields as RowFields<Schema, TCollection>);
   }
 
   async refreshFields(row: DbRowRef): Promise<Record<string, JsonValue>> {
@@ -83,7 +109,9 @@ export class Rows {
     return response.fields;
   }
 
-  async fetchWithCollection(row: Pick<DbRowRef, "id" | "workerUrl"> & { owner: string }): Promise<{ fields: Record<string, JsonValue>; collection: string | null }> {
+  async fetchWithCollection(
+    row: Pick<DbRowRef, "id" | "workerUrl"> & { owner: string },
+  ): Promise<{ fields: Record<string, JsonValue>; collection: string | null }> {
     const bareRef: DbRowRef = { ...row, collection: "unknown" };
     const response = await this.transport.request<GetFieldsResponse>(
       roomEndpointUrl(bareRef, "fields"),

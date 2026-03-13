@@ -3,6 +3,7 @@ export { RowHandle } from "./row-handle";
 export { PuterFedError } from "./errors";
 export { RoomWorker } from "./worker/core";
 export { InMemoryKv } from "./worker/in-memory-kv";
+export { collection, defineSchema, field, index } from "./schema";
 export {
   canonicalize,
   signEnvelope,
@@ -28,17 +29,26 @@ export type {
   RoomUser,
 } from "./types";
 export type {
-  DbCollectionSpec,
-  DbFieldSpec,
-  DbIndexSpec,
+  AllowedParentCollections,
+  AllowedParentRef,
+  CollectionIndexes,
+  CollectionName,
+  DbCollectionDefinition,
+  DbFieldBuilder,
+  DbIndexDefinition,
   DbMemberInfo,
   DbPutOptions,
   DbQueryOptions,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
+  DbRowFields,
   DbRow,
   DbRowRef,
   DbSchema,
   FieldType,
+  IndexValue,
+  InsertFields,
   MemberRole,
+  QueryWhere,
+  RowFields,
 } from "./schema";

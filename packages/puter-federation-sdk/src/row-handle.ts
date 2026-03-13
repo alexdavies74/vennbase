@@ -1,5 +1,5 @@
 import type { CrdtConnectCallbacks, CrdtConnection, JsonValue } from "./types";
-import type { DbMemberInfo, DbRowRef, MemberRole } from "./schema";
+import type { DbMemberInfo, DbRowFields, DbRowRef, MemberRole } from "./schema";
 
 export interface RowHandleBackend {
   addParent(child: DbRowRef, parent: DbRowRef): Promise<void>;
@@ -14,20 +14,24 @@ export interface RowHandleBackend {
   listMembers(row: DbRowRef): Promise<string[]>;
 }
 
-export class RowHandle {
+export class RowHandle<
+  TCollection extends string = string,
+  TFields extends DbRowFields = DbRowFields,
+  TAllowedParentCollections extends string = string,
+> {
   readonly id: string;
 
-  readonly collection: string;
+  readonly collection: TCollection;
 
   readonly owner: string;
 
   readonly workerUrl: string;
 
-  fields: Record<string, JsonValue>;
+  fields: TFields;
 
   readonly in: {
-    add: (parent: DbRowRef) => Promise<void>;
-    remove: (parent: DbRowRef) => Promise<void>;
+    add: (parent: DbRowRef<TAllowedParentCollections>) => Promise<void>;
+    remove: (parent: DbRowRef<TAllowedParentCollections>) => Promise<void>;
     list: () => Promise<DbRowRef[]>;
   };
 
@@ -41,8 +45,8 @@ export class RowHandle {
 
   constructor(
     private readonly backend: RowHandleBackend,
-    row: DbRowRef,
-    fields: Record<string, JsonValue>,
+    row: DbRowRef<TCollection>,
+    fields: TFields,
   ) {
     this.id = row.id;
     this.collection = row.collection;
@@ -51,10 +55,10 @@ export class RowHandle {
     this.fields = fields;
 
     this.in = {
-      add: async (parent: DbRowRef) => {
+      add: async (parent: DbRowRef<TAllowedParentCollections>) => {
         await this.backend.addParent(this.toRef(), parent);
       },
-      remove: async (parent: DbRowRef) => {
+      remove: async (parent: DbRowRef<TAllowedParentCollections>) => {
         await this.backend.removeParent(this.toRef(), parent);
       },
       list: async () => this.backend.listParents(this.toRef()),
@@ -78,11 +82,11 @@ export class RowHandle {
   }
 
   async refresh(): Promise<this> {
-    this.fields = await this.backend.refreshFields(this.toRef());
+    this.fields = await this.backend.refreshFields(this.toRef()) as TFields;
     return this;
   }
 
-  toRef(): DbRowRef {
+  toRef(): DbRowRef<TCollection> {
     return {
       id: this.id,
       collection: this.collection,

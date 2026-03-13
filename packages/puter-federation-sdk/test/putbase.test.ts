@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PutBase } from "../src/putbase";
 import { RowHandle } from "../src/row-handle";
+import { collection, defineSchema } from "../src/schema";
 import type { PuterFedRoomsOptions } from "../src/types";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 import { RoomWorker } from "../src/worker/core";
@@ -35,7 +36,9 @@ class MapKv {
   }
 }
 
-const MINIMAL_SCHEMA = { rows: { fields: {} } } as const;
+const MINIMAL_SCHEMA = defineSchema({
+  rows: collection({ fields: {} }),
+});
 
 describe("PutBase", () => {
   afterEach(() => {

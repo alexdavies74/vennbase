@@ -8,14 +8,19 @@ import { RowHandle, type RowHandleBackend } from "./row-handle";
 import { Rooms } from "./rooms";
 import { Rows } from "./rows";
 import type {
+  AllowedParentCollections,
+  CollectionName,
   DbMemberInfo,
   DbPutOptions,
   DbQueryOptions,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
+  DbRowFields,
   DbRowRef,
   DbSchema,
+  InsertFields,
   MemberRole,
+  RowFields,
 } from "./schema";
 import { stripTrailingSlash } from "./transport";
 import { Transport } from "./transport";
@@ -44,8 +49,8 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   private readonly syncModule: Sync;
   private readonly membersModule: Members;
   private readonly parentsModule: Parents;
-  private readonly rowsModule: Rows;
-  private readonly queryModule: Query;
+  private readonly rowsModule: Rows<Schema>;
+  private readonly queryModule: Query<Schema>;
 
   constructor(private readonly options: PutBaseOptions<Schema>) {
     this.identity = new Identity(options);
@@ -85,29 +90,30 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.identity.whoAmI();
   }
 
-  // Row CRUD
-
-  async put(
-    collection: keyof Schema & string,
-    fields: Record<string, JsonValue>,
-    options?: DbPutOptions,
-  ): Promise<RowHandle> {
+  async put<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    fields: InsertFields<Schema, TCollection>,
+    options?: DbPutOptions<Schema, TCollection>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
     return this.rowsModule.put(collection, fields, options);
   }
 
-  async update(
-    collection: keyof Schema & string,
-    row: DbRowRef,
-    fields: Record<string, JsonValue>,
-  ): Promise<RowHandle> {
+  async update<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    row: DbRowRef<TCollection>,
+    fields: Partial<RowFields<Schema, TCollection>>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
     return this.rowsModule.update(collection, row, fields);
   }
 
-  async getRow(collection: keyof Schema & string, row: DbRowRef): Promise<RowHandle> {
+  async getRow<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    row: DbRowRef<TCollection>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>> {
     return this.rowsModule.getRow(collection, row);
   }
 
-  async getRowByUrl(workerUrl: string): Promise<RowHandle> {
+  async getRowByUrl(workerUrl: string): Promise<RowHandle<string, DbRowFields>> {
     const snapshot = await this.roomsModule.getRoom(workerUrl);
     const bareRef = {
       id: snapshot.id,
@@ -122,22 +128,20 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return new RowHandle(this, rowRef, fields);
   }
 
-  async query(
-    collection: keyof Schema & string,
-    options: DbQueryOptions,
-  ): Promise<RowHandle[]> {
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>> {
     return this.queryModule.query(collection, options);
   }
 
-  watchQuery(
-    collection: keyof Schema & string,
-    options: DbQueryOptions,
-    callbacks: DbQueryWatchCallbacks<RowHandle>,
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);
   }
-
-  // Invites
 
   async getExistingInviteToken(row: DbRowRef): Promise<InviteToken | null> {
     return this.invitesModule.getExistingInviteToken(row);
@@ -158,18 +162,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   async joinRow(
     workerUrl: string,
     options: { inviteToken?: string } = {},
-  ): Promise<RowHandle> {
+  ): Promise<RowHandle<string, DbRowFields>> {
     await this.roomsModule.joinRoom(workerUrl, options);
     return this.getRowByUrl(workerUrl);
   }
 
-  // Member listing at room level (raw usernames, not DB roles)
-
   async listMembers(row: DbRowRef): Promise<string[]> {
     return this.roomsModule.listMembers(row.workerUrl);
   }
-
-  // RowHandleBackend implementation
 
   async addParent(child: DbRowRef, parent: DbRowRef): Promise<void> {
     return this.parentsModule.add(child, parent);

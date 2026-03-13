@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { PutBase, PuterFedError, type DbQueryWatchHandle } from "puter-federation-sdk";
 
 import type { DogProfile } from "./profile";
+import { woofSchema } from "./schema";
 import { WoofService, type ChatEntry } from "./service";
 
 const appElement = document.getElementById("app");
@@ -17,24 +18,7 @@ const chatArray = doc.getArray<ChatEntry>("messages");
 const db = new PutBase({
   appBaseUrl: window.location.origin,
   puter,
-  schema: {
-    dogs: {
-      fields: {
-        name: { type: "string" },
-      },
-    },
-    tags: {
-      in: ["dogs"],
-      fields: {
-        label: { type: "string" },
-        createdBy: { type: "string" },
-        createdAt: { type: "number" },
-      },
-      indexes: {
-        byCreatedAt: { fields: ["createdAt"] },
-      },
-    },
-  },
+  schema: woofSchema,
 });
 const service = new WoofService(db, puter.kv, doc);
 

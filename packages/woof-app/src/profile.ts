@@ -1,8 +1,8 @@
 import type { KV } from "@heyputer/puter.js";
-import type { RowHandle } from "puter-federation-sdk";
+import type { DogRowHandle } from "./schema";
 
 export interface DogProfile {
-  row: RowHandle;
+  row: DogRowHandle;
 }
 
 const PROFILE_KEY = "woof:myDog";
@@ -19,7 +19,7 @@ export async function loadStoredWorkerUrl(kv: KvLike): Promise<string | null> {
   return workerUrl || null;
 }
 
-export async function saveStoredWorkerUrl(row: Pick<RowHandle, "workerUrl">, kv: KvLike): Promise<void> {
+export async function saveStoredWorkerUrl(row: Pick<DogRowHandle, "workerUrl">, kv: KvLike): Promise<void> {
   await kv.set(PROFILE_KEY, row.workerUrl);
 }
 

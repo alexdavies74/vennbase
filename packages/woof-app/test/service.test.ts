@@ -12,10 +12,10 @@ import type {
   MemberRole,
 } from "puter-federation-sdk";
 import { RowHandle } from "puter-federation-sdk";
-import type { PutBase } from "puter-federation-sdk";
 import type { ChatMessage } from "@heyputer/puter.js";
 
 import { loadStoredWorkerUrl } from "../src/profile";
+import type { DogRowHandle, TagRowHandle, WoofDb } from "../src/schema";
 import { WoofService } from "../src/service";
 
 class MockKv {
@@ -46,7 +46,7 @@ class MockDb {
   public putCalls: Array<{
     collection: string;
     fields: Record<string, unknown>;
-    options?: { in?: DbRowRef };
+    options?: { in?: DbRowRef<"dogs"> };
   }> = [];
 
   public queryRows: MockRow[] = [];
@@ -54,14 +54,24 @@ class MockDb {
   public disconnectCalls = 0;
   public watchCallbacks: DbQueryWatchCallbacks<MockRow> | null = null;
 
-  private makeRow(id: string, collection: string, fields: Record<string, unknown>): RowHandle {
+  private makeDogRow(id: string, fields: Record<string, unknown>): DogRowHandle {
     const workerUrl = `https://workers.puter.site/alex/rooms/${id}`;
     return new RowHandle(this as unknown as Parameters<typeof RowHandle>[0], {
       id,
-      collection,
+      collection: "dogs",
       owner: "alex",
       workerUrl,
-    }, fields as Record<string, import("puter-federation-sdk").JsonValue>);
+    }, fields as DogRowHandle["fields"]);
+  }
+
+  private makeTagRow(id: string, fields: Record<string, unknown>): TagRowHandle {
+    const workerUrl = `https://workers.puter.site/alex/rooms/${id}`;
+    return new RowHandle(this as unknown as Parameters<typeof RowHandle>[0], {
+      id,
+      collection: "tags",
+      owner: "alex",
+      workerUrl,
+    }, fields as TagRowHandle["fields"]);
   }
 
   async whoAmI(): Promise<{ username: string }> {
@@ -71,21 +81,23 @@ class MockDb {
   async put(
     collection: string,
     fields: Record<string, unknown>,
-    options?: { in?: DbRowRef },
-  ): Promise<RowHandle> {
+    options?: { in?: DbRowRef<"dogs"> },
+  ): Promise<DogRowHandle | TagRowHandle> {
     this.putCalls.push({ collection, fields, options });
     const id = collection === "dogs" ? "row_created" : `tag_${this.putCalls.length}`;
-    return this.makeRow(id, collection, fields);
+    return collection === "dogs"
+      ? this.makeDogRow(id, fields)
+      : this.makeTagRow(id, fields);
   }
 
-  async getRowByUrl(workerUrl: string): Promise<RowHandle> {
+  async getRowByUrl(workerUrl: string): Promise<DogRowHandle> {
     if (this.failGetRowByUrl) {
       throw new Error("room lookup failed");
     }
     const joined = workerUrl.includes("row_joined");
     const id = joined ? "row_joined" : "row_created";
     const name = joined ? "Joined Canonical" : "Rex Canonical";
-    return this.makeRow(id, "dogs", { name });
+    return this.makeDogRow(id, { name });
   }
 
   parseInviteInput(input: string): { workerUrl: string; inviteToken?: string } {
@@ -101,31 +113,32 @@ class MockDb {
   async joinRow(
     workerUrl: string,
     _options?: { inviteToken?: string },
-  ): Promise<RowHandle> {
-    return this.makeRow("row_joined", "dogs", { name: "Joined" });
+  ): Promise<DogRowHandle> {
+    void workerUrl;
+    return this.makeDogRow("row_joined", { name: "Joined" });
   }
 
-  async query(_collection: string, _options?: unknown): Promise<RowHandle[]> {
+  async query(_collection: string, _options?: unknown): Promise<TagRowHandle[]> {
     return this.queryRows.map((row) =>
-      this.makeRow(row.id, "tags", row.fields),
+      this.makeTagRow(row.id, row.fields),
     );
   }
 
   watchQuery(
     _collection: string,
     _options: unknown,
-    callbacks: DbQueryWatchCallbacks<RowHandle>,
+    callbacks: DbQueryWatchCallbacks<TagRowHandle>,
   ): DbQueryWatchHandle {
     this.watchCallbacks = callbacks as unknown as DbQueryWatchCallbacks<MockRow>;
     callbacks.onChange(
-      this.queryRows.map((row) => this.makeRow(row.id, "tags", row.fields)),
+      this.queryRows.map((row) => this.makeTagRow(row.id, row.fields)),
     );
     return {
       disconnect: () => { this.disconnectCalls += 1; },
       refresh: async () => {
         this.refreshCalls += 1;
         callbacks.onChange(
-          this.queryRows.map((row) => this.makeRow(row.id, "tags", row.fields)),
+          this.queryRows.map((row) => this.makeTagRow(row.id, row.fields)),
         );
       },
     };
@@ -173,7 +186,7 @@ describe("WoofService", () => {
   it("creates row on first-run adopt flow", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     const profile = await service.enterChat({ dogName: "Rex" });
 
@@ -186,7 +199,7 @@ describe("WoofService", () => {
   it("joins row from invite input", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     const profile = await service.joinFromInvite(
       "https://woof.example/?worker=https%3A%2F%2Fworkers.puter.site%2Falex%2Frooms%2Frow_joined&token=invite_1",
@@ -201,7 +214,7 @@ describe("WoofService", () => {
   it("restores profile by worker URL with canonical field fetch", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     await kv.set("woof:myDog", "https://workers.puter.site/alex/rooms/row_created");
     const restored = await service.restoreProfile();
@@ -211,7 +224,7 @@ describe("WoofService", () => {
 
   it("creates tags as DB child rows under the dog row", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
 
     await service.createTag(profile, "friendly");
@@ -234,7 +247,7 @@ describe("WoofService", () => {
       { id: "tag_2", fields: { label: "" } },
     ];
 
-    const service = new WoofService(db as unknown as PutBase, new MockKv(), new Y.Doc());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv(), new Y.Doc());
     const profile = await service.enterChat({ dogName: "Rex" });
     const tags = await service.listTags(profile);
 
@@ -249,7 +262,7 @@ describe("WoofService", () => {
       { id: "tag_2", fields: { label: " " } },
     ];
 
-    const service = new WoofService(db as unknown as PutBase, new MockKv(), new Y.Doc());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv(), new Y.Doc());
     const profile = await service.enterChat({ dogName: "Rex" });
     const updates: Array<Array<{ id: string; label: string }>> = [];
 
@@ -268,7 +281,7 @@ describe("WoofService", () => {
       { id: "tag_1", fields: { label: "friendly", createdBy: "alex", createdAt: 100 } },
     ];
 
-    const service = new WoofService(db as unknown as PutBase, new MockKv(), new Y.Doc());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv(), new Y.Doc());
     const profile = await service.enterChat({ dogName: "Rex" });
     const watcher = service.watchTags(profile, { onChange() {} });
 
@@ -284,7 +297,7 @@ describe("WoofService", () => {
   it("refreshes saved profile with canonical row fields", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     const profile = await service.joinFromInvite(
       "https://woof.example/?worker=https%3A%2F%2Fworkers.puter.site%2Falex%2Frooms%2Frow_joined&token=invite_1",
@@ -300,7 +313,7 @@ describe("WoofService", () => {
   it("clears profile when canonical refresh fails", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     const profile = await service.enterChat({ dogName: "Rex" });
     db.failGetRowByUrl = true;
@@ -312,7 +325,7 @@ describe("WoofService", () => {
   it("clears persisted worker URL when restore fails", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     await kv.set("woof:myDog", "https://workers.puter.site/alex/rooms/row_created");
     db.failGetRowByUrl = true;
@@ -324,7 +337,7 @@ describe("WoofService", () => {
   it("sends user and dog messages in one turn", async () => {
     const db = new MockDb();
     const doc = new Y.Doc();
-    const service = new WoofService(db as unknown as PutBase, new MockKv(), doc);
+    const service = new WoofService(db as unknown as WoofDb, new MockKv(), doc);
     let chatInput: ChatMessage[] | undefined;
 
     const profile = await service.enterChat({ dogName: "Rex" });
@@ -358,7 +371,7 @@ describe("WoofService", () => {
 
   it("uses row field name for dog persona", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     let chatInput: ChatMessage[] | undefined;
 
     const profile = await service.joinFromInvite(
@@ -382,7 +395,7 @@ describe("WoofService", () => {
 
   it("formats history as chronological user and assistant messages", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
     let secondTurnChatInput: ChatMessage[] | undefined;
@@ -409,7 +422,7 @@ describe("WoofService", () => {
 
   it("falls back to canned dog reply when AI call fails", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
 
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
@@ -426,7 +439,7 @@ describe("WoofService", () => {
 
   it("can send additional dog replies to other users", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
 
@@ -451,7 +464,7 @@ describe("WoofService", () => {
 
   it("strips address prefix from plain-text AI replies", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
 
@@ -468,7 +481,7 @@ describe("WoofService", () => {
 
   it("forces a reply to actor when AI omits it", async () => {
     const db = new MockDb();
-    const service = new WoofService(db as unknown as PutBase, new MockKv());
+    const service = new WoofService(db as unknown as WoofDb, new MockKv());
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
 
@@ -491,7 +504,7 @@ describe("WoofService", () => {
   it("relinquish clears profile and disconnects CRDT", async () => {
     const db = new MockDb();
     const kv = new MockKv();
-    const service = new WoofService(db as unknown as PutBase, kv);
+    const service = new WoofService(db as unknown as WoofDb, kv);
 
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);
@@ -504,7 +517,7 @@ describe("WoofService", () => {
   it("applies remote CRDT updates via applyRemoteUpdate callback", async () => {
     const db = new MockDb();
     const doc = new Y.Doc();
-    const service = new WoofService(db as unknown as PutBase, new MockKv(), doc);
+    const service = new WoofService(db as unknown as WoofDb, new MockKv(), doc);
 
     const profile = await service.enterChat({ dogName: "Rex" });
     service.connectToRoom(profile);

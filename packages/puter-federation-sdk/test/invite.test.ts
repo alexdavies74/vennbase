@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { PutBase } from "../src/putbase";
+import { defineSchema } from "../src/schema";
 
 function buildDb(appBaseUrl = "https://woof.example") {
   return new PutBase({
-    schema: {},
+    schema: defineSchema({}),
     identityProvider: async () => ({ username: "test" }),
     appBaseUrl,
   });

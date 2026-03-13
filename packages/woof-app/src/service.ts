@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import type { PutBase, CrdtConnection, DbQueryWatchHandle, RowHandle, RoomUser } from "puter-federation-sdk";
+import type { CrdtConnection, DbQueryWatchHandle, RoomUser } from "puter-federation-sdk";
 import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
 
 import {
@@ -8,6 +8,7 @@ import {
   saveStoredWorkerUrl,
   type DogProfile,
 } from "./profile";
+import type { DogRowHandle, TagRowHandle, WoofDb } from "./schema";
 
 type KvLike = Pick<KV, "get" | "set" | "del">;
 
@@ -62,7 +63,7 @@ export class WoofService {
   private pendingUpdate: Uint8Array | null = null;
 
   constructor(
-    private readonly db: PutBase,
+    private readonly db: WoofDb,
     private readonly kv: KvLike,
     private readonly doc: Y.Doc = new Y.Doc(),
   ) {
@@ -84,7 +85,7 @@ export class WoofService {
     }
 
     try {
-      const row = await this.db.getRowByUrl(workerUrl);
+      const row = await this.db.getRowByUrl(workerUrl) as unknown as DogRowHandle;
       return { row };
     } catch (error) {
       await clearProfile(this.kv);
@@ -102,7 +103,7 @@ export class WoofService {
     const parsed = this.db.parseInviteInput(inviteInput.trim());
     const row = await this.db.joinRow(parsed.workerUrl, {
       inviteToken: parsed.inviteToken,
-    });
+    }) as unknown as DogRowHandle;
 
     await saveStoredWorkerUrl(row, this.kv);
     return { row };
@@ -110,7 +111,7 @@ export class WoofService {
 
   async refreshProfileCanonical(profile: DogProfile): Promise<DogProfile> {
     try {
-      const row = await this.db.getRowByUrl(profile.row.workerUrl);
+      const row = await this.db.getRowByUrl(profile.row.workerUrl) as unknown as DogRowHandle;
       await saveStoredWorkerUrl(row, this.kv);
       return { row };
     } catch (error) {
@@ -119,7 +120,7 @@ export class WoofService {
     }
   }
 
-  async generateInviteLink(row: RowHandle): Promise<string> {
+  async generateInviteLink(row: DogRowHandle): Promise<string> {
     const existing = await this.db.getExistingInviteToken(row);
     const invite = existing ?? await this.db.createInviteToken(row);
     return this.db.createInviteLink(row, invite.token);
@@ -212,7 +213,7 @@ export class WoofService {
     });
   }
 
-  private mapTags(rows: RowHandle[]): DogTag[] {
+  private mapTags(rows: TagRowHandle[]): DogTag[] {
     return rows
       .map((row) => {
         const label = typeof row.fields.label === "string"

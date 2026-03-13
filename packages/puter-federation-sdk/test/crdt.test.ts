@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PutBase } from "../src/putbase";
 import { RowHandle } from "../src/row-handle";
+import { collection, defineSchema } from "../src/schema";
 
 function asUrl(input: RequestInfo | URL): string {
   return typeof input === "string"
@@ -16,7 +17,9 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-const MINIMAL_SCHEMA = { rows: { fields: {} } } as const;
+const MINIMAL_SCHEMA = defineSchema({
+  rows: collection({ fields: {} }),
+});
 
 function buildRow(db: PutBase) {
   return new RowHandle(db, {

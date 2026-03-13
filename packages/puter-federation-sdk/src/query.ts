@@ -1,7 +1,17 @@
 import { createAdaptivePoller } from "./polling";
 import { RowHandle, type RowHandleBackend } from "./row-handle";
 import type { Rows } from "./rows";
-import type { DbQueryOptions, DbQueryWatchCallbacks, DbQueryWatchHandle, DbRowRef, DbSchema } from "./schema";
+import type {
+  AllowedParentCollections,
+  CollectionName,
+  DbQueryOptions,
+  DbQueryWatchCallbacks,
+  DbQueryWatchHandle,
+  DbRowFields,
+  DbRowRef,
+  DbSchema,
+  RowFields,
+} from "./schema";
 import { getCollectionSpec, pickIndex } from "./schema";
 import type { Transport } from "./transport";
 import { roomEndpointUrl, stripTrailingSlash } from "./transport";
@@ -35,7 +45,7 @@ function stableJsonStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
-function snapshotRows(rows: RowHandle[]): string {
+function snapshotRows(rows: Array<RowHandle<string, DbRowFields>>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
     collection: row.collection,
@@ -50,18 +60,18 @@ function normalizeParents(input: DbRowRef | DbRowRef[]): DbRowRef[] {
   return Array.isArray(input) ? input : [input];
 }
 
-export class Query {
+export class Query<Schema extends DbSchema> {
   constructor(
     private readonly transport: Transport,
-    private readonly rows: Rows,
-    private readonly schema: DbSchema,
+    private readonly rows: Rows<Schema>,
+    private readonly schema: Schema,
     private readonly backend: RowHandleBackend,
   ) {}
 
-  async query(
-    collection: string,
-    options: DbQueryOptions,
-  ): Promise<RowHandle[]> {
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>> {
     const parentRefs = normalizeParents(options.in);
     if (parentRefs.length === 0) {
       throw new Error("query requires at least one parent in scope");
@@ -107,7 +117,7 @@ export class Query {
     const queryRows = Array.from(deduped.values()).slice(0, limit);
     const hydrated = await Promise.all(
       queryRows.map(async (row) => {
-        const rowRef: DbRowRef = {
+        const rowRef: DbRowRef<TCollection> = {
           id: row.rowId,
           collection,
           owner: row.owner,
@@ -117,7 +127,15 @@ export class Query {
         try {
           return await this.rows.getRow(collection, rowRef);
         } catch {
-          return new RowHandle(this.backend, rowRef, row.fields);
+          return new RowHandle<
+            TCollection,
+            RowFields<Schema, TCollection>,
+            AllowedParentCollections<Schema, TCollection>
+          >(
+            this.backend,
+            rowRef,
+            row.fields as RowFields<Schema, TCollection>,
+          );
         }
       }),
     );
@@ -125,17 +143,17 @@ export class Query {
     return hydrated;
   }
 
-  watchQuery(
-    collection: string,
-    options: DbQueryOptions,
-    callbacks: DbQueryWatchCallbacks<RowHandle>,
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>>>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;
 
     const poller = createAdaptivePoller({
       run: async ({ markActivity }) => {
         const result = await this.query(collection, options);
-        const nextSnapshot = snapshotRows(result);
+        const nextSnapshot = snapshotRows(result as unknown as Array<RowHandle<string, DbRowFields>>);
 
         if (lastSnapshot === nextSnapshot) {
           return;

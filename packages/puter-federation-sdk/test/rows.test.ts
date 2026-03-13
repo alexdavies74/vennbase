@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PutBase } from "../src/putbase";
 import { Query } from "../src/query";
-import type { DbSchema } from "../src/schema";
+import { collection, defineSchema, field, index } from "../src/schema";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 import { RoomWorker } from "../src/worker/core";
 
@@ -55,23 +55,23 @@ class TestWorkerNetwork {
   }
 }
 
-const schema: DbSchema = {
-  projects: {
+const schema = defineSchema({
+  projects: collection({
     fields: {
-      name: { type: "string" },
+      name: field.string(),
     },
-  },
-  tasks: {
+  }),
+  tasks: collection({
     in: ["projects"],
     fields: {
-      title: { type: "string" },
-      status: { type: "string", default: "todo" },
+      title: field.string(),
+      status: field.string().default("todo"),
     },
     indexes: {
-      byStatus: { fields: ["status"] },
+      byStatus: index("status"),
     },
-  },
-};
+  }),
+});
 
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
@@ -109,7 +109,7 @@ function buildDb(args: { username: string; network: TestWorkerNetwork }): PutBas
 }
 
 function spyOnInternalQuery(db: PutBase<typeof schema>) {
-  return vi.spyOn((db as unknown as { queryModule: Query }).queryModule, "query");
+  return vi.spyOn((db as unknown as { queryModule: Query<typeof schema> }).queryModule, "query");
 }
 
 describe("PutBase rows", () => {
