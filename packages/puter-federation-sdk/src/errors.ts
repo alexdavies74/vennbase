@@ -3,12 +3,14 @@ import type { ApiError, ErrorCode } from "./types";
 export class PutBaseError extends Error {
   readonly code: ErrorCode;
   readonly status?: number;
+  readonly logs?: string[];
 
   constructor(apiError: ApiError, status?: number) {
     super(apiError.message);
     this.name = "PutBaseError";
     this.code = apiError.code;
     this.status = status;
+    this.logs = Array.isArray(apiError.logs) ? apiError.logs : undefined;
   }
 }
 

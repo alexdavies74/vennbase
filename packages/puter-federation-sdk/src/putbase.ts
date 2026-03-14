@@ -252,16 +252,38 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.syncRuntime();
 
     const promise = (async () => {
-      await this.identity.whoAmI();
-      await this.provisioning.ensureFederationWorkerForCurrentUser();
-      this.ready = true;
-      this.pendingReadinessError = null;
+      while (true) {
+        try {
+          await this.identity.whoAmI();
+
+          const prewarmed = await this.provisioning.ensureFederationWorkerForCurrentUser();
+          if (!prewarmed) {
+            if (await this.waitForAmbientProvisioningBackend()) {
+              continue;
+            }
+
+            throw new Error(
+              "Unable to provision federation worker: a compatible backend with workers.create is unavailable.",
+            );
+          }
+
+          this.ready = true;
+          this.pendingReadinessError = null;
+          return;
+        } catch (error) {
+          if (this.shouldWaitForAmbientProvisioningBackend(error)) {
+            const waited = await this.waitForAmbientProvisioningBackend();
+            if (waited) {
+              continue;
+            }
+          }
+
+          this.ready = false;
+          this.pendingReadinessError = error;
+          throw error;
+        }
+      }
     })()
-      .catch((error) => {
-        this.ready = false;
-        this.pendingReadinessError = error;
-        throw error;
-      })
       .finally(() => {
         if (this.readinessPromise === promise) {
           this.readinessPromise = null;
@@ -270,6 +292,38 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
     this.readinessPromise = promise;
     return promise;
+  }
+
+  private shouldWaitForAmbientProvisioningBackend(error: unknown): boolean {
+    if (this.options.backend || this.options.deployWorker || !this.options.appBaseUrl) {
+      return false;
+    }
+
+    if (!error || typeof error !== "object" || !("message" in error)) {
+      return false;
+    }
+
+    const message = (error as { message?: unknown }).message;
+    return typeof message === "string" && message.includes("Unable to determine the current username");
+  }
+
+  private async waitForAmbientProvisioningBackend(): Promise<boolean> {
+    if (this.options.backend || this.options.deployWorker || !this.options.appBaseUrl) {
+      return this.provisioning.canDeployFederationWorker();
+    }
+
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      this.syncRuntime();
+      if (this.provisioning.canDeployFederationWorker()) {
+        return true;
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+
+    this.syncRuntime();
+    return this.provisioning.canDeployFederationWorker();
   }
 
   private createRuntimeRowHandle<TCollection extends CollectionName<Schema>>(

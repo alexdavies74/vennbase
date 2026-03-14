@@ -109,6 +109,70 @@ describe("PutBase", () => {
     expect(row.fields.name).toBe("Rex");
   });
 
+  it("surfaces worker trace logs from error responses", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+
+        if (url.endsWith("/room")) {
+          return new Response(
+            JSON.stringify({
+              id: "room_public",
+              name: "Rex",
+              owner: "owner",
+              workerUrl: "https://worker.example/rooms/room_public",
+              createdAt: 1,
+              collection: "rows",
+              members: ["owner"],
+              parentRefs: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (url.endsWith("/fields")) {
+          return new Response(
+            JSON.stringify({
+              code: "UNAUTHORIZED",
+              message: "Members only",
+              logs: ["fields room=room_public requester=owner", "resolve-member-role room=room_public username=owner final=none"],
+            }),
+            { status: 401, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    await expect(db.getRowByUrl("https://worker.example/rooms/room_public")).rejects.toMatchObject({
+      message: "Members only",
+      code: "UNAUTHORIZED",
+      status: 401,
+      logs: [
+        "fields room=room_public requester=owner",
+        "resolve-member-role room=room_public username=owner final=none",
+      ],
+    });
+
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "[putbase] worker trace 401 https://worker.example/rooms/room_public/fields",
+      [
+        "fields room=room_public requester=owner",
+        "resolve-member-role room=room_public username=owner final=none",
+      ],
+    );
+
+    consoleInfo.mockRestore();
+  });
+
   it("uses globalThis.puter when no backend option is provided", async () => {
     runtimeGlobal.puter = {
       auth: {
@@ -127,6 +191,48 @@ describe("PutBase", () => {
     });
 
     await expect(db.whoAmI()).resolves.toEqual({ username: "owner" });
+  });
+
+  it("waits for ambient backend availability during constructor prewarm", async () => {
+    const kv = new MapKv();
+    const appHost = "late-backend.example";
+    const hostHash = hashHostname(appHost);
+    const expectedWorkerName = `owner-${hostHash}-federation`;
+    const deployedWorkerBase = `https://workers.example/${expectedWorkerName}`;
+    const createStarted = deferred<void>();
+    let createCalls = 0;
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      appBaseUrl: `https://${appHost}`,
+    });
+
+    runtimeGlobal.puter = {
+      auth: {
+        whoami: async () => ({ username: "owner" }),
+      },
+      fs: {
+        mkdir: async () => undefined,
+        write: async () => undefined,
+      },
+      workers: {
+        create: async () => {
+          createCalls += 1;
+          createStarted.resolve();
+          return { success: true, url: deployedWorkerBase };
+        },
+      },
+      kv,
+    } as BackendClient;
+
+    await createStarted.promise;
+    await expect(db.ensureReady()).resolves.toBeUndefined();
+
+    expect(createCalls).toBe(1);
+    await expect(kv.get(`puter-fed:federation-worker-version:v2:owner:${hostHash}`)).resolves.toSatisfy(
+      (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
+    await expect(kv.get(`puter-fed:federation-worker-url:v2:owner:${hostHash}`)).resolves.toBe(deployedWorkerBase);
   });
 
   it("fails getRowByUrl when the worker omits collection metadata", async () => {
@@ -295,6 +401,7 @@ describe("PutBase", () => {
   });
 
   it("starts provisioning a host-scoped federation worker from constructor prewarm", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const kv = new MapKv();
     const appHost = "woof.example";
     const hostHash = hashHostname(appHost);
@@ -330,8 +437,17 @@ describe("PutBase", () => {
     await db.ensureReady();
 
     expect(createdName).toBe(expectedWorkerName);
-    await expect(kv.get(`puter-fed:federation-worker-version:v2:owner:${hostHash}`)).resolves.toBe(12);
+    await expect(kv.get(`puter-fed:federation-worker-version:v2:owner:${hostHash}`)).resolves.toSatisfy(
+      (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
     await expect(kv.get(`puter-fed:federation-worker-url:v2:owner:${hostHash}`)).resolves.toBe(deployedWorkerBase);
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringContaining(`[putbase] deploying federation worker ${expectedWorkerName} for owner on ${appHost} at version `),
+    );
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringContaining(`[putbase] federation worker ready ${expectedWorkerName} version `),
+    );
+    consoleInfo.mockRestore();
   });
 
   it("shares constructor prewarm with ensureReady", async () => {
@@ -641,6 +757,56 @@ describe("PutBase", () => {
     expect(getCalls).toBeGreaterThan(0);
     expect(deployCalls).toBe(0);
     expect(row.workerUrl.startsWith(`${existingWorkerBase}/rooms/`)).toBe(true);
+  });
+
+  it("logs and redeploys when the stored federation worker version is stale", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const kv = new MapKv();
+    const appHost = "upgrade.example";
+    const hostHash = hashHostname(appHost);
+    const workerName = `owner-${hostHash}-federation`;
+    const staleWorkerBase = `https://workers.example/${workerName}-stale`;
+    const upgradedWorkerBase = `https://workers.example/${workerName}`;
+    let getCalls = 0;
+    let createCalls = 0;
+
+    await kv.set(`puter-fed:federation-worker-version:v2:owner:${hostHash}`, 1);
+    await kv.set(`puter-fed:federation-worker-url:v2:owner:${hostHash}`, staleWorkerBase);
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: `https://${appHost}`,
+      backend: {
+        fs: { mkdir: async () => undefined, write: async () => undefined },
+        workers: {
+          get: async () => {
+            getCalls += 1;
+            return { url: staleWorkerBase };
+          },
+          create: async () => {
+            createCalls += 1;
+            return { url: upgradedWorkerBase };
+          },
+        },
+        kv,
+      },
+    });
+
+    await db.ensureReady();
+
+    expect(getCalls).toBe(0);
+    expect(createCalls).toBe(1);
+    await expect(kv.get(`puter-fed:federation-worker-url:v2:owner:${hostHash}`)).resolves.toBe(upgradedWorkerBase);
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `[putbase] upgrading federation worker ${workerName} for owner on ${appHost} from version 1 to `,
+      ),
+    );
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringContaining(`[putbase] federation worker ready ${workerName} version `),
+    );
+    consoleInfo.mockRestore();
   });
 
   it("fails hard when scoped worker name collides", async () => {

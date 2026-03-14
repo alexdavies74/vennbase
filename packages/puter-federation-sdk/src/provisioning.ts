@@ -7,7 +7,7 @@ import { stripTrailingSlash } from "./transport";
 import type { BackendClient, DeployWorkerArgs } from "./types";
 
 const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
-const FEDERATION_WORKER_VERSION = 12;
+const FEDERATION_WORKER_VERSION = 21;
 const FEDERATION_WORKER_VERSION_KV_PREFIX = "puter-fed:federation-worker-version:v2";
 const FEDERATION_WORKER_URL_KV_PREFIX = "puter-fed:federation-worker-url:v2";
 const sharedFederationWorkerPromises = new Map<string, Promise<string>>();
@@ -30,13 +30,14 @@ export class Provisioning {
     this.backend = backend;
   }
 
-  async ensureFederationWorkerForCurrentUser(): Promise<void> {
+  async ensureFederationWorkerForCurrentUser(): Promise<boolean> {
     if (!this.canDeployFederationWorker()) {
-      return;
+      return false;
     }
 
     const user = await this.identity.whoAmI();
     await this.getFederationWorkerUrl(user.username);
+    return true;
   }
 
   async getFederationWorkerUrl(username: string): Promise<string> {
@@ -111,15 +112,28 @@ export class Provisioning {
       return stripTrailingSlash(storedUrl);
     }
 
-    const existingWorkerUrl = await this.loadExistingFederationWorkerUrl(workerName);
-    if (existingWorkerUrl) {
-      await this.saveFederationWorkerMetadata(username, appHostHash, existingWorkerUrl);
-      return stripTrailingSlash(existingWorkerUrl);
+    const requiresUpgrade = storedVersion > 0 && storedVersion < FEDERATION_WORKER_VERSION;
+    if (!requiresUpgrade) {
+      const existingWorkerUrl = await this.loadExistingFederationWorkerUrl(workerName);
+      if (existingWorkerUrl) {
+        await this.saveFederationWorkerMetadata(username, appHostHash, existingWorkerUrl);
+        return stripTrailingSlash(existingWorkerUrl);
+      }
     }
 
     if (!this.canDeployFederationWorker()) {
       throw new Error(
         "Unable to provision federation worker: a compatible backend with workers.create is unavailable.",
+      );
+    }
+
+    if (requiresUpgrade) {
+      console.info(
+        `[putbase] upgrading federation worker ${workerName} for ${username} on ${appHostname} from version ${storedVersion} to ${FEDERATION_WORKER_VERSION}`,
+      );
+    } else {
+      console.info(
+        `[putbase] deploying federation worker ${workerName} for ${username} on ${appHostname} at version ${FEDERATION_WORKER_VERSION}`,
       );
     }
 
@@ -143,6 +157,9 @@ export class Provisioning {
     }
 
     const activeWorkerUrl = stripTrailingSlash(deployedWorkerUrl);
+    console.info(
+      `[putbase] federation worker ready ${workerName} version ${FEDERATION_WORKER_VERSION} ${activeWorkerUrl}`,
+    );
     await this.saveFederationWorkerMetadata(username, appHostHash, activeWorkerUrl);
     return activeWorkerUrl;
   }

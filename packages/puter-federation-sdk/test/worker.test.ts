@@ -50,6 +50,62 @@ class CountingKv extends InMemoryKv {
   }
 }
 
+class WorkerNetwork {
+  private readonly workers = new Map<string, RoomWorker>();
+
+  register(baseUrl: string, worker: RoomWorker): void {
+    this.workers.set(baseUrl.replace(/\/+$/g, ""), worker);
+  }
+
+  async dispatch(
+    mode: "full" | "local-only",
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const baseUrl = this.resolveBaseUrl(request.url);
+    if (!baseUrl) {
+      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: `No worker for ${request.url}` }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    const worker = this.workers.get(baseUrl);
+    if (!worker) {
+      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: `Worker missing for ${request.url}` }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    return worker.handle(request, {
+      workersExec: (nextUrl, nextInit) => {
+        if (mode === "local-only" && this.resolveBaseUrl(nextUrl) !== baseUrl) {
+          return Promise.resolve(new Response(JSON.stringify({
+            code: "EXEC_SCOPE",
+            message: "cross-worker exec blocked",
+          }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }));
+        }
+
+        return this.dispatch(mode, nextUrl, nextInit);
+      },
+    });
+  }
+
+  private resolveBaseUrl(requestUrl: string): string | null {
+    let best: string | null = null;
+    for (const candidate of this.workers.keys()) {
+      if (!requestUrl.startsWith(candidate)) continue;
+      if (!best || candidate.length > best.length) best = candidate;
+    }
+    return best;
+  }
+}
+
 describe("RoomWorker", () => {
   it("enforces invite and members-only reads", async () => {
     const worker = new RoomWorker(
@@ -615,5 +671,155 @@ describe("RoomWorker", () => {
     expect(response.status).toBe(204);
     const allowHeaders = response.headers.get("access-control-allow-headers");
     expect(allowHeaders).toContain("puter-auth");
+  });
+
+  it("reproduces inherited-membership failure when exec cannot cross worker boundaries", async () => {
+    const network = new WorkerNetwork();
+    const aliceBase = "https://alice.example";
+    const bobBase = "https://bob.example";
+
+    network.register(
+      aliceBase,
+      new RoomWorker(
+        { owner: "alice", workerUrl: aliceBase },
+        { kv: new InMemoryKv() },
+      ),
+    );
+    network.register(
+      bobBase,
+      new RoomWorker(
+        { owner: "bob", workerUrl: bobBase },
+        { kv: new InMemoryKv() },
+      ),
+    );
+
+    const run = (mode: "full" | "local-only", args: Parameters<typeof authedRequest>[0]) =>
+      network.dispatch(mode, authedRequest(args));
+
+    expect(await run("full", {
+      url: `${aliceBase}/rooms`,
+      method: "POST",
+      username: "alice",
+      body: { roomId: "dog_1", roomName: "Rex" },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("dog_1", "join").replace("https://worker.example", aliceBase),
+      method: "POST",
+      username: "alice",
+      body: { username: "alice" },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("dog_1", "invite-token").replace("https://worker.example", aliceBase),
+      method: "POST",
+      username: "alice",
+      body: { token: "invite_1", roomId: "dog_1", invitedBy: "alice", createdAt: 1 },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("dog_1", "join").replace("https://worker.example", aliceBase),
+      method: "POST",
+      username: "bob",
+      body: { username: "bob", inviteToken: "invite_1" },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("dog_1", "fields").replace("https://worker.example", aliceBase),
+      method: "POST",
+      username: "alice",
+      body: { collection: "dogs", fields: { name: "Rex" } },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: `${bobBase}/rooms`,
+      method: "POST",
+      username: "bob",
+      body: { roomId: "tag_1", roomName: "friendly" },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("tag_1", "join").replace("https://worker.example", bobBase),
+      method: "POST",
+      username: "bob",
+      body: { username: "bob" },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("tag_1", "fields").replace("https://worker.example", bobBase),
+      method: "POST",
+      username: "bob",
+      body: {
+        collection: "tags",
+        fields: { label: "friendly", createdBy: "bob", createdAt: 1 },
+      },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("dog_1", "register-child").replace("https://worker.example", aliceBase),
+      method: "POST",
+      username: "bob",
+      body: {
+        childRowId: "tag_1",
+        childOwner: "bob",
+        childWorkerUrl: `${bobBase}/rooms/tag_1`,
+        collection: "tags",
+        fields: { label: "friendly", createdBy: "bob", createdAt: 1 },
+      },
+    })).toMatchObject({ status: 200 });
+
+    expect(await run("full", {
+      url: roomEndpoint("tag_1", "link-parent").replace("https://worker.example", bobBase),
+      method: "POST",
+      username: "bob",
+      body: {
+        parentRef: {
+          id: "dog_1",
+          collection: "dogs",
+          owner: "alice",
+          workerUrl: `${aliceBase}/rooms/dog_1`,
+        },
+      },
+    })).toMatchObject({ status: 200 });
+
+    const parentQuery = await run("local-only", {
+      url: `${roomEndpoint("dog_1", "db-query").replace("https://worker.example", aliceBase)}?collection=tags`,
+      method: "GET",
+      username: "alice",
+    });
+    expect(parentQuery.status).toBe(200);
+    expect((await jsonBody(parentQuery)).rows).toEqual([
+      expect.objectContaining({
+        rowId: "tag_1",
+        owner: "bob",
+        workerUrl: `${bobBase}/rooms/tag_1`,
+      }),
+    ]);
+
+    const childFieldsWithLocalOnlyExec = await run("local-only", {
+      url: roomEndpoint("tag_1", "fields").replace("https://worker.example", bobBase),
+      method: "GET",
+      username: "alice",
+    });
+    expect(childFieldsWithLocalOnlyExec.status).toBe(401);
+    expect((await jsonBody(childFieldsWithLocalOnlyExec))).toMatchObject({
+      message: "Members only",
+      logs: expect.arrayContaining([
+        expect.stringContaining("fields room=tag_1 requester=alice"),
+        expect.stringContaining("resolve-member-role room=tag_1 username=alice"),
+        expect.stringContaining("resolve-member-role parent status=503 room=tag_1 parent=dog_1"),
+      ]),
+    });
+
+    const childFieldsWithFullExec = await run("full", {
+      url: roomEndpoint("tag_1", "fields").replace("https://worker.example", bobBase),
+      method: "GET",
+      username: "alice",
+    });
+    expect(childFieldsWithFullExec.status).toBe(200);
+    expect((await jsonBody(childFieldsWithFullExec)).fields).toMatchObject({
+      label: "friendly",
+      createdBy: "bob",
+    });
   });
 });
