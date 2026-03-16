@@ -1,5 +1,6 @@
 import { buildClassicWorkerScript } from "./worker/template";
 import { resolveBackend } from "./backend";
+import type { WorkerDeployment } from "@heyputer/puter.js";
 import type { Identity } from "./identity";
 import type { PutBaseOptions } from "./putbase";
 import type { Transport } from "./transport";
@@ -170,8 +171,7 @@ export class Provisioning {
     }
 
     this.backend = resolveBackend(this.backend);
-
-    const workers = this.backend?.workers as { create?: unknown } | undefined;
+    const workers = this.backend?.workers;
     return typeof workers?.create === "function";
   }
 
@@ -200,12 +200,7 @@ export class Provisioning {
     const workerDir = "puter-fed/workers";
     const workerFilePath = `${workerDir}/${workerName}.js`;
 
-    const workers = backend.workers as
-      | {
-          create?: (name: string, filePath: string) => Promise<{ url?: unknown }>;
-          get?: (name: string) => Promise<{ url?: unknown } | null>;
-        }
-      | undefined;
+    const workers = backend.workers;
 
     if (!workers?.create) {
       throw new Error("A compatible backend workers.create API is unavailable.");
@@ -224,7 +219,7 @@ export class Provisioning {
         createMissingAncestors: true,
       });
 
-      let deployment: { url?: unknown };
+      let deployment: WorkerDeployment;
       try {
         deployment = await workers.create(workerName, workerFilePath);
       } catch (error) {
@@ -247,9 +242,7 @@ export class Provisioning {
         return stripTrailingSlash(deployment.url);
       }
 
-      const discovered = workers.get
-        ? await this.loadExistingFederationWorkerUrl(workerName)
-        : null;
+      const discovered = await this.loadExistingFederationWorkerUrl(workerName);
       return discovered ?? undefined;
     } catch (error) {
       console.error("[putbase] deployWorker failed", {
@@ -321,11 +314,7 @@ export class Provisioning {
     this.backend = resolveBackend(this.backend);
 
     const backend = this.backend;
-    const workers = backend?.workers as
-      | {
-          get?: (name: string) => Promise<{ url?: unknown } | null>;
-        }
-      | undefined;
+    const workers = backend?.workers;
 
     if (!workers?.get) {
       return null;

@@ -1,8 +1,7 @@
 import * as Y from "yjs";
 import type {
-  CrdtConnectCallbacks,
+  AnyRowHandle,
   CrdtConnection,
-  ParsedInviteInput,
   RoomUser,
 } from "puter-federation-sdk";
 import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
@@ -13,51 +12,16 @@ import {
   saveStoredWorkerUrl,
   type DogProfile,
 } from "./profile";
-import type { DogFields, TagFields } from "./schema";
+import type { DogRowHandle, TagRowHandle, WoofDb, WoofSchema } from "./schema";
 
 type KvLike = Pick<KV, "get" | "set" | "del">;
 
 type PuterAI = Pick<AI, "chat">;
 
-type DogRowRef = {
-  id: string;
-  collection: "dogs";
-  owner: string;
-  workerUrl: string;
-};
-
-interface ResolvedWoofRowPort {
-  collection: string;
-}
-
-export interface DogRowPort extends ResolvedWoofRowPort {
-  id: string;
-  collection: "dogs";
-  owner: string;
-  workerUrl: string;
-  fields: DogFields | (Record<string, unknown> & { name?: unknown });
-  connectCrdt(callbacks: CrdtConnectCallbacks): CrdtConnection;
-  toRef(): DogRowRef;
-}
-
-export interface TagRowPort {
-  id: string;
-  fields: TagFields | (Record<string, unknown> & {
-    label?: unknown;
-    createdBy?: unknown;
-    createdAt?: unknown;
-  });
-}
-
-export interface WoofDbPort {
-  whoAmI(): Promise<RoomUser>;
-  put(collection: "dogs", fields: DogFields): Promise<DogRowPort>;
-  put(collection: "tags", fields: TagFields, options: { in: DogRowRef }): Promise<TagRowPort>;
-  getRowByUrl(workerUrl: string): Promise<ResolvedWoofRowPort>;
-  parseInviteInput(input: string): ParsedInviteInput;
-  joinRow(workerUrl: string, options?: { inviteToken?: string }): Promise<ResolvedWoofRowPort>;
-  listMembers(row: DogRowPort): Promise<string[]>;
-}
+export type WoofDbPort = Pick<
+  WoofDb,
+  "whoAmI" | "put" | "getRowByUrl" | "parseInviteInput" | "joinRow" | "listMembers"
+>;
 
 export interface ChatEntry {
   id: string;
@@ -91,12 +55,12 @@ function decodeUpdate(body: unknown): Uint8Array | null {
   }
 }
 
-function expectDogRow(row: ResolvedWoofRowPort): DogRowPort {
+function expectDogRow(row: AnyRowHandle<WoofSchema>): DogRowHandle {
   if (row.collection !== "dogs") {
     throw new Error(`Expected dogs row, got ${row.collection}`);
   }
 
-  return row as DogRowPort;
+  return row as DogRowHandle;
 }
 
 export class WoofService {

@@ -1,5 +1,6 @@
 import { encodeCompositeFieldValues } from "../key-encoding";
-import type { DbRowRef } from "../schema";
+import type { WorkersHandler } from "@heyputer/puter.js";
+import type { DbRowRef, MemberRole } from "../schema";
 import type {
   ApiError,
   InviteToken,
@@ -37,21 +38,9 @@ interface JoinRequest {
   inviteToken?: string;
 }
 
-interface InvitePayload {
-  token: string;
-  roomId: string;
-  invitedBy: string;
-  createdAt: number;
-}
+type InvitePayload = Pick<InviteToken, "token" | "roomId" | "createdAt" | "invitedBy">;
 
-interface MessagePayload {
-  id: string;
-  roomId: string;
-  body: unknown;
-  createdAt: number;
-}
-
-type MemberRole = "admin" | "writer" | "reader";
+type MessagePayload = Omit<Message, "signedBy" | "sequence">;
 
 interface GetFieldsResponse {
   fields: Record<string, JsonValue>;
@@ -480,10 +469,8 @@ function deepEqualJson(left: JsonValue, right: JsonValue): boolean {
   return false;
 }
 
-type WorkersExec = (url: string, init?: RequestInit) => Promise<Response>;
-
 interface WorkerRequestContext {
-  workersExec?: WorkersExec;
+  workersExec?: WorkersHandler["exec"];
 }
 
 export class RoomWorker {

@@ -1,18 +1,25 @@
 import { RoomWorker, type WorkerKv } from "./core";
+import type { Auth, KV, Puter, WorkersHandler } from "@heyputer/puter.js";
+
+type DeployRuntimeKv = Pick<KV, "get" | "set" | "incr" | "list"> & {
+  delete?: (key: string) => Promise<void>;
+};
+
+type DeployRuntimeWorkers = Pick<WorkersHandler, "exec">;
+
+type DeployRuntimePuter = Pick<Puter, "getUser"> & {
+  auth?: Pick<Auth, "whoami" | "getUser">;
+  kv: DeployRuntimeKv;
+  workers?: DeployRuntimeWorkers;
+};
+
+type RouterPuter = Pick<Puter, "getUser"> & {
+  auth?: Pick<Auth, "whoami" | "getUser">;
+  workers?: DeployRuntimeWorkers;
+};
 
 declare const me: {
-  puter: {
-    kv: {
-      get<T = unknown>(key: string): Promise<T | null>;
-      set<T = unknown>(key: string, value: T): Promise<void>;
-      incr(key: string, amount?: number): Promise<number>;
-      delete?(key: string): Promise<void>;
-      list(prefix: string, includeValues?: boolean): Promise<Array<{ key: string; value: unknown }> | null>;
-    };
-    workers?: {
-      exec: (url: string, init?: RequestInit) => Promise<Response>;
-    };
-  };
+  puter: DeployRuntimePuter;
 };
 
 declare const router: {
@@ -23,16 +30,7 @@ declare const router: {
 
 interface RouterUserContext {
   username: string;
-  puter: {
-    getUser?: () => Promise<{ username?: string } | null>;
-    auth?: {
-      whoami?: () => Promise<{ username?: string } | null>;
-      getUser?: () => Promise<{ username?: string } | null>;
-    };
-    workers?: {
-      exec: (url: string, init?: RequestInit) => Promise<Response>;
-    };
-  };
+  puter: RouterPuter;
 }
 
 interface RouterContext {
@@ -49,11 +47,11 @@ const CORS_PREFLIGHT_HEADERS = {
 };
 
 const kv: WorkerKv = {
-  get<T = unknown>(key: string): Promise<T | null> {
-    return me.puter.kv.get<T>(key);
+  async get<T = unknown>(key: string): Promise<T | null> {
+    return (await me.puter.kv.get<T>(key)) ?? null;
   },
-  set<T = unknown>(key: string, value: T): Promise<void> {
-    return me.puter.kv.set<T>(key, value);
+  async set<T = unknown>(key: string, value: T): Promise<void> {
+    await me.puter.kv.set<T>(key, value);
   },
   incr(key: string, amount = 1): Promise<number> {
     return me.puter.kv.incr(key, amount);

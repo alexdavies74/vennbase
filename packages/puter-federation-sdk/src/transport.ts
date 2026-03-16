@@ -1,13 +1,19 @@
 import { PutBaseError, toApiError } from "./errors";
 import { resolveBackend } from "./backend";
+import type { WorkersHandler } from "@heyputer/puter.js";
 import type { PutBaseOptions } from "./putbase";
 import type { BackendClient } from "./types";
 import type { DbRowLocator } from "./schema";
 
-export type PuterWorkersExec = (
-  workerUrl: string,
-  init?: RequestInit,
-) => Promise<Response>;
+function resolveBoundWorkersExec(
+  workers: Partial<Pick<WorkersHandler, "exec">> | null | undefined,
+): WorkersHandler["exec"] | null {
+  if (!workers || typeof workers.exec !== "function") {
+    return null;
+  }
+
+  return workers.exec.bind(workers);
+}
 
 export function stripTrailingSlash(input: string): string {
   return input.replace(/\/+$/g, "");
@@ -104,17 +110,10 @@ export class Transport {
     });
   }
 
-  resolveWorkersExec(): PuterWorkersExec | null {
+  resolveWorkersExec(): WorkersHandler["exec"] | null {
     this.backend = resolveBackend(this.backend);
-
-    const exec = (this.backend?.workers as { exec?: unknown } | undefined)?.exec;
-    if (typeof exec === "function") {
-      return exec as PuterWorkersExec;
-    }
-
-    const globalBackend = resolveBackend();
-    const globalExec = (globalBackend?.workers as { exec?: unknown } | undefined)?.exec;
-    return typeof globalExec === "function" ? (globalExec as PuterWorkersExec) : null;
+    return resolveBoundWorkersExec(this.backend?.workers)
+      ?? resolveBoundWorkersExec(resolveBackend()?.workers);
   }
 
   createId(prefix: string): string {

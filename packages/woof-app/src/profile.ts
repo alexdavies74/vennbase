@@ -1,8 +1,8 @@
 import type { KV } from "@heyputer/puter.js";
-import type { DogRowPort } from "./service";
+import type { DogRowHandle } from "./schema";
 
 export interface DogProfile {
-  row: DogRowPort;
+  row: DogRowHandle;
 }
 
 const PROFILE_KEY = "woof:myDog";
@@ -19,7 +19,7 @@ export async function loadStoredWorkerUrl(kv: KvLike): Promise<string | null> {
   return workerUrl || null;
 }
 
-export async function saveStoredWorkerUrl(row: Pick<DogRowPort, "workerUrl">, kv: KvLike): Promise<void> {
+export async function saveStoredWorkerUrl(row: Pick<DogRowHandle, "workerUrl">, kv: KvLike): Promise<void> {
   await kv.set(PROFILE_KEY, row.workerUrl);
 }
 
