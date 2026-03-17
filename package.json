@@ -6,6 +6,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
+    "publish:sdk": "node ./scripts/publish-sdk.mjs",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },

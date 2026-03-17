@@ -13,6 +13,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "node ./scripts/clean-dist.mjs",
     "generate:worker-runtime": "node ./scripts/generate-worker-runtime.mjs",
