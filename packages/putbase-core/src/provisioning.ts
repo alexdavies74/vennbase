@@ -278,7 +278,8 @@ export class Provisioning {
       this.options.appBaseUrl ??
       (typeof window !== "undefined" ? window.location.origin : "http://localhost:5173");
     const normalized = appBaseUrl.includes("://") ? appBaseUrl : `https://${appBaseUrl}`;
-    return new URL(normalized).hostname.toLowerCase();
+    // Use host instead of hostname so localhost apps on different ports provision distinct workers.
+    return new URL(normalized).host.toLowerCase();
   }
 
   private federationWorkerName(username: string, appHostHash: string): string {

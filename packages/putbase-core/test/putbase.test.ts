@@ -479,6 +479,54 @@ describe("PutBase", () => {
     expect(deployCalls).toBe(1);
   });
 
+  it("uses distinct federation workers for localhost apps on different ports", async () => {
+    const kv = new MapKv();
+    const createdNames: string[] = [];
+    const firstHost = "localhost:5173";
+    const secondHost = "localhost:4173";
+    const firstHash = hashHostname(firstHost);
+    const secondHash = hashHostname(secondHost);
+
+    const backend: BackendClient = {
+      fs: { mkdir: async () => undefined, write: async () => undefined },
+      workers: {
+        create: async (name: string) => {
+          createdNames.push(name);
+          return { success: true, url: `https://workers.example/${name}` };
+        },
+      },
+      kv,
+    };
+
+    const firstDb = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: `http://${firstHost}`,
+      backend,
+    });
+
+    const secondDb = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: `http://${secondHost}`,
+      backend,
+    });
+
+    await Promise.all([firstDb.ensureReady(), secondDb.ensureReady()]);
+
+    expect(createdNames).toEqual(expect.arrayContaining([
+      `owner-${firstHash}-federation`,
+      `owner-${secondHash}-federation`,
+    ]));
+    expect(new Set(createdNames).size).toBe(2);
+    await expect(kv.get(workerMetadataKey("url", firstHash))).resolves.toBe(
+      `https://workers.example/owner-${firstHash}-federation`,
+    );
+    await expect(kv.get(workerMetadataKey("url", secondHash))).resolves.toBe(
+      `https://workers.example/owner-${secondHash}-federation`,
+    );
+  });
+
   it("uses deployed shared worker URL returned by puter.workers.create", async () => {
     const requestedUrls: string[] = [];
     const deployedWorkerBase = "https://workers.example/owner-1234abcd-federation";
