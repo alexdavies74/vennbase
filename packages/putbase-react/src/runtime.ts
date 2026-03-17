@@ -1,5 +1,6 @@
 import type { PutBase } from "@putbase/core";
 import type {
+  AuthSession,
   AnyRowHandle,
   CollectionName,
   DbMemberInfo,
@@ -95,6 +96,10 @@ function snapshotStrings(value: string[]): string {
 }
 
 function snapshotRoomUser(value: RoomUser): string {
+  return stableJsonStringify(value);
+}
+
+function snapshotSession(value: AuthSession): string {
   return stableJsonStringify(value);
 }
 
@@ -350,6 +355,7 @@ export const snapshots = {
   directMembers: snapshotMembers,
   effectiveMembers: snapshotEffectiveMembers,
   currentUser: snapshotRoomUser,
+  session: snapshotSession,
 };
 
 export type QueryRows<

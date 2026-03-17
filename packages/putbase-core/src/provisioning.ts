@@ -40,6 +40,11 @@ export class Provisioning {
     this.backend = backend;
   }
 
+  reset(): void {
+    this.federationWorkerUrl = null;
+    this.federationWorkerPromise = null;
+  }
+
   async ensureFederationWorkerForCurrentUser(): Promise<boolean> {
     if (!this.canDeployFederationWorker()) {
       return false;

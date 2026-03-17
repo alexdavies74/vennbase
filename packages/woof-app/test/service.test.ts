@@ -15,7 +15,7 @@ import type {
 } from "@putbase/core";
 import type { ChatMessage } from "@heyputer/puter.js";
 
-import { loadStoredWorkerUrl } from "../src/profile";
+import { loadStoredTarget } from "../src/profile";
 import type {
   DogFields,
   DogRowHandle,
@@ -44,7 +44,7 @@ class MockKv {
 }
 
 class MockDb implements WoofDbPort {
-  public failGetRowByUrl = false;
+  public failOpenTarget = false;
   public readonly memberList = ["alex", "friend"];
   public crdtCallbacks: CrdtConnectCallbacks | null = null;
 
@@ -94,12 +94,12 @@ class MockDb implements WoofDbPort {
   }
 
   private makeDogRow(id: string, fields: Record<string, unknown>): DogRowHandle {
-    const workerUrl = `https://workers.puter.site/alex/rooms/${id}`;
+    const target = `https://workers.puter.site/alex/rooms/${id}`;
     const rowRef: ReturnType<DogRowHandle["toRef"]> = {
       id,
       collection: "dogs",
       owner: "alex",
-      workerUrl,
+      target,
     };
     const rowFields: DogFields = {
       name: typeof fields.name === "string" ? fields.name : "",
@@ -113,7 +113,7 @@ class MockDb implements WoofDbPort {
       id,
       collection: "tags",
       owner: "alex",
-      workerUrl: `https://workers.puter.site/alex/rooms/${id}`,
+      target: `https://workers.puter.site/alex/rooms/${id}`,
     };
     const rowFields: TagFields = {
       label: typeof fields.label === "string" ? fields.label : "",
@@ -125,6 +125,17 @@ class MockDb implements WoofDbPort {
   }
 
   async whoAmI(): Promise<{ username: string }> {
+    return { username: "alex" };
+  }
+
+  async getSession(): Promise<{ state: "signed-in"; user: { username: string } }> {
+    return {
+      state: "signed-in",
+      user: { username: "alex" },
+    };
+  }
+
+  async signIn(): Promise<{ username: string }> {
     return { username: "alex" };
   }
 
@@ -146,31 +157,17 @@ class MockDb implements WoofDbPort {
       : this.makeTagRow(id, fields);
   }
 
-  async getRowByUrl(workerUrl: string): Promise<DogRowHandle> {
-    if (this.failGetRowByUrl) {
+  async openTarget(target: string): Promise<DogRowHandle> {
+    if (this.failOpenTarget) {
       throw new Error("room lookup failed");
     }
-    const joined = workerUrl.includes("row_joined");
+    const joined = target.includes("row_joined");
     const id = joined ? "row_joined" : "row_created";
     const name = joined ? "Joined Canonical" : "Rex Canonical";
     return this.makeDogRow(id, { name });
   }
 
-  parseInviteInput(input: string): { workerUrl: string; inviteToken?: string } {
-    const url = new URL(input);
-    const workerUrl = url.searchParams.get("worker");
-    const token = url.searchParams.get("token") ?? undefined;
-    return {
-      workerUrl: workerUrl ?? `https://workers.puter.site/alex/rooms/row_joined`,
-      inviteToken: token,
-    };
-  }
-
-  async joinRow(
-    workerUrl: string,
-    _options?: { inviteToken?: string },
-  ): Promise<DogRowHandle> {
-    void workerUrl;
+  async openInvite(_input: string): Promise<DogRowHandle> {
     return this.makeDogRow("row_joined", { name: "Joined" });
   }
 
@@ -188,7 +185,7 @@ describe("WoofService", () => {
     const profile = await service.enterChat({ dogName: "Rex" });
 
     expect(profile.row.id).toBe("row_created");
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBe(
+    await expect(loadStoredTarget(kv)).resolves.toBe(
       "https://workers.puter.site/alex/rooms/row_created",
     );
   });
@@ -203,7 +200,7 @@ describe("WoofService", () => {
     );
 
     expect(profile.row.id).toBe("row_joined");
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBe(
+    await expect(loadStoredTarget(kv)).resolves.toBe(
       "https://workers.puter.site/alex/rooms/row_joined",
     );
   });
@@ -233,7 +230,7 @@ describe("WoofService", () => {
       id: profile.row.id,
       collection: "dogs",
       owner: profile.row.owner,
-      workerUrl: profile.row.workerUrl,
+      target: profile.row.target,
     });
   });
 
@@ -248,7 +245,7 @@ describe("WoofService", () => {
     const refreshed = await service.refreshProfileCanonical(profile);
 
     expect(String(refreshed.row.fields.name)).toBe("Joined Canonical");
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBe(
+    await expect(loadStoredTarget(kv)).resolves.toBe(
       "https://workers.puter.site/alex/rooms/row_joined",
     );
   });
@@ -259,10 +256,10 @@ describe("WoofService", () => {
     const service = new WoofService(db, kv);
 
     const profile = await service.enterChat({ dogName: "Rex" });
-    db.failGetRowByUrl = true;
+    db.failOpenTarget = true;
 
     await expect(service.refreshProfileCanonical(profile)).rejects.toThrow("room lookup failed");
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBeNull();
+    await expect(loadStoredTarget(kv)).resolves.toBeNull();
   });
 
   it("clears persisted worker URL when restore fails", async () => {
@@ -271,10 +268,10 @@ describe("WoofService", () => {
     const service = new WoofService(db, kv);
 
     await kv.set("woof:myDog", "https://workers.puter.site/alex/rooms/row_created");
-    db.failGetRowByUrl = true;
+    db.failOpenTarget = true;
 
     await expect(service.restoreProfile()).rejects.toThrow("room lookup failed");
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBeNull();
+    await expect(loadStoredTarget(kv)).resolves.toBeNull();
   });
 
   it("sends user and dog messages in one turn", async () => {
@@ -454,7 +451,7 @@ describe("WoofService", () => {
 
     await service.relinquish();
 
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBeNull();
+    await expect(loadStoredTarget(kv)).resolves.toBeNull();
   });
 
   it("applies remote CRDT updates via applyRemoteUpdate callback", async () => {

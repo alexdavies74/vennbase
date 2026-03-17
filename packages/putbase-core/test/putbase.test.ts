@@ -138,7 +138,59 @@ describe("PutBase", () => {
     await expect(db.whoAmI()).resolves.toEqual({ username: "owner" });
   });
 
-  it("waits for ambient backend availability during constructor prewarm", async () => {
+  it("returns signed-out session without triggering interactive login", async () => {
+    let signInCalls = 0;
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      backend: {
+        auth: {
+          isSignedIn: () => false,
+          signIn: async () => {
+            signInCalls += 1;
+            return null;
+          },
+        },
+        workers: {},
+        kv: new MapKv(),
+      } as BackendClient,
+    });
+
+    await expect(db.getSession()).resolves.toEqual({ state: "signed-out" });
+    await expect(db.whoAmI()).rejects.toMatchObject<Partial<PutBaseError>>({
+      code: "SIGNED_OUT",
+    });
+    expect(signInCalls).toBe(0);
+  });
+
+  it("signs in explicitly and resolves the authenticated user", async () => {
+    let signedIn = false;
+    let signInCalls = 0;
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      backend: {
+        auth: {
+          isSignedIn: () => signedIn,
+          whoami: async () => (signedIn ? { username: "owner" } : null),
+          signIn: async () => {
+            signInCalls += 1;
+            signedIn = true;
+            return null;
+          },
+        },
+        workers: {},
+        kv: new MapKv(),
+      } as BackendClient,
+    });
+
+    await expect(db.signIn()).resolves.toEqual({ username: "owner" });
+    await expect(db.getSession()).resolves.toEqual({
+      state: "signed-in",
+      user: { username: "owner" },
+    });
+    expect(signInCalls).toBe(1);
+  });
+
+  it("waits for ambient backend availability once ensureReady is called", async () => {
     const kv = new MapKv();
     const appHost = "late-backend.example";
     const hostHash = hashHostname(appHost);
@@ -170,8 +222,9 @@ describe("PutBase", () => {
       kv,
     } as BackendClient;
 
+    const readyPromise = db.ensureReady();
     await createStarted.promise;
-    await expect(db.ensureReady()).resolves.toBeUndefined();
+    await expect(readyPromise).resolves.toBeUndefined();
 
     expect(createCalls).toBe(1);
     await expect(kv.get(workerMetadataKey("version", hostHash))).resolves.toSatisfy(

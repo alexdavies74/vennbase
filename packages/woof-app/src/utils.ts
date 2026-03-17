@@ -37,7 +37,7 @@ function hasStringMessage(value: unknown): value is { message: string } {
 
 export function getInviteInputFromLocation(href: string): string | null {
   const url = new URL(href);
-  return url.searchParams.has("worker") ? url.toString() : null;
+  return url.searchParams.has("worker") || url.searchParams.has("target") ? url.toString() : null;
 }
 
 export function clearInviteLocation(): void {

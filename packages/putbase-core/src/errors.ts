@@ -12,6 +12,13 @@ export class PutBaseError extends Error {
   }
 }
 
+export function signedOutError(message = "Not signed in. Call signIn() first."): PutBaseError {
+  return new PutBaseError({
+    code: "SIGNED_OUT",
+    message,
+  });
+}
+
 export function toApiError(maybeError: unknown): ApiError {
   if (
     maybeError &&

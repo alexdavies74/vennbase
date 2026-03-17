@@ -1,5 +1,5 @@
 import { puter } from "@heyputer/puter.js";
-import { useCurrentUser, useInviteLink, useMutation } from "@putbase/react";
+import { useInviteLink, useMutation, useSession } from "@putbase/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { DogProfile } from "./profile";
@@ -61,6 +61,28 @@ function SetupPanel(props: {
         </button>
       </form>
       <p className="muted">{errorMessage}</p>
+    </section>
+  );
+}
+
+function SignInPanel(props: {
+  busy: boolean;
+  errorMessage: string;
+  hasInvite: boolean;
+  onSignIn(): void;
+}) {
+  const description = props.hasInvite
+    ? "Log in with Puter to join this shared dog room."
+    : "Log in with Puter before creating or restoring a dog room.";
+
+  return (
+    <section className="panel">
+      <h1>Adopt a dog</h1>
+      <p className="muted">{description}</p>
+      <button className="primary" type="button" disabled={props.busy} onClick={props.onSignIn}>
+        {props.busy ? "Opening Puter…" : props.hasInvite ? "Log in to join invite" : "Log in with Puter"}
+      </button>
+      <p className="muted">{props.errorMessage}</p>
     </section>
   );
 }
@@ -189,9 +211,15 @@ function RoomScreen(props: {
 }
 
 export function App() {
-  const currentUser = useCurrentUser();
+  const session = useSession();
+  const signedInUser =
+    session.status === "success" && session.data?.state === "signed-in"
+      ? session.data.user
+      : null;
   const [bootError, setBootError] = useState("");
-  const [bootStatus, setBootStatus] = useState<"loading" | "ready">("loading");
+  const [bootStatus, setBootStatus] = useState<"idle" | "loading" | "ready">("idle");
+  const [loginError, setLoginError] = useState("");
+  const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
   const [profile, setProfile] = useState<DogProfile | null>(null);
   const bootPromise = useRef<Promise<{
     error: unknown | null;
@@ -200,11 +228,16 @@ export function App() {
   }> | null>(null);
 
   useEffect(() => {
-    if (currentUser.status !== "success") {
+    if (!signedInUser) {
+      bootPromise.current = null;
+      setBootStatus("idle");
+      setProfile(null);
+      setBootError("");
       return;
     }
 
     let cancelled = false;
+    setBootStatus("loading");
     if (bootPromise.current === null) {
       const inviteInput = getInviteInputFromLocation(window.location.href);
       bootPromise.current = (async () => {
@@ -258,14 +291,48 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser.status]);
+  }, [signedInUser?.username]);
 
-  if (currentUser.status === "loading" || bootStatus === "loading") {
-    return <SetupPanel disabled initialError="" onEnter={setProfile} />;
+  const invitePending = getInviteInputFromLocation(window.location.href) !== null;
+
+  if (session.status === "loading") {
+    return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;
   }
 
-  if (currentUser.status === "error") {
-    return <SetupPanel disabled={false} initialError={getErrorMessage(currentUser.error, "Could not initialize app.")} onEnter={setProfile} />;
+  if (session.status === "error") {
+    return (
+      <SignInPanel
+        busy={loginStatus === "loading"}
+        errorMessage={getErrorMessage(session.error, "Could not initialize app.")}
+        hasInvite={invitePending}
+        onSignIn={() => undefined}
+      />
+    );
+  }
+
+  if (session.data?.state !== "signed-in") {
+    return (
+      <SignInPanel
+        busy={loginStatus === "loading"}
+        errorMessage={loginError}
+        hasInvite={invitePending}
+        onSignIn={() => {
+          setLoginError("");
+          setLoginStatus("loading");
+          void session.signIn()
+            .catch((error) => {
+              setLoginError(getErrorMessage(error, "Could not sign in."));
+            })
+            .finally(() => {
+              setLoginStatus("idle");
+            });
+        }}
+      />
+    );
+  }
+
+  if (bootStatus === "loading") {
+    return <SetupPanel disabled initialError="" onEnter={setProfile} />;
   }
 
   if (!profile) {
@@ -274,7 +341,7 @@ export function App() {
 
   return (
     <RoomScreen
-      currentUsername={currentUser.data?.username ?? null}
+      currentUsername={signedInUser?.username ?? null}
       profile={profile}
       onRelinquished={() => {
         setProfile(null);

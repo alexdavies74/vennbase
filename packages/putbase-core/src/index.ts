@@ -5,6 +5,7 @@ export { PutBaseError } from "./errors";
 export { collection, defineSchema, field, index } from "./schema";
 export type { PutBaseOptions } from "./putbase";
 export type {
+  AuthSession,
   BackendClient,
   CrdtConnectCallbacks,
   CrdtConnection,

@@ -2,10 +2,10 @@ import { puter } from "@heyputer/puter.js";
 import * as Y from "yjs";
 import { PutBase } from "@putbase/core";
 
-import { woofSchema } from "./schema";
+import { woofSchema, type WoofDb } from "./schema";
 import { WoofService } from "./service";
 
-export const db = new PutBase({
+export const db: WoofDb = new PutBase({
   appBaseUrl: window.location.origin,
   schema: woofSchema,
 });

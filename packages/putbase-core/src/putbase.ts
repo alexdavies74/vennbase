@@ -28,6 +28,7 @@ import { resolveCollectionName } from "./schema";
 import { normalizeTarget } from "./transport";
 import { Transport } from "./transport";
 import type {
+  AuthSession,
   BackendClient,
   CrdtConnectCallbacks,
   CrdtConnection,
@@ -93,11 +94,22 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       (row) => this.rowsModule.refreshFields(row),
     );
     this.queryModule = new Query(this.transport, this.rowsModule, options.schema);
-    this.startPrewarm();
+    this.startPrewarmIfSignedIn();
   }
 
   async ensureReady(): Promise<void> {
     await this.awaitSharedReadiness();
+  }
+
+  async getSession(): Promise<AuthSession> {
+    return this.identity.getSession();
+  }
+
+  async signIn(): Promise<RoomUser> {
+    this.resetSessionState();
+    const user = await this.identity.signIn();
+    void this.startReadiness().catch(() => undefined);
+    return user;
   }
 
   async whoAmI(): Promise<RoomUser> {
@@ -226,8 +238,24 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.provisioning.setBackend(backend);
   }
 
-  private startPrewarm(): void {
-    void this.startReadiness().catch(() => undefined);
+  private resetSessionState(): void {
+    this.ready = false;
+    this.readinessPromise = null;
+    this.pendingReadinessError = null;
+    this.identity.clear();
+    this.provisioning.reset();
+  }
+
+  private startPrewarmIfSignedIn(): void {
+    void this.identity.getSession()
+      .then((session) => {
+        if (session.state !== "signed-in") {
+          return;
+        }
+
+        return this.startReadiness();
+      })
+      .catch(() => undefined);
   }
 
   private async awaitSharedReadiness(): Promise<void> {
@@ -303,12 +331,15 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       return false;
     }
 
-    if (!error || typeof error !== "object" || !("message" in error)) {
+    if (resolveBackend() !== undefined) {
       return false;
     }
 
-    const message = (error as { message?: unknown }).message;
-    return typeof message === "string" && message.includes("Unable to determine the current username");
+    if (!error || typeof error !== "object" || !("code" in error)) {
+      return false;
+    }
+
+    return (error as { code?: unknown }).code === "SIGNED_OUT";
   }
 
   private async waitForAmbientProvisioningBackend(): Promise<boolean> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clearProfile, loadStoredWorkerUrl, saveStoredWorkerUrl } from "../src/profile";
+import { clearProfile, loadStoredTarget, saveStoredTarget } from "../src/profile";
 
 class MockKv {
   private readonly map = new Map<string, unknown>();
@@ -21,18 +21,18 @@ class MockKv {
 }
 
 describe("profile persistence", () => {
-  it("saves, loads, and clears worker URL in puter kv", async () => {
+  it("saves, loads, and clears the stored room target in puter kv", async () => {
     const kv = new MockKv();
 
-    await saveStoredWorkerUrl(
+    await saveStoredTarget(
       {
-        workerUrl: "https://workers.puter.site/alex/rooms/room_1",
+        target: "https://workers.puter.site/alex/rooms/room_1",
       },
       kv,
     );
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBe("https://workers.puter.site/alex/rooms/room_1");
+    await expect(loadStoredTarget(kv)).resolves.toBe("https://workers.puter.site/alex/rooms/room_1");
 
     await clearProfile(kv);
-    await expect(loadStoredWorkerUrl(kv)).resolves.toBeNull();
+    await expect(loadStoredTarget(kv)).resolves.toBeNull();
   });
 });

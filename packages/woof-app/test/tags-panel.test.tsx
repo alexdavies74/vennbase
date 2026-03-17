@@ -10,6 +10,13 @@ import { TagsPanel } from "../src/tags-panel";
 import { woofSchema } from "../src/schema";
 
 class FakeDb {
+  async getSession() {
+    return {
+      state: "signed-in" as const,
+      user: { username: "alex" },
+    };
+  }
+
   async query() {
     return [
       new RowHandle(
@@ -32,7 +39,7 @@ class FakeDb {
           id: "tag_1",
           collection: "tags",
           owner: "alex",
-          workerUrl: "https://worker.example/rooms/tag_1",
+          target: "https://worker.example/rooms/tag_1",
         },
         { label: "playful", createdBy: "alex", createdAt: 100 },
       ),
@@ -56,7 +63,7 @@ class FakeDb {
           id: "tag_2",
           collection: "tags",
           owner: "alex",
-          workerUrl: "https://worker.example/rooms/tag_2",
+          target: "https://worker.example/rooms/tag_2",
         },
         { label: " ", createdBy: "alex", createdAt: 101 },
       ),
@@ -121,7 +128,7 @@ describe("TagsPanel", () => {
         id: "dog_1",
         collection: "dogs" as const,
         owner: "alex",
-        workerUrl: "https://worker.example/rooms/dog_1",
+        target: "https://worker.example/rooms/dog_1",
         fields: { name: "Rex" },
         connectCrdt: () => ({
           disconnect: () => undefined,
@@ -131,7 +138,7 @@ describe("TagsPanel", () => {
           id: "dog_1",
           collection: "dogs" as const,
           owner: "alex",
-          workerUrl: "https://worker.example/rooms/dog_1",
+          target: "https://worker.example/rooms/dog_1",
         }),
       },
     };

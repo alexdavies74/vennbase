@@ -1,4 +1,4 @@
-import { PutBaseProvider, useInviteLink, useMutation, useQuery } from "@putbase/react";
+import { PutBaseProvider, useInviteLink, useMutation, useQuery, useSession } from "@putbase/react";
 import { useEffect, useState } from "react";
 import type { RowHandle, RowFields } from "@putbase/core";
 import { db } from "./db";
@@ -12,9 +12,17 @@ export type CardHandle = RowHandle<"cards", RowFields<Schema, "cards">, "boards"
 
 export default function App() {
   const [board, setBoard] = useState<BoardHandle | null>(null);
+  const [loginError, setLoginError] = useState("");
+  const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
+  const session = useSession({ client: db });
+  const signedIn = session.status === "success" && session.data?.state === "signed-in";
+  const invitePending = new URLSearchParams(window.location.search).has("target");
 
-  // If the page was opened from an invite link, join immediately
   useEffect(() => {
+    if (!signedIn) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     if (params.has("target")) {
       db.openInvite(window.location.href)
@@ -28,7 +36,36 @@ export default function App() {
 
   return (
     <PutBaseProvider client={db}>
-      {board
+      {!signedIn
+        ? (
+          <main>
+            <h1>PutBase Todo</h1>
+            <section>
+              <h2>{invitePending ? "Log in to join board" : "Log in to start"}</h2>
+              <p>{invitePending ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
+              <button
+                type="button"
+                disabled={loginStatus === "loading" || session.status === "loading"}
+                onClick={() => {
+                  setLoginError("");
+                  setLoginStatus("loading");
+                  void session.signIn()
+                    .catch((error) => {
+                      const message = error instanceof Error ? error.message : "Sign-in failed.";
+                      setLoginError(message);
+                    })
+                    .finally(() => {
+                      setLoginStatus("idle");
+                    });
+                }}
+              >
+                {loginStatus === "loading" || session.status === "loading" ? "Opening Puter…" : invitePending ? "Log in to join" : "Log in with Puter"}
+              </button>
+              {loginError ? <p className="error">{loginError}</p> : null}
+            </section>
+          </main>
+        )
+        : board
         ? <BoardView board={board} onLeave={() => setBoard(null)} />
         : <LandingView onBoard={setBoard} />}
     </PutBaseProvider>

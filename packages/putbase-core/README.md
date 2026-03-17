@@ -82,7 +82,20 @@ import { schema } from "./schema";
 export const db = new PutBase({ schema, appBaseUrl: window.location.origin });
 ```
 
-If `puter.js` is on the page, PutBase finds it automatically. No further configuration is needed.
+If `puter.js` is on the page, PutBase finds it automatically. Construction is safe on first paint: PutBase may probe whether a session already exists, but it will never open the Puter login popup unless you call `db.signIn()` explicitly.
+
+## Auth and startup
+
+Use `getSession()` to detect whether the current browser already has a Puter session, and call `signIn()` from a user gesture when it does not:
+
+```ts
+const session = await db.getSession();
+
+if (session.state === "signed-out") {
+  await db.signIn();        // call this from a button click
+}
+```
+
 
 ---
 
@@ -147,6 +160,26 @@ function CardList({ board }: { board: BoardHandle }) {
 `rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
 
 Wrap your app in `<PutBaseProvider client={db}>` to make the client available to all hooks.
+
+For app boot, prefer `useSession()`:
+
+```tsx
+import { useSession } from "@putbase/react";
+
+function AppShell() {
+  const session = useSession();
+
+  if (session.status === "loading") {
+    return <p>Checking session…</p>;
+  }
+
+  if (session.session.state === "signed-out") {
+    return <button onClick={() => void session.signIn()}>Log in with Puter</button>;
+  }
+
+  return <App />;
+}
+```
 
 ---
 

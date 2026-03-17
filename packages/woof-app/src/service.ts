@@ -8,8 +8,8 @@ import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
 
 import {
   clearProfile,
-  loadStoredWorkerUrl,
-  saveStoredWorkerUrl,
+  loadStoredTarget,
+  saveStoredTarget,
   type DogProfile,
 } from "./profile";
 import type { DogRowHandle, TagRowHandle, WoofDb, WoofSchema } from "./schema";
@@ -20,7 +20,7 @@ type PuterAI = Pick<AI, "chat">;
 
 export type WoofDbPort = Pick<
   WoofDb,
-  "whoAmI" | "put" | "getRowByUrl" | "parseInviteInput" | "joinRow" | "listMembers"
+  "whoAmI" | "put" | "openTarget" | "openInvite" | "listMembers"
 >;
 
 export interface ChatEntry {
@@ -84,13 +84,13 @@ export class WoofService {
   }
 
   async restoreProfile(): Promise<DogProfile | null> {
-    const workerUrl = await loadStoredWorkerUrl(this.kv);
-    if (!workerUrl) {
+    const target = await loadStoredTarget(this.kv);
+    if (!target) {
       return null;
     }
 
     try {
-      const row = expectDogRow(await this.db.getRowByUrl(workerUrl));
+      const row = expectDogRow(await this.db.openTarget(target));
       return { row };
     } catch (error) {
       await clearProfile(this.kv);
@@ -100,24 +100,20 @@ export class WoofService {
 
   async enterChat(args: { dogName: string }): Promise<DogProfile> {
     const row = await this.db.put("dogs", { name: args.dogName });
-    await saveStoredWorkerUrl(row, this.kv);
+    await saveStoredTarget(row, this.kv);
     return { row };
   }
 
   async joinFromInvite(inviteInput: string): Promise<DogProfile> {
-    const parsed = this.db.parseInviteInput(inviteInput.trim());
-    const row = expectDogRow(await this.db.joinRow(parsed.workerUrl, {
-      inviteToken: parsed.inviteToken,
-    }));
-
-    await saveStoredWorkerUrl(row, this.kv);
+    const row = expectDogRow(await this.db.openInvite(inviteInput.trim()));
+    await saveStoredTarget(row, this.kv);
     return { row };
   }
 
   async refreshProfileCanonical(profile: DogProfile): Promise<DogProfile> {
     try {
-      const row = expectDogRow(await this.db.getRowByUrl(profile.row.workerUrl));
-      await saveStoredWorkerUrl(row, this.kv);
+      const row = expectDogRow(await this.db.openTarget(profile.row.target));
+      await saveStoredTarget(row, this.kv);
       return { row };
     } catch (error) {
       await clearProfile(this.kv);

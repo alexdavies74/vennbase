@@ -1,9 +1,12 @@
 import { resolveBackend } from "./backend";
+import { signedOutError } from "./errors";
 import type { PutBaseOptions } from "./putbase";
-import type { BackendClient, RoomUser } from "./types";
+import type { AuthSession, BackendClient, RoomUser } from "./types";
 
 export class Identity {
   private cached: RoomUser | null = null;
+  private session: AuthSession | null = null;
+  private sessionPromise: Promise<AuthSession> | null = null;
   private backend: BackendClient | undefined;
 
   constructor(private readonly options: Pick<PutBaseOptions, "backend" | "identityProvider">) {
@@ -11,22 +14,102 @@ export class Identity {
   }
 
   setBackend(backend: BackendClient | undefined): void {
-    this.backend = backend;
+    const resolved = resolveBackend(backend);
+    if (this.backend !== resolved) {
+      this.clear();
+    }
+    this.backend = resolved;
+  }
+
+  clear(): void {
+    this.cached = null;
+    this.session = null;
+    this.sessionPromise = null;
+  }
+
+  async getSession(): Promise<AuthSession> {
+    if (this.cached) {
+      return {
+        state: "signed-in",
+        user: this.cached,
+      };
+    }
+
+    if (this.session) {
+      return this.session;
+    }
+
+    if (this.sessionPromise) {
+      return this.sessionPromise;
+    }
+
+    const promise = this.resolveSession()
+      .then((session) => {
+        if (session.state === "signed-in") {
+          this.session = session;
+          this.cached = session.user;
+        }
+        return session;
+      })
+      .finally(() => {
+        if (this.sessionPromise === promise) {
+          this.sessionPromise = null;
+        }
+      });
+    this.sessionPromise = promise;
+    return promise;
   }
 
   async whoAmI(): Promise<RoomUser> {
-    if (this.cached) {
-      return this.cached;
+    const session = await this.getSession();
+    if (session.state !== "signed-in") {
+      throw signedOutError();
     }
 
+    this.cached = session.user;
+    return session.user;
+  }
+
+  async signIn(): Promise<RoomUser> {
+    this.clear();
+
     if (this.options.identityProvider) {
-      this.cached = await this.options.identityProvider();
-      return this.cached;
+      const user = await this.options.identityProvider();
+      this.cached = user;
+      this.session = {
+        state: "signed-in",
+        user,
+      };
+      return user;
+    }
+
+    this.backend = resolveBackend(this.backend);
+    const auth = this.backend?.auth;
+    if (!auth?.signIn) {
+      throw signedOutError("A compatible signIn API is unavailable.");
+    }
+
+    await auth.signIn();
+    const user = await this.whoAmI();
+    return user;
+  }
+
+  private async resolveSession(): Promise<AuthSession> {
+    if (this.options.identityProvider) {
+      const user = await this.options.identityProvider();
+      return {
+        state: "signed-in",
+        user,
+      };
     }
 
     this.backend = resolveBackend(this.backend);
 
     const auth = this.backend?.auth;
+    if (auth?.isSignedIn && !auth.isSignedIn()) {
+      return { state: "signed-out" };
+    }
+
     let candidate: { username?: string } | null = null;
 
     if (auth?.getUser) {
@@ -37,25 +120,18 @@ export class Identity {
       candidate = await auth.whoami().catch(() => candidate);
     }
 
-    if (!candidate?.username && auth?.isSignedIn && auth?.signIn && !auth.isSignedIn()) {
-      await auth.signIn().catch(() => null);
-      candidate = await (auth.whoami?.() ?? auth.getUser?.() ?? Promise.resolve(null)).catch(
-        () => candidate,
-      );
-    }
-
-    if (!candidate && this.backend?.getUser) {
+    if (!candidate?.username && this.backend?.getUser) {
       candidate = await this.backend.getUser().catch(() => null);
     }
 
-    const username = candidate?.username;
+    const username = candidate?.username?.trim();
     if (!username) {
-      throw new Error(
-        "Unable to determine the current username. Provide a compatible backend via { backend }, ensure globalThis.puter is available, or supply identityProvider.",
-      );
+      return { state: "signed-out" };
     }
 
-    this.cached = { username };
-    return this.cached;
+    return {
+      state: "signed-in",
+      user: { username },
+    };
   }
 }

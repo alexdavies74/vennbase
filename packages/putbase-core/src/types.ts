@@ -12,6 +12,7 @@ export type JsonValue =
   | JsonValue[];
 
 export type ErrorCode =
+  | "SIGNED_OUT"
   | "UNAUTHORIZED"
   | "INVALID_SIGNATURE"
   | "INVITE_REQUIRED"
@@ -26,6 +27,10 @@ export interface ApiError {
 export interface RoomUser {
   username: string;
 }
+
+export type AuthSession =
+  | { state: "signed-out" }
+  | { state: "signed-in"; user: RoomUser };
 
 export interface Room {
   id: string;
