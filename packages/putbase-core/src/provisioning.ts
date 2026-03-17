@@ -1,3 +1,4 @@
+import type { AuthManager } from "./auth";
 import { buildClassicWorkerScript } from "./worker/template";
 import { resolveBackend } from "./backend";
 import type { WorkerDeployment } from "@heyputer/puter.js";
@@ -8,7 +9,7 @@ import { stripTrailingSlash } from "./transport";
 import type { BackendClient, DeployWorkerArgs } from "./types";
 
 const FEDERATION_WORKER_ROOM_SENTINEL = "bootstrap";
-const FEDERATION_WORKER_VERSION = 22;
+const FEDERATION_WORKER_VERSION = 28;
 const WORKER_METADATA_NAMESPACE = "putbase";
 const LEGACY_WORKER_METADATA_NAMESPACE = `${"puter"}-${"fed"}`;
 const FEDERATION_WORKER_VERSION_KV_PREFIX = `${WORKER_METADATA_NAMESPACE}:federation-worker-version:v2`;
@@ -28,6 +29,7 @@ export class Provisioning {
     private readonly options: Pick<PutBaseOptions, "appBaseUrl" | "backend" | "deployWorker">,
     private readonly transport: Transport,
     private readonly identity: Identity,
+    private readonly auth: AuthManager,
   ) {
     this.backend = resolveBackend(options.backend);
   }
@@ -144,12 +146,17 @@ export class Provisioning {
       );
     }
 
-    const script = buildClassicWorkerScript({ owner: username });
+    const ownerPublicKeyJwk = await this.auth.getPublicKeyJwk();
+    const script = buildClassicWorkerScript({
+      owner: username,
+      ownerPublicKeyJwk,
+    });
 
     const deployedWorkerUrl = await this.deployWorker({
       owner: username,
       roomId: FEDERATION_WORKER_ROOM_SENTINEL,
       roomName: "federation",
+      ownerPublicKeyJwk,
       workerName,
       workerVersion: FEDERATION_WORKER_VERSION,
       script,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { createPrincipalProof, createRequestProof } from "../src/auth";
+import { exportPublicJwk, generateP256KeyPair } from "../src/crypto";
 import { RoomWorker } from "../src/worker/core";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 
@@ -11,28 +13,137 @@ function roomEndpoint(roomId: string, endpoint: string): string {
   return `https://worker.example/rooms/${encodeURIComponent(roomId)}/${endpoint}`;
 }
 
-function authedRequest(args: {
+const signerState = new Map<string, Promise<{ keyPair: CryptoKeyPair; publicKeyJwk: JsonWebKey }>>();
+
+async function getSigner(username: string): Promise<{ keyPair: CryptoKeyPair; publicKeyJwk: JsonWebKey }> {
+  const existing = signerState.get(username);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async () => {
+    const keyPair = await generateP256KeyPair();
+    const publicKeyJwk = await exportPublicJwk(keyPair.publicKey);
+    return { keyPair, publicKeyJwk };
+  })();
+  signerState.set(username, promise);
+  return promise;
+}
+
+function translateRequest(args: {
   url: string;
   username: string;
   method: "GET" | "POST";
   body?: object;
-}): Request {
-  return new Request(args.url, {
-    method: args.method,
+}) {
+  const url = new URL(args.url);
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (segments.length === 1 && segments[0] === "rooms") {
+    const body = args.body as { roomId?: string; roomName?: string } | undefined;
+    return {
+      url: url.toString(),
+      action: "rooms.create",
+      roomId: body?.roomId ?? "room_missing",
+      payload: body ?? {},
+    };
+  }
+
+  const roomsIndex = segments.indexOf("rooms");
+  const roomId = decodeURIComponent(segments[roomsIndex + 1] ?? "");
+  const endpoint = segments.slice(roomsIndex + 2).join("/");
+
+  switch (endpoint) {
+    case "join":
+      return { url: url.toString(), action: "rooms.join", roomId, payload: args.body ?? {} };
+    case "room":
+      return { url: url.toString(), action: "rooms.room", roomId, payload: {} };
+    case "messages":
+      return {
+        url: url.origin + url.pathname,
+        action: "rooms.messages",
+        roomId,
+        payload: url.searchParams.has("sinceSequence")
+          ? { sinceSequence: Number(url.searchParams.get("sinceSequence")) }
+          : {},
+      };
+    case "invite-token":
+      return { url: `${url.toString()}/create`, action: "invite-token.create", roomId, payload: args.body ?? {} };
+    case "message":
+      return { url: url.toString(), action: "rooms.message", roomId, payload: args.body ?? {} };
+    case "fields":
+      return args.method === "GET"
+        ? { url: `${url.toString()}/get`, action: "fields.get", roomId, payload: {} }
+        : { url: `${url.toString()}/set`, action: "fields.set", roomId, payload: args.body ?? {} };
+    case "link-parent":
+      return { url: url.toString(), action: "parents.link-parent", roomId, payload: args.body ?? {} };
+    case "unlink-parent":
+      return { url: url.toString(), action: "parents.unlink-parent", roomId, payload: args.body ?? {} };
+    case "register-child":
+      return { url: url.toString(), action: "parents.register-child", roomId, payload: args.body ?? {} };
+    case "unregister-child":
+      return { url: url.toString(), action: "parents.unregister-child", roomId, payload: args.body ?? {} };
+    case "db-query":
+      return {
+        url: url.origin + url.pathname,
+        action: "db.query",
+        roomId,
+        payload: {
+          collection: url.searchParams.get("collection") ?? "",
+          index: url.searchParams.get("index") ?? undefined,
+          value: url.searchParams.get("value"),
+          order: (url.searchParams.get("order") ?? "asc") as "asc" | "desc",
+          limit: Number(url.searchParams.get("limit") ?? 50),
+          where: url.searchParams.get("where") ? JSON.parse(url.searchParams.get("where") as string) : undefined,
+        },
+      };
+    default:
+      return { url: url.toString(), action: endpoint || "unknown", roomId, payload: args.body ?? {} };
+  }
+}
+
+async function authedRequest(args: {
+  url: string;
+  username: string;
+  method: "GET" | "POST";
+  body?: object;
+}): Promise<Request> {
+  const translated = translateRequest(args);
+  const signer = await getSigner(args.username);
+  const principal = await createPrincipalProof({
+    username: args.username,
+    publicKeyJwk: signer.publicKeyJwk,
+    privateKey: signer.keyPair.privateKey,
+  });
+  const requestProof = await createRequestProof({
+    action: translated.action,
+    roomId: translated.roomId,
+    payload: translated.payload,
+    principal,
+    privateKey: signer.keyPair.privateKey,
+  });
+
+  return new Request(translated.url, {
+    method: "POST",
     headers: {
-      ...(args.body ? { "content-type": "application/json" } : {}),
-      "x-puter-username": args.username,
+      "content-type": "application/json",
     },
-    body: args.body ? JSON.stringify(args.body) : undefined,
+    body: JSON.stringify({
+      auth: {
+        principal,
+        request: requestProof,
+      },
+      payload: translated.payload,
+    }),
   });
 }
 
 async function createRoom(worker: RoomWorker, roomId: string, roomName = "Rex"): Promise<Response> {
   return worker.handle(
-    authedRequest({
+    await authedRequest({
       url: "https://worker.example/rooms",
-      method: "POST",
       username: "owner",
+      method: "POST",
       body: {
         roomId,
         roomName,
@@ -120,7 +231,7 @@ describe("RoomWorker", () => {
     expect(created.status).toBe(200);
 
     const ownerJoin = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_1", "join"),
         method: "POST",
         username: "owner",
@@ -131,7 +242,7 @@ describe("RoomWorker", () => {
     expect((await jsonBody(ownerJoin)).workerUrl).toBe("https://worker.example/rooms/room_1");
 
     const guestJoinWithoutInvite = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_1", "join"),
         method: "POST",
         username: "guest",
@@ -143,7 +254,7 @@ describe("RoomWorker", () => {
     expect((await jsonBody(guestJoinWithoutInvite)).code).toBe("INVITE_REQUIRED");
 
     const inviteResponse = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_1", "invite-token"),
         method: "POST",
         username: "owner",
@@ -164,7 +275,7 @@ describe("RoomWorker", () => {
     });
 
     const guestJoin = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_1", "join"),
         method: "POST",
         username: "guest",
@@ -178,7 +289,7 @@ describe("RoomWorker", () => {
     expect(guestJoin.status).toBe(200);
 
     const outsiderRead = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: `${roomEndpoint("room_1", "messages")}?sinceSequence=0`,
         method: "GET",
         username: "outsider",
@@ -199,7 +310,7 @@ describe("RoomWorker", () => {
     );
 
     const response = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: "https://worker.example/rooms",
         method: "POST",
         username: "guest",
@@ -226,7 +337,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_auth");
 
     const spoofedJoin = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_auth", "join"),
         method: "POST",
         username: "owner",
@@ -251,7 +362,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "task_1", "Task");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("project_1", "join"),
         method: "POST",
         username: "owner",
@@ -259,7 +370,7 @@ describe("RoomWorker", () => {
       }),
     );
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("task_1", "join"),
         method: "POST",
         username: "owner",
@@ -268,7 +379,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("project_1", "fields"),
         method: "POST",
         username: "owner",
@@ -279,7 +390,7 @@ describe("RoomWorker", () => {
       }),
     );
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("task_1", "fields"),
         method: "POST",
         username: "owner",
@@ -298,7 +409,7 @@ describe("RoomWorker", () => {
     };
 
     const link = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("task_1", "link-parent"),
         method: "POST",
         username: "owner",
@@ -310,7 +421,7 @@ describe("RoomWorker", () => {
     expect((await jsonBody(link)).parentRefs).toEqual([parentRef]);
 
     const snapshot = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("task_1", "room"),
         method: "GET",
         username: "owner",
@@ -325,7 +436,7 @@ describe("RoomWorker", () => {
     });
 
     const unlink = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("task_1", "unlink-parent"),
         method: "POST",
         username: "owner",
@@ -349,7 +460,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_2");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_2", "join"),
         method: "POST",
         username: "owner",
@@ -358,7 +469,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_2", "invite-token"),
         method: "POST",
         username: "owner",
@@ -372,7 +483,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_2", "join"),
         method: "POST",
         username: "guest",
@@ -384,7 +495,7 @@ describe("RoomWorker", () => {
     );
 
     const post = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_2", "message"),
         method: "POST",
         username: "guest",
@@ -419,7 +530,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_3");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_3", "join"),
         method: "POST",
         username: "owner",
@@ -428,7 +539,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_3", "message"),
         method: "POST",
         username: "owner",
@@ -442,7 +553,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_3", "message"),
         method: "POST",
         username: "owner",
@@ -456,7 +567,7 @@ describe("RoomWorker", () => {
     );
 
     const response = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: `${roomEndpoint("room_3", "messages")}?sinceSequence=0`,
         method: "GET",
         username: "owner",
@@ -480,7 +591,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_req_seq");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_req_seq", "join"),
         method: "POST",
         username: "owner",
@@ -489,7 +600,7 @@ describe("RoomWorker", () => {
     );
 
     const response = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_req_seq", "messages"),
         method: "GET",
         username: "owner",
@@ -513,7 +624,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_seq");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_seq", "join"),
         method: "POST",
         username: "owner",
@@ -522,7 +633,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_seq", "message"),
         method: "POST",
         username: "owner",
@@ -536,7 +647,7 @@ describe("RoomWorker", () => {
     );
 
     const noChangeResponse = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: `${roomEndpoint("room_seq", "messages")}?sinceSequence=1`,
         method: "GET",
         username: "owner",
@@ -552,7 +663,7 @@ describe("RoomWorker", () => {
     expect(kv.listCalls).toBe(0);
 
     const changedResponse = await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: `${roomEndpoint("room_seq", "messages")}?sinceSequence=0`,
         method: "GET",
         username: "owner",
@@ -574,7 +685,7 @@ describe("RoomWorker", () => {
     await createRoom(worker, "room_4");
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_4", "join"),
         method: "POST",
         username: "owner",
@@ -583,7 +694,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_4", "invite-token"),
         method: "POST",
         username: "owner",
@@ -597,7 +708,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_4", "join"),
         method: "POST",
         username: "guest",
@@ -609,7 +720,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_4", "message"),
         method: "POST",
         username: "guest",
@@ -623,7 +734,7 @@ describe("RoomWorker", () => {
     );
 
     await worker.handle(
-      authedRequest({
+      await authedRequest({
         url: roomEndpoint("room_4", "message"),
         method: "POST",
         username: "owner",
@@ -638,7 +749,7 @@ describe("RoomWorker", () => {
 
     for (const username of ["guest", "owner"]) {
       const response = await worker.handle(
-        authedRequest({
+        await authedRequest({
           url: `${roomEndpoint("room_4", "messages")}?sinceSequence=0`,
           method: "GET",
           username,
@@ -693,8 +804,8 @@ describe("RoomWorker", () => {
       ),
     );
 
-    const run = (mode: "full" | "local-only", args: Parameters<typeof authedRequest>[0]) =>
-      network.dispatch(mode, authedRequest(args));
+    const run = async (mode: "full" | "local-only", args: Parameters<typeof authedRequest>[0]) =>
+      network.dispatch(mode, await authedRequest(args));
 
     expect(await run("full", {
       url: `${aliceBase}/rooms`,

@@ -19,31 +19,51 @@ export class Parents {
     const childFields = await this.refreshFields(child);
     const childSpec = this.schema[child.collection];
 
-    await this.transport.request(roomEndpointUrl(parent, "register-child"), "POST", {
-      childRowId: child.id,
-      childOwner: child.owner,
-      childWorkerUrl: child.workerUrl,
-      collection: child.collection,
-      fields: childFields,
-      schema: {
-        indexes: childSpec?.indexes,
+    await this.transport.request({
+      url: roomEndpointUrl(parent, "register-child"),
+      action: "parents.register-child",
+      roomId: parent.id,
+      payload: {
+        childRowId: child.id,
+        childOwner: child.owner,
+        childWorkerUrl: child.workerUrl,
+        collection: child.collection,
+        fields: childFields,
+        schema: {
+          indexes: childSpec?.indexes,
+        },
       },
     });
 
-    await this.transport.request(roomEndpointUrl(child, "link-parent"), "POST", {
-      parentRef: parent,
+    await this.transport.request({
+      url: roomEndpointUrl(child, "link-parent"),
+      action: "parents.link-parent",
+      roomId: child.id,
+      payload: {
+        parentRef: parent,
+      },
     });
   }
 
   async remove(child: DbRowRef, parent: DbRowRef): Promise<void> {
-    await this.transport.request(roomEndpointUrl(parent, "unregister-child"), "POST", {
-      childRowId: child.id,
-      childOwner: child.owner,
-      collection: child.collection,
+    await this.transport.request({
+      url: roomEndpointUrl(parent, "unregister-child"),
+      action: "parents.unregister-child",
+      roomId: parent.id,
+      payload: {
+        childRowId: child.id,
+        childOwner: child.owner,
+        collection: child.collection,
+      },
     });
 
-    await this.transport.request(roomEndpointUrl(child, "unlink-parent"), "POST", {
-      parentRef: parent,
+    await this.transport.request({
+      url: roomEndpointUrl(child, "unlink-parent"),
+      action: "parents.unlink-parent",
+      roomId: child.id,
+      payload: {
+        parentRef: parent,
+      },
     });
   }
 

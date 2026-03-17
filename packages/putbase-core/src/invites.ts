@@ -34,10 +34,12 @@ export class Invites {
   ) {}
 
   async getExistingInviteToken(row: DbRowLocator): Promise<InviteToken | null> {
-    const response = await this.transport.request<GetInviteResponse>(
-      `${stripTrailingSlash(row.workerUrl)}/invite-token`,
-      "GET",
-    );
+    const response = await this.transport.request<GetInviteResponse>({
+      url: `${stripTrailingSlash(row.workerUrl)}/invite-token/get`,
+      action: "invite-token.get",
+      roomId: row.id,
+      payload: {},
+    });
     return response.inviteToken;
   }
 
@@ -51,11 +53,12 @@ export class Invites {
       createdAt: Date.now(),
     };
 
-    const response = await this.transport.request<PostInviteResponse>(
-      `${stripTrailingSlash(row.workerUrl)}/invite-token`,
-      "POST",
+    const response = await this.transport.request<PostInviteResponse>({
+      url: `${stripTrailingSlash(row.workerUrl)}/invite-token/create`,
+      action: "invite-token.create",
+      roomId: row.id,
       payload,
-    );
+    });
 
     return response.inviteToken;
   }

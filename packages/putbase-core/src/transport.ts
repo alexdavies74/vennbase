@@ -1,3 +1,4 @@
+import type { AuthManager } from "./auth";
 import { PutBaseError, toApiError } from "./errors";
 import { resolveBackend } from "./backend";
 import type { WorkersHandler } from "@heyputer/puter.js";
@@ -52,40 +53,59 @@ export function roomEndpointUrl(
 export class Transport {
   private backend: BackendClient | undefined;
   private readonly fetchFn: typeof fetch;
-  private readonly getUsername: () => Promise<string>;
+  private readonly auth: AuthManager;
 
   constructor(
     options: Pick<PutBaseOptions, "backend" | "fetchFn">,
-    getUsername: () => Promise<string>,
+    auth: AuthManager,
   ) {
     this.backend = resolveBackend(options.backend);
     this.fetchFn = options.fetchFn ?? fetch;
-    this.getUsername = getUsername;
+    this.auth = auth;
   }
 
   setBackend(backend: BackendClient | undefined): void {
     this.backend = backend;
   }
 
-  async request<T>(
+  async request<T, TPayload = unknown>(args: {
+    url: string;
+    action: string;
+    roomId: string;
+    payload: TPayload;
+    includeRequestProof?: boolean;
+  }): Promise<T> {
+    const body = await this.auth.createProtectedRequest({
+      action: args.action,
+      roomId: args.roomId,
+      payload: args.payload,
+      includeRequestProof: args.includeRequestProof,
+    });
+    return this.postJson<T>(args.url, body);
+  }
+
+  async postJson<T>(
     url: string,
-    method: "GET" | "POST",
-    body?: unknown,
+    body: unknown,
   ): Promise<T> {
     const workersExec = this.resolveWorkersExec();
     const serialized = body !== undefined ? JSON.stringify(body) : undefined;
 
     const init: RequestInit = {
-      method,
+      method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-puter-no-auth": "1",
       },
       body: serialized,
     };
 
     const response = workersExec
       ? await workersExec(url, init)
-      : await this.requestViaFetch(url, init);
+      : await (() => {
+        const fetchFn = this.fetchFn;
+        return fetchFn(url, init);
+      })();
 
     const payload = await response
       .json()
@@ -96,18 +116,6 @@ export class Transport {
     }
 
     return payload as T;
-  }
-
-  private async requestViaFetch(url: string, init: RequestInit): Promise<Response> {
-    const username = await this.getUsername();
-    const headers = new Headers(init.headers);
-    headers.set("x-puter-username", username);
-
-    const fetchFn = this.fetchFn;
-    return fetchFn(url, {
-      ...init,
-      headers,
-    });
   }
 
   resolveWorkersExec(): WorkersHandler["exec"] | null {

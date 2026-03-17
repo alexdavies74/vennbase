@@ -54,9 +54,14 @@ export class Rows<Schema extends DbSchema> {
       fields as InsertFields<Schema, TCollection> & DbRowFields,
     ) as Record<string, JsonValue>;
 
-    await this.transport.request(roomEndpointUrl(rowRef, "fields"), "POST", {
-      fields: payload,
-      collection,
+    await this.transport.request({
+      url: roomEndpointUrl(rowRef, "fields/set"),
+      action: "fields.set",
+      roomId: rowRef.id,
+      payload: {
+        fields: payload,
+        collection,
+      },
     });
 
     for (const parent of parentRefs) {
@@ -81,11 +86,17 @@ export class Rows<Schema extends DbSchema> {
     fields: Partial<RowFields<Schema, TCollection>>,
   ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>> {
     const rowRef: DbRowRef<TCollection> = { ...row, collection };
-    await this.transport.request(roomEndpointUrl(rowRef, "fields"), "POST", {
-      fields,
-      merge: true,
-      collection,
+    const response = await this.transport.request<GetFieldsResponse>({
+      url: roomEndpointUrl(rowRef, "fields/set"),
+      action: "fields.set",
+      roomId: rowRef.id,
+      payload: {
+        fields,
+        merge: true,
+        collection,
+      },
     });
+    await this.syncParentIndexes(rowRef, response.fields);
 
     return this.getRow(collection, rowRef);
   }
@@ -105,21 +116,49 @@ export class Rows<Schema extends DbSchema> {
   }
 
   async refreshFields(row: DbRowLocator): Promise<Record<string, JsonValue>> {
-    const response = await this.transport.request<GetFieldsResponse>(
-      roomEndpointUrl(row, "fields"),
-      "GET",
-    );
+    const response = await this.transport.request<GetFieldsResponse>({
+      url: roomEndpointUrl(row, "fields/get"),
+      action: "fields.get",
+      roomId: row.id,
+      payload: {},
+    });
     return response.fields;
   }
 
   async fetchWithCollection(
     row: DbRowLocator,
   ): Promise<{ fields: Record<string, JsonValue>; collection: string | null }> {
-    const response = await this.transport.request<GetFieldsResponse>(
-      roomEndpointUrl(row, "fields"),
-      "GET",
-    );
+    const response = await this.transport.request<GetFieldsResponse>({
+      url: roomEndpointUrl(row, "fields/get"),
+      action: "fields.get",
+      roomId: row.id,
+      payload: {},
+    });
     return { fields: response.fields, collection: response.collection };
+  }
+
+  private async syncParentIndexes(row: DbRowRef, fields: Record<string, JsonValue>): Promise<void> {
+    const room = await this.rooms.getRoom(row.workerUrl);
+    const childSpec = this.schema[row.collection];
+    await Promise.all(
+      room.parentRefs.map((parentRef) =>
+        this.transport.request({
+          url: roomEndpointUrl(parentRef, "register-child"),
+          action: "parents.register-child",
+          roomId: parentRef.id,
+          payload: {
+            childRowId: row.id,
+            childOwner: row.owner,
+            childWorkerUrl: row.workerUrl,
+            collection: row.collection,
+            fields,
+            schema: {
+              indexes: childSpec?.indexes,
+            },
+          },
+        }),
+      ),
+    );
   }
 }
 

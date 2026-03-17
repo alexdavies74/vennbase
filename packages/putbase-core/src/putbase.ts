@@ -1,3 +1,4 @@
+import { AuthManager } from "./auth";
 import { Identity } from "./identity";
 import { Invites } from "./invites";
 import { Members } from "./members";
@@ -48,6 +49,7 @@ export interface PutBaseOptions<Schema extends DbSchema = DbSchema> {
 }
 
 export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBackend<Schema> {
+  private readonly auth: AuthManager;
   private readonly transport: Transport;
   private readonly identity: Identity;
   private readonly provisioning: Provisioning;
@@ -64,8 +66,9 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   constructor(private readonly options: PutBaseOptions<Schema>) {
     this.identity = new Identity(options);
-    this.transport = new Transport(options, () => this.identity.whoAmI().then((u) => u.username));
-    this.provisioning = new Provisioning(options, this.transport, this.identity);
+    this.auth = new AuthManager(resolveBackend(options.backend), () => this.identity.whoAmI().then((u) => u.username));
+    this.transport = new Transport(options, this.auth);
+    this.provisioning = new Provisioning(options, this.transport, this.identity, this.auth);
     this.syncRuntime();
     this.roomsModule = new Rooms(
       this.transport,
@@ -218,6 +221,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   private syncRuntime(): void {
     const backend = resolveBackend(this.options.backend);
     this.identity.setBackend(backend);
+    this.auth.setBackend(backend);
     this.transport.setBackend(backend);
     this.provisioning.setBackend(backend);
   }

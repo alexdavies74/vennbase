@@ -82,24 +82,26 @@ export class Query<Schema extends DbSchema> {
 
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
-        const params = new URLSearchParams();
-        params.set("collection", collection);
-        params.set("order", options.order ?? "asc");
-        params.set("limit", String(limit));
-
+        let indexName: string | undefined;
+        let value: string | null | undefined;
         if (selectedIndex) {
-          params.set("index", selectedIndex.name);
-          if (selectedIndex.encodedValue !== null) {
-            params.set("value", selectedIndex.encodedValue);
-          }
-        } else if (options.where) {
-          params.set("where", JSON.stringify(options.where));
+          indexName = selectedIndex.name;
+          value = selectedIndex.encodedValue;
         }
 
-        return this.transport.request<DbQueryResponse>(
-          roomEndpointUrl(parent, "db-query", params),
-          "GET",
-        );
+        return this.transport.request<DbQueryResponse>({
+          url: roomEndpointUrl(parent, "db-query"),
+          action: "db.query",
+          roomId: parent.id,
+          payload: {
+            collection,
+            order: options.order ?? "asc",
+            limit,
+            index: indexName,
+            value,
+            where: selectedIndex ? undefined : options.where,
+          },
+        });
       }),
     );
 

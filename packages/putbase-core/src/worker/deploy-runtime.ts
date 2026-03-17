@@ -39,11 +39,12 @@ interface RouterContext {
 }
 
 const ROOM_OWNER = "__PUTER_FED_ROOM_OWNER__";
+const ROOM_OWNER_PUBLIC_KEY_JWK = JSON.parse("__PUTBASE_OWNER_PUBLIC_KEY_JWK__");
 
 const CORS_PREFLIGHT_HEADERS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "content-type,x-puter-username,puter-auth",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,x-puter-no-auth,puter-auth",
+  "access-control-allow-methods": "POST,OPTIONS",
 };
 
 const kv: WorkerKv = {
@@ -72,68 +73,40 @@ const kv: WorkerKv = {
 const worker = new RoomWorker(
   {
     owner: ROOM_OWNER,
+    ownerPublicKeyJwk: ROOM_OWNER_PUBLIC_KEY_JWK,
   },
   { kv },
 );
 
-async function resolveRequesterFromAuth(user?: RouterUserContext): Promise<string | null> {
-  if (!user) {
-    return null;
-  }
-
-  if (typeof user.username === "string" && user.username) {
-    return user.username;
-  }
-
-  let candidate: { username?: string } | null = null;
-  if (user.puter?.getUser) {
-    candidate = await user.puter.getUser().catch(() => null);
-  }
-
-  if (!candidate?.username && user.puter?.auth?.getUser) {
-    candidate = await user.puter.auth.getUser().catch(() => candidate);
-  }
-
-  if (!candidate?.username && user.puter?.auth?.whoami) {
-    candidate = await user.puter.auth.whoami().catch(() => candidate);
-  }
-
-  return candidate?.username ?? null;
-}
-
-function withRequesterHeader(request: Request, requester: string | null): Request {
-  if (!requester) {
-    return request;
-  }
-
-  const headers = new Headers(request.headers);
-  headers.set("x-puter-username", requester);
-  return new Request(request, { headers });
-}
-
-async function route({ request, user }: RouterContext): Promise<Response> {
-  const requester = await resolveRequesterFromAuth(user);
-  const workersExec = user.puter?.workers?.exec ?? me.puter.workers?.exec;
-  return worker.handle(withRequesterHeader(request, requester), {
+async function route({ request }: RouterContext): Promise<Response> {
+  const workersExec = me.puter.workers?.exec;
+  return worker.handle(request, {
     workersExec: workersExec
-      ? (url, init) => workersExec(url, init)
+      ? (url, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("x-puter-no-auth", "1");
+        return workersExec(url, { ...init, headers });
+      }
       : (url, init) => fetch(url, init),
   });
 }
 
 router.options("/rooms", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/room", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
-router.options("/rooms/:roomId/messages", () =>
-  new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
+router.options("/rooms/:roomId/messages", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/join", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
-router.options("/rooms/:roomId/invite-token", () =>
+router.options("/rooms/:roomId/invite-token/get", () =>
+  new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
+router.options("/rooms/:roomId/invite-token/create", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/message", () => new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/is-member", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/member-role", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
-router.options("/rooms/:roomId/fields", () =>
+router.options("/rooms/:roomId/fields/get", () =>
+  new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
+router.options("/rooms/:roomId/fields/set", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rooms/:roomId/register-child", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
@@ -156,19 +129,19 @@ router.options("/rooms/:roomId/members-direct", () =>
 router.options("/rooms/:roomId/members-effective", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.post("/rooms", route);
-router.get("/rooms/:roomId/room", route);
-router.get("/rooms/:roomId/messages", route);
-router.get("/rooms/:roomId/is-member", route);
-router.get("/rooms/:roomId/member-role", route);
-router.get("/rooms/:roomId/fields", route);
-router.get("/rooms/:roomId/db-query", route);
-router.get("/rooms/:roomId/members-direct", route);
-router.get("/rooms/:roomId/members-effective", route);
 router.post("/rooms/:roomId/join", route);
-router.get("/rooms/:roomId/invite-token", route);
-router.post("/rooms/:roomId/invite-token", route);
+router.post("/rooms/:roomId/room", route);
+router.post("/rooms/:roomId/messages", route);
+router.post("/rooms/:roomId/is-member", route);
+router.post("/rooms/:roomId/member-role", route);
+router.post("/rooms/:roomId/fields/get", route);
+router.post("/rooms/:roomId/fields/set", route);
+router.post("/rooms/:roomId/db-query", route);
+router.post("/rooms/:roomId/members-direct", route);
+router.post("/rooms/:roomId/members-effective", route);
+router.post("/rooms/:roomId/invite-token/get", route);
+router.post("/rooms/:roomId/invite-token/create", route);
 router.post("/rooms/:roomId/message", route);
-router.post("/rooms/:roomId/fields", route);
 router.post("/rooms/:roomId/register-child", route);
 router.post("/rooms/:roomId/unregister-child", route);
 router.post("/rooms/:roomId/update-index", route);

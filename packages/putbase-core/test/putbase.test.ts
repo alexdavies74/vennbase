@@ -96,7 +96,7 @@ describe("PutBase", () => {
           );
         }
 
-        if (url.endsWith("/fields")) {
+        if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
           return new Response(
             JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
             { status: 200, headers: { "content-type": "application/json" } },
@@ -203,7 +203,7 @@ describe("PutBase", () => {
           );
         }
 
-        if (url.endsWith("/fields")) {
+        if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
           return new Response(
             JSON.stringify({ fields: { name: "Rex" }, collection: null }),
             { status: 200, headers: { "content-type": "application/json" } },
@@ -243,7 +243,7 @@ describe("PutBase", () => {
           );
         }
 
-        if (url.endsWith("/fields")) {
+        if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
           return new Response(
             JSON.stringify({ fields: { name: "Rex" }, collection: "foreign" }),
             { status: 200, headers: { "content-type": "application/json" } },
@@ -315,7 +315,7 @@ describe("PutBase", () => {
         );
       }
 
-      if (url.endsWith("/fields")) {
+      if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
         return Promise.resolve(
           new Response(
             JSON.stringify({ fields: {}, collection: "rows" }),
@@ -436,7 +436,7 @@ describe("PutBase", () => {
       requestedUrls.push(url);
 
       if (url === `${deployedWorkerBase}/rooms` && init?.body && typeof init.body === "string") {
-        roomId = (JSON.parse(init.body) as { roomId: string }).roomId;
+        roomId = (JSON.parse(init.body) as { payload: { roomId: string } }).payload.roomId;
         return new Response(
           JSON.stringify({
             id: roomId,
@@ -475,7 +475,11 @@ describe("PutBase", () => {
         );
       }
 
-      if (roomId && url === `${deployedWorkerBase}/rooms/${roomId}/fields`) {
+      if (
+        roomId
+        && (url === `${deployedWorkerBase}/rooms/${roomId}/fields/get`
+          || url === `${deployedWorkerBase}/rooms/${roomId}/fields/set`)
+      ) {
         return new Response(
           JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -523,7 +527,7 @@ describe("PutBase", () => {
       requestedUrls.push(url);
 
       if (url === `${deployedWorkerBase}/rooms` && init?.body && typeof init.body === "string") {
-        roomId = (JSON.parse(init.body) as { roomId: string }).roomId;
+        roomId = (JSON.parse(init.body) as { payload: { roomId: string } }).payload.roomId;
         return new Response(
           JSON.stringify({
             id: roomId,
@@ -562,7 +566,11 @@ describe("PutBase", () => {
         );
       }
 
-      if (roomId && url === `${deployedWorkerBase}/rooms/${roomId}/fields`) {
+      if (
+        roomId
+        && (url === `${deployedWorkerBase}/rooms/${roomId}/fields/get`
+          || url === `${deployedWorkerBase}/rooms/${roomId}/fields/set`)
+      ) {
         return new Response(
           JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -842,7 +850,7 @@ describe("PutBase", () => {
             );
           }
 
-          if (url.endsWith("/fields")) {
+          if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
             return new Response(
               JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
               { status: 200, headers: { "content-type": "application/json" } },
@@ -871,7 +879,7 @@ describe("PutBase", () => {
     const row = await db.getRowByUrl("https://worker.example/rooms/room_exec");
     expect(row.id).toBe("room_exec");
     expect(execCalls.some((c) => c.url.endsWith("/room"))).toBe(true);
-    expect(execCalls.some((c) => c.url.endsWith("/fields"))).toBe(true);
+    expect(execCalls.some((c) => c.url.endsWith("/fields/get") || c.url.endsWith("/fields/set"))).toBe(true);
     expect(new Headers(execCalls[0].init?.headers).get("x-puter-username")).toBeNull();
   });
 

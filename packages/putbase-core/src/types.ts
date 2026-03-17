@@ -55,6 +55,40 @@ export interface JoinOptions {
   inviteToken?: string;
 }
 
+export interface PrincipalProof {
+  username: string;
+  publicKeyJwk: JsonWebKey;
+  signedAt: number;
+  expiresAt: number;
+  signature: string;
+}
+
+export interface RequestProof {
+  action: string;
+  roomId: string;
+  nonce: string;
+  signedAt: number;
+  signature: string;
+}
+
+export interface ProtectedRequest<TPayload> {
+  auth: {
+    principal: PrincipalProof;
+    request?: RequestProof;
+  };
+  payload: TPayload;
+}
+
+export interface VerifiedPrincipal {
+  username: string;
+  publicKeyJwk: JsonWebKey;
+  publicKey: CryptoKey;
+  signedAt: number;
+  expiresAt: number;
+  signature: string;
+  proof: PrincipalProof;
+}
+
 export interface CrdtConnectCallbacks {
   applyRemoteUpdate: (body: JsonValue, message: Message) => void;
   produceLocalUpdate: () => JsonValue | null;
@@ -75,6 +109,7 @@ export interface DeployWorkerArgs {
   roomId: string;
   roomName: string;
   script: string;
+  ownerPublicKeyJwk?: JsonWebKey;
   workerName?: string;
   workerVersion?: number;
   appHostname?: string;
