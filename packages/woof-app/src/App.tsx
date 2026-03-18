@@ -1,15 +1,17 @@
 import { puter } from "@heyputer/puter.js";
-import { useInviteLink, useMutation, useSession } from "@putbase/react";
+import { useInviteFromLocation, useInviteLink, useMutation, useSession } from "@putbase/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { DogProfile } from "./profile";
 import type { ChatEntry } from "./service";
 import { useChatEntries, useRowConnection } from "./app-hooks";
+import type { WoofSchema } from "./schema";
 import { TagsPanel } from "./tags-panel";
-import { getErrorMessage, clearInviteLocation, getInviteInputFromLocation } from "./utils";
+import { getErrorMessage } from "./utils";
 import { service } from "./services";
 
 function SetupPanel(props: {
+  busyMessage?: string;
   disabled: boolean;
   initialError: string;
   onEnter(profile: DogProfile): void;
@@ -21,7 +23,7 @@ function SetupPanel(props: {
   const errorMessage = enterChat.error
     ? getErrorMessage(enterChat.error, "Failed to enter chat.")
     : props.disabled
-      ? "Initializing app…"
+      ? props.busyMessage ?? "Initializing app…"
       : props.initialError;
 
   return (
@@ -221,11 +223,23 @@ export function App() {
   const [loginError, setLoginError] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
   const [profile, setProfile] = useState<DogProfile | null>(null);
-  const bootPromise = useRef<Promise<{
-    error: unknown | null;
-    fallbackMessage: string;
-    profile: DogProfile | null;
-  }> | null>(null);
+  const bootPromise = useRef<Promise<DogProfile | null> | null>(null);
+  const incomingInvite = useInviteFromLocation<WoofSchema, DogProfile>({
+    clearLocation: (url) => {
+      url.pathname = url.pathname === "/join" ? "/" : url.pathname;
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    },
+    enabled: profile === null,
+    onOpen: (joinedProfile) => {
+      bootPromise.current = null;
+      setBootStatus("ready");
+      setBootError("");
+      setProfile(joinedProfile);
+    },
+    open: async (inviteInput) => service.joinFromInvite(inviteInput),
+  });
 
   useEffect(() => {
     if (!signedInUser) {
@@ -236,64 +250,58 @@ export function App() {
       return;
     }
 
+    if (profile) {
+      setBootStatus("ready");
+      return;
+    }
+
+    if (incomingInvite.hasInvite) {
+      bootPromise.current = null;
+
+      if (incomingInvite.status === "error") {
+        setProfile(null);
+        setBootError(getErrorMessage(incomingInvite.error, "Failed to join invite link."));
+        setBootStatus("ready");
+      } else {
+        setBootError("");
+        setBootStatus("loading");
+      }
+
+      return;
+    }
+
     let cancelled = false;
     setBootStatus("loading");
     if (bootPromise.current === null) {
-      const inviteInput = getInviteInputFromLocation(window.location.href);
-      bootPromise.current = (async () => {
-        try {
-          if (inviteInput) {
-            const joined = await service.joinFromInvite(inviteInput);
-            clearInviteLocation();
-            return {
-              error: null,
-              fallbackMessage: "Failed to join invite link.",
-              profile: joined,
-            };
-          }
-
-          return {
-            error: null,
-            fallbackMessage: "Could not restore saved row.",
-            profile: await service.restoreProfile(),
-          };
-        } catch (error) {
-          await service.relinquish();
-          console.error("[woof-app] boot failed", {
-            error,
-            inviteInput,
-          });
-          return {
-            error,
-            fallbackMessage: inviteInput ? "Failed to join invite link." : "Could not restore saved row.",
-            profile: null,
-          };
-        }
-      })();
+      bootPromise.current = service.restoreProfile();
     }
 
-    void bootPromise.current.then((result) => {
-      if (cancelled) {
-        return;
-      }
+    void bootPromise.current
+      .then((restoredProfile) => {
+        if (cancelled) {
+          return;
+        }
 
-      if (result.error) {
-        setProfile(null);
-        setBootError(getErrorMessage(result.error, result.fallbackMessage));
-      } else {
-        setProfile(result.profile);
+        setProfile(restoredProfile);
         setBootError("");
-      }
+        setBootStatus("ready");
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
 
-      setBootStatus("ready");
-    });
+        setProfile(null);
+        setBootError(getErrorMessage(error, "Could not restore saved row."));
+        setBootStatus("ready");
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [signedInUser?.username]);
+  }, [incomingInvite.error, incomingInvite.hasInvite, incomingInvite.status, profile, signedInUser?.username]);
 
-  const invitePending = getInviteInputFromLocation(window.location.href) !== null;
+  const invitePending = incomingInvite.hasInvite;
 
   if (session.status === "loading") {
     return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;
@@ -332,7 +340,14 @@ export function App() {
   }
 
   if (bootStatus === "loading") {
-    return <SetupPanel disabled initialError="" onEnter={setProfile} />;
+    return (
+      <SetupPanel
+        busyMessage={invitePending ? "Opening shared dog row…" : "Initializing app…"}
+        disabled
+        initialError=""
+        onEnter={setProfile}
+      />
+    );
   }
 
   if (!profile) {

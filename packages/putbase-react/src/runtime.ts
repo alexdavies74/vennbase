@@ -58,6 +58,10 @@ function stableJsonStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
+function snapshotValue(value: unknown): string {
+  return stableJsonStringify(canonicalizeKeyPart(value));
+}
+
 function isRowLocatorLike(value: unknown): value is DbRowLocator & { collection?: string } {
   if (!value || typeof value !== "object") {
     return false;
@@ -257,7 +261,7 @@ class Resource<TData> implements ResourceController<TData> {
     this.inFlight = (async () => {
       try {
         const data = await this.options.load();
-        const nextValueSnapshot = this.options.snapshotOf?.(data) ?? stableJsonStringify(data);
+        const nextValueSnapshot = this.options.snapshotOf?.(data) ?? snapshotValue(data);
         const changed = this.lastValueSnapshot !== nextValueSnapshot || this.snapshot.status !== "success";
         this.lastValueSnapshot = nextValueSnapshot;
 
@@ -403,6 +407,10 @@ export function makeMembersKey(kind: "usernames" | "direct" | "effective", row: 
 
 export function makeInviteLinkKey(row: Pick<DbRowLocator, "target">): string {
   return `invite-link:${row.target}`;
+}
+
+export function makeIncomingInviteKey(inviteInput: string): string {
+  return `incoming-invite:${inviteInput}`;
 }
 
 export const snapshots = {

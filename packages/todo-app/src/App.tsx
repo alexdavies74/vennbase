@@ -1,5 +1,5 @@
-import { PutBaseProvider, useInviteLink, useMutation, useQuery, useSession } from "@putbase/react";
-import { useEffect, useState } from "react";
+import { PutBaseProvider, useInviteFromLocation, useInviteLink, useMutation, useQuery, useSession } from "@putbase/react";
+import { useState } from "react";
 import type { RowHandle, RowFields } from "@putbase/core";
 import { db } from "./db";
 import type { Schema } from "./schema";
@@ -16,33 +16,19 @@ export default function App() {
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
   const session = useSession({ client: db });
   const signedIn = session.status === "success" && session.data?.state === "signed-in";
-  const inviteUrl = new URLSearchParams(window.location.search).has("target")
-    ? window.location.href
-    : null;
-  const invitePending = inviteUrl !== null;
-
-  useEffect(() => {
-    if (!signedIn || board !== null || inviteUrl === null) {
-      return;
-    }
-
-    let cancelled = false;
-
-    db.openInvite(inviteUrl)
-      .then((handle) => {
-        if (cancelled) {
-          return;
-        }
-
-          setBoard(handle as BoardHandle);
-          window.history.replaceState({}, "", window.location.pathname);
-        })
-        .catch(console.error);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [board, inviteUrl, signedIn]);
+  const incomingInvite = useInviteFromLocation<Schema>({
+    client: db,
+    enabled: board === null,
+    onOpen: (handle) => {
+      setBoard(handle as BoardHandle);
+    },
+  });
+  const invitePending = incomingInvite.hasInvite;
+  const inviteError = incomingInvite.error instanceof Error
+    ? incomingInvite.error.message
+    : incomingInvite.status === "error"
+      ? "Failed to open invite link."
+      : "";
 
   return (
     <PutBaseProvider client={db}>
@@ -77,14 +63,16 @@ export default function App() {
         )
         : board
         ? <BoardView board={board} onLeave={() => setBoard(null)} />
-        : <LandingView onBoard={setBoard} />}
+        : invitePending && incomingInvite.status !== "error"
+          ? <OpeningInviteView />
+          : <LandingView errorMessage={inviteError} onBoard={setBoard} />}
     </PutBaseProvider>
   );
 }
 
 // ─── Landing: create or join ──────────────────────────────────────────────────
 
-function LandingView({ onBoard }: { onBoard: (b: BoardHandle) => void }) {
+function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard: (b: BoardHandle) => void }) {
   const [title, setTitle] = useState("");
 
   const createBoard = useMutation(async (t: string) => {
@@ -119,6 +107,19 @@ function LandingView({ onBoard }: { onBoard: (b: BoardHandle) => void }) {
         {createBoard.error != null && (
           <p className="error">Failed to create board.</p>
         )}
+        {errorMessage ? <p className="error">{errorMessage}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+function OpeningInviteView() {
+  return (
+    <main>
+      <section>
+        <h1>PutBase Todo</h1>
+        <h2>Opening shared board</h2>
+        <p className="muted">Joining the invite and loading the board…</p>
       </section>
     </main>
   );

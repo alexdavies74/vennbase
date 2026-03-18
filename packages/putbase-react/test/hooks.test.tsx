@@ -17,6 +17,7 @@ import {
 import {
   PutBaseProvider,
   useCurrentUser,
+  useInviteFromLocation,
   usePutBase,
   useQuery,
   useRow,
@@ -89,19 +90,29 @@ function makeTagRow(id: string, label: string) {
 class FakeDb {
   username = "alex";
   sessionState: "signed-in" | "signed-out" = "signed-in";
+  sessionPromise:
+    | Promise<{ state: "signed-out" } | { state: "signed-in"; user: { username: string } }>
+    | null = null;
   queryCalls = 0;
   getRowCalls = 0;
   openTargetCalls = 0;
+  openInviteCalls = 0;
+  lastInviteInput: string | null = null;
   ensureReadyCalls = 0;
   signInCalls = 0;
   failSession = false;
   dogName = "Rex";
+  inviteDogName = "Buddy";
   queryRows = [makeTagRow("tag_1", "friendly")];
   activitySubscriber: (() => void) | null = null;
 
   async getSession(): Promise<{ state: "signed-out" } | { state: "signed-in"; user: { username: string } }> {
     if (this.failSession) {
       throw new Error("session failed");
+    }
+
+    if (this.sessionPromise) {
+      return this.sessionPromise;
     }
 
     if (this.sessionState === "signed-out") {
@@ -146,6 +157,12 @@ class FakeDb {
     return makeDogRow(this.dogName);
   }
 
+  async openInvite(inviteInput: string): Promise<ReturnType<typeof makeDogRow>> {
+    this.openInviteCalls += 1;
+    this.lastInviteInput = inviteInput;
+    return makeDogRow(this.inviteDogName);
+  }
+
   async listParents(): Promise<DbRowRef[]> {
     return [];
   }
@@ -183,6 +200,34 @@ class FakeDb {
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function waitFor(check: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      check();
+      return;
+    } catch (error) {
+      lastError = error;
+      await act(async () => {
+        await flushMicrotasks();
+      });
+    }
+  }
+
+  throw lastError;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, reject, resolve };
 }
 
 async function renderApp(element: ReactElement) {
@@ -326,6 +371,101 @@ describe("@putbase/react", () => {
 
     expect(latest?.status).toBe("idle");
     expect(db.queryCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("opens invite links from the current location after session resolution", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1",
+    );
+
+    const db = new FakeDb();
+    const session = deferred<{ state: "signed-in"; user: { username: string } }>();
+    db.sessionPromise = session.promise;
+    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let openedDogName = "";
+
+    function Probe() {
+      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>({
+        client: db as unknown as PutBase<TestSchema>,
+        onOpen: (row) => {
+          openedDogName = row.fields.name;
+        },
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.status).toBe("loading");
+    expect(db.openInviteCalls).toBe(0);
+
+    await act(async () => {
+      session.resolve({ state: "signed-in", user: { username: "alex" } });
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    expect(db.openInviteCalls).toBe(1);
+    expect(db.lastInviteInput).toBe("http://localhost:3000/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1");
+    expect(openedDogName).toBe("Buddy");
+    expect(window.location.search).toBe("");
+    await app.unmount();
+  });
+
+  it("supports custom invite openers for app-specific post-processing", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1",
+    );
+
+    const db = new FakeDb();
+    const openInvite = vi.fn(async (inviteInput: string) => {
+      const result = {
+        inviteInput,
+        kind: "profile" as const,
+        row: makeDogRow("Buddy"),
+      };
+      return Object.assign(result, { self: result });
+    });
+    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, {
+      inviteInput: string;
+      kind: "profile";
+      row: ReturnType<typeof makeDogRow>;
+      self?: unknown;
+    }>> | null = null;
+
+    function Probe() {
+      latest = useInviteFromLocation<TestSchema, {
+        inviteInput: string;
+        kind: "profile";
+        row: ReturnType<typeof makeDogRow>;
+        self?: unknown;
+      }>({
+        client: db as unknown as PutBase<TestSchema>,
+        open: async (inviteInput) => openInvite(inviteInput),
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(openInvite).toHaveBeenCalledWith(
+        "http://localhost:3000/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1",
+      );
+      expect(latest?.status).toBe("success");
+      expect(latest?.data?.inviteInput).toBe(
+        "http://localhost:3000/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1",
+      );
+      expect(latest?.data?.row.fields.name).toBe("Buddy");
+    });
+
+    expect(db.openInviteCalls).toBe(0);
     await app.unmount();
   });
 

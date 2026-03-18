@@ -157,7 +157,7 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
-`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
+`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
 
 Wrap your app in `<PutBaseProvider client={db}>` to make the client available to all hooks.
 
@@ -202,6 +202,8 @@ const board = await db.openInvite(link);
 ```
 
 `openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ target, inviteToken? }` object from `db.parseInvite(input)`.
+
+In React apps, `useInviteFromLocation()` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, and optionally clear the invite params from the address bar after success.
 
 ---
 

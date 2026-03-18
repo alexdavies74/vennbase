@@ -2,6 +2,7 @@ import {
   createContext,
   type ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -28,6 +29,7 @@ import {
   getDefaultRuntime,
   getIdleSnapshot,
   makeInviteLinkKey,
+  makeIncomingInviteKey,
   makeMembersKey,
   makeParentsKey,
   makeQueryKey,
@@ -61,6 +63,21 @@ export interface UseSessionResult extends UseResourceResult<AuthSession> {
 export interface UseHookOptions<Schema extends DbSchema> {
   client?: PutBase<Schema>;
   enabled?: boolean;
+}
+
+export interface UseInviteFromLocationOptions<
+  Schema extends DbSchema,
+  TResult = AnyRowHandle<Schema>,
+> extends UseHookOptions<Schema> {
+  href?: string | null;
+  clearLocation?: boolean | ((url: URL) => string);
+  onOpen?: (result: TResult) => void;
+  open?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
+}
+
+export interface UseInviteFromLocationResult<TResult> extends UseResourceResult<TResult> {
+  hasInvite: boolean;
+  inviteInput: string | null;
 }
 
 export interface PutBaseProviderProps<Schema extends DbSchema> {
@@ -149,6 +166,45 @@ function blockedResourceResult<TData>(
   }
 
   return null;
+}
+
+function getInviteHrefFromLocation(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const url = new URL(window.location.href);
+  if (
+    url.searchParams.has("target")
+    || url.searchParams.has("worker")
+    || (url.searchParams.has("owner") && url.searchParams.has("row"))
+  ) {
+    return url.toString();
+  }
+
+  return null;
+}
+
+function clearInviteLocation(
+  clearLocation: boolean | ((url: URL) => string),
+  inviteInput: string,
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = new URL(window.location.href);
+  if (current.toString() !== inviteInput) {
+    return;
+  }
+
+  if (typeof clearLocation === "function") {
+    window.history.replaceState({}, "", clearLocation(current));
+    return;
+  }
+
+  current.search = "";
+  window.history.replaceState({}, "", `${current.pathname}${current.hash}`);
 }
 
 export function PutBaseProvider<Schema extends DbSchema>({
@@ -418,6 +474,112 @@ export function useInviteLink<Schema extends DbSchema>(
     ),
   );
   return blocked ?? resource;
+}
+
+export function useInviteFromLocation<
+  Schema extends DbSchema,
+  TResult = AnyRowHandle<Schema>,
+>(
+  options: UseInviteFromLocationOptions<Schema, TResult> = {},
+): UseInviteFromLocationResult<TResult> {
+  const runtime = useRuntime(options.client);
+  const session = useSessionResource(runtime, options.enabled ?? true);
+  const inviteInput = options.href ?? getInviteHrefFromLocation();
+  const resourceKey = inviteInput ? makeIncomingInviteKey(inviteInput) : null;
+  const clearLocationOption = options.clearLocation ?? true;
+  const deliveredInviteRef = useRef<string | null>(null);
+  const clearedInviteRef = useRef<string | null>(null);
+  const onOpenRef = useRef(options.onOpen);
+  const openRef = useRef(options.open);
+
+  onOpenRef.current = options.onOpen;
+  openRef.current = options.open;
+
+  const resource = useOptionalResource(
+    (options.enabled ?? true)
+      && !!inviteInput
+      && session.status === "success"
+      && session.data?.state === "signed-in",
+    resourceKey,
+    runtime,
+    () => runtime.getLoadOnce(
+      resourceKey as string,
+      () => {
+        const openInvite = openRef.current;
+        if (openInvite) {
+          return openInvite(inviteInput as string, runtime.client);
+        }
+
+        return runtime.client.openInvite(inviteInput as string) as Promise<TResult>;
+      },
+    ),
+  );
+
+  useEffect(() => {
+    if (!inviteInput || resource.status !== "success" || resource.data === undefined) {
+      return;
+    }
+
+    if (onOpenRef.current && deliveredInviteRef.current !== inviteInput) {
+      deliveredInviteRef.current = inviteInput;
+      onOpenRef.current(resource.data);
+    }
+
+    if (clearLocationOption && clearedInviteRef.current !== inviteInput) {
+      clearedInviteRef.current = inviteInput;
+      clearInviteLocation(clearLocationOption, inviteInput);
+    }
+  }, [clearLocationOption, inviteInput, resource.data, resource.status]);
+
+  if (!(options.enabled ?? true) || !inviteInput) {
+    return {
+      data: undefined,
+      error: undefined,
+      hasInvite: false,
+      inviteInput: null,
+      refresh: noopRefresh,
+      status: "idle",
+    };
+  }
+
+  if (session.status === "error") {
+    return {
+      data: undefined,
+      error: session.error,
+      hasInvite: true,
+      inviteInput,
+      refresh: session.refresh,
+      status: "error",
+    };
+  }
+
+  if (session.status !== "success") {
+    return {
+      data: undefined,
+      error: undefined,
+      hasInvite: true,
+      inviteInput,
+      refresh: session.refresh,
+      status: "loading",
+    };
+  }
+
+  if (session.data?.state !== "signed-in") {
+    return {
+      data: undefined,
+      error: undefined,
+      hasInvite: true,
+      inviteInput,
+      refresh: session.refresh,
+      status: "idle",
+    };
+  }
+
+  return {
+    ...resource,
+    hasInvite: true,
+    inviteInput,
+  };
 }
 
 export interface MutationResult<TResult, TArgs extends unknown[]> {
