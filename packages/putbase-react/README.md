@@ -10,12 +10,6 @@ See [`@putbase/core`](https://www.npmjs.com/package/@putbase/core) for the full 
 pnpm add @putbase/react @putbase/core
 ```
 
-Your page must also load `puter.js`:
-
-```html
-<script src="https://js.puter.com/v2/"></script>
-```
-
 ## Setup
 
 Create one `PutBase` instance and wrap your app in `<PutBaseProvider>`:

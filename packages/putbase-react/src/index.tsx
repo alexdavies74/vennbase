@@ -1,3 +1,5 @@
+import "@heyputer/puter.js";
+
 import {
   createContext,
   type ReactNode,

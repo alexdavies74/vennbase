@@ -24,6 +24,7 @@ import type {
   RowFields,
 } from "./schema";
 import { resolveBackend } from "./backend";
+import { missingPuterProvisioningMessage } from "./errors";
 import { resolveCollectionName } from "./schema";
 import { normalizeTarget } from "./transport";
 import { Transport } from "./transport";
@@ -295,7 +296,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
             }
 
             throw new Error(
-              "Unable to provision federation worker: a compatible backend with workers.create is unavailable.",
+              missingPuterProvisioningMessage(),
             );
           }
 

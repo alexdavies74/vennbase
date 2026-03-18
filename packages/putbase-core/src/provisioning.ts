@@ -1,6 +1,7 @@
 import type { AuthManager } from "./auth";
 import { buildClassicWorkerScript } from "./worker/template";
 import { resolveBackend } from "./backend";
+import { missingPuterProvisioningMessage } from "./errors";
 import type { WorkerDeployment } from "@heyputer/puter.js";
 import type { Identity } from "./identity";
 import type { PutBaseOptions } from "./putbase";
@@ -138,9 +139,7 @@ export class Provisioning {
     }
 
     if (!this.canDeployFederationWorker()) {
-      throw new Error(
-        "Unable to provision federation worker: a compatible backend with workers.create is unavailable.",
-      );
+      throw new Error(missingPuterProvisioningMessage());
     }
 
     if (requiresUpgrade) {
@@ -213,7 +212,7 @@ export class Provisioning {
 
     const backend = this.backend;
     if (!backend) {
-      throw new Error("A compatible backend client is unavailable.");
+      throw new Error(missingPuterProvisioningMessage());
     }
 
     const workerName = args.workerName ?? `${args.owner}-federation`;
@@ -222,7 +221,7 @@ export class Provisioning {
     const workers = backend.workers;
 
     if (!workers?.create) {
-      throw new Error("A compatible backend workers.create API is unavailable.");
+      throw new Error(missingPuterProvisioningMessage());
     }
 
     try {

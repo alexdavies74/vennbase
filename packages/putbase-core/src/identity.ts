@@ -1,5 +1,5 @@
 import { resolveBackend } from "./backend";
-import { signedOutError } from "./errors";
+import { missingPuterClientMessage, signedOutError } from "./errors";
 import type { PutBaseOptions } from "./putbase";
 import type { AuthSession, BackendClient, PutBaseUser } from "./types";
 
@@ -63,6 +63,9 @@ export class Identity {
   async whoAmI(): Promise<PutBaseUser> {
     const session = await this.getSession();
     if (session.state !== "signed-in") {
+      if (!this.options.identityProvider && !resolveBackend(this.backend)) {
+        throw signedOutError(missingPuterClientMessage());
+      }
       throw signedOutError();
     }
 
@@ -86,7 +89,7 @@ export class Identity {
     this.backend = resolveBackend(this.backend);
     const auth = this.backend?.auth;
     if (!auth?.signIn) {
-      throw signedOutError("A compatible signIn API is unavailable.");
+      throw signedOutError(missingPuterClientMessage());
     }
 
     await auth.signIn();

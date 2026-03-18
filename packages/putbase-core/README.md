@@ -44,11 +44,7 @@ Access control is **explicit-grant only**. There are no complex rule expressions
 pnpm add @putbase/core
 ```
 
-Your page must also load `puter.js`:
-
-```html
-<script src="https://js.puter.com/v2/"></script>
-```
+Using React? Start with `@putbase/react`.
 
 ---
 
@@ -98,7 +94,7 @@ import { schema } from "./schema";
 export const db = new PutBase({ schema, appBaseUrl: window.location.origin });
 ```
 
-If `puter.js` is on the page, PutBase finds it automatically. Construction is safe on first paint: PutBase may probe whether a session already exists, but it will never open the Puter login popup unless you call `db.signIn()` explicitly.
+Construction is safe on first paint: PutBase may probe whether a session already exists, but it will never open the Puter login popup unless you call `db.signIn()` explicitly.
 
 ## Auth and startup
 

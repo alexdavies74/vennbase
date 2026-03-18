@@ -260,6 +260,12 @@ afterEach(() => {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("@putbase/react", () => {
+  it("initializes the ambient Puter client on import", () => {
+    expect((globalThis as { puter?: unknown }).puter).toBeTruthy();
+  });
+});
+
+describe("@putbase/react", () => {
   it("reads the client from provider context", async () => {
     const db = new FakeDb() as unknown as PutBase<TestSchema>;
     let seen: PutBase<TestSchema> | null = null;

@@ -190,6 +190,41 @@ describe("PutBase", () => {
     expect(signInCalls).toBe(1);
   });
 
+  it("explains how to provide Puter when signIn is called without a backend", async () => {
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+    });
+
+    await expect(db.signIn()).rejects.toMatchObject<Partial<PutBaseError>>({
+      code: "SIGNED_OUT",
+      message: expect.stringContaining("No Puter client found."),
+    });
+    await expect(db.signIn()).rejects.toMatchObject<Partial<PutBaseError>>({
+      message: expect.stringContaining("@heyputer/puter.js"),
+    });
+  });
+
+  it("explains how to provide Puter when provisioning cannot find workers.create", async () => {
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      appBaseUrl: "https://app.example",
+      backend: {
+        auth: {
+          whoami: async () => ({ username: "owner" }),
+        },
+        fs: {
+          mkdir: async () => undefined,
+          write: async () => undefined,
+        },
+        workers: {},
+        kv: new MapKv(),
+      } as BackendClient,
+    });
+
+    await expect(db.ensureReady()).rejects.toThrow("@heyputer/puter.js");
+    await expect(db.ensureReady()).rejects.toThrow("workers.create");
+  });
+
   it("waits for ambient backend availability once ensureReady is called", async () => {
     const kv = new MapKv();
     const appHost = "late-backend.example";

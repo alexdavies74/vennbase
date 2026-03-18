@@ -33,6 +33,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@heyputer/puter.js": "^2.2.11",
     "@putbase/core": "workspace:*"
   },
   "peerDependencies": {
