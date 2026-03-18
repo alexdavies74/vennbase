@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@putbase/react";
+import { useMutation, usePutBase, useQuery } from "@putbase/react";
 
 import type { DogProfile } from "./profile";
+import type { WoofSchema } from "./schema";
 import { getErrorMessage } from "./utils";
 
 interface DogTag {
@@ -35,9 +36,10 @@ export interface TagsPanelProps {
 }
 
 export function TagsPanel({ profile, onCreateTag }: TagsPanelProps) {
+  const db = usePutBase<WoofSchema>();
   const [tagInput, setTagInput] = useState("");
   const [validationError, setValidationError] = useState("");
-  const tagsQuery = useQuery("tags", {
+  const tagsQuery = useQuery(db, "tags", {
     in: profile.row.toRef(),
     index: "byCreatedAt",
     order: "asc",

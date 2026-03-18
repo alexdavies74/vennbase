@@ -290,7 +290,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useCurrentUser<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useCurrentUser<TestSchema>({ client: db as unknown as PutBase<TestSchema> });
+      latest = useCurrentUser<TestSchema>(db as unknown as PutBase<TestSchema>);
       return <div>{latest.data?.username ?? latest.status}</div>;
     }
 
@@ -315,7 +315,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useCurrentUser<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useCurrentUser<TestSchema>({ client: db as unknown as PutBase<TestSchema> });
+      latest = useCurrentUser<TestSchema>(db as unknown as PutBase<TestSchema>);
       return <div>{latest.status}</div>;
     }
 
@@ -332,7 +332,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useSession<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useSession<TestSchema>({ client: db as unknown as PutBase<TestSchema> });
+      latest = useSession<TestSchema>(db as unknown as PutBase<TestSchema>);
       return <div>{latest.session.state}</div>;
     }
 
@@ -369,7 +369,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
 
     function Probe() {
-      latest = useQuery("tags", queryOptions, { client: db as unknown as PutBase<TestSchema> });
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
       return <div>{latest.status}</div>;
     }
 
@@ -394,8 +394,7 @@ describe("@putbase/react", () => {
     let openedDogName = "";
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>({
-        client: db as unknown as PutBase<TestSchema>,
+      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
         onOpen: (row) => {
           openedDogName = row.fields.name;
         },
@@ -451,8 +450,7 @@ describe("@putbase/react", () => {
         kind: "profile";
         row: ReturnType<typeof makeDogRow>;
         self?: unknown;
-      }>({
-        client: db as unknown as PutBase<TestSchema>,
+      }>(db as unknown as PutBase<TestSchema>, {
         open: async (inviteInput) => openInvite(inviteInput),
       });
       return <div>{latest.status}</div>;
@@ -491,7 +489,7 @@ describe("@putbase/react", () => {
     };
 
     function Probe() {
-      const result = useQuery("tags", queryOptions, { client: db as unknown as PutBase<TestSchema> });
+      const result = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
       return <div>{result.rows.map((row) => row.fields.label).join(",")}</div>;
     }
 
@@ -522,11 +520,11 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
 
     function Probe() {
-      latest = useQuery("tags", {
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", {
         in: boardHandle,
         index: "byCreatedAt",
         order: "asc",
-      }, { client: db as unknown as PutBase<TestSchema> });
+      });
       return <div>{latest.rows.map((row) => row.fields.label).join(",")}</div>;
     }
 
@@ -550,7 +548,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useRow<TestSchema, "dogs">> | null = null;
 
     function Probe() {
-      latest = useRow("dogs", rowRef, { client: db as unknown as PutBase<TestSchema> });
+      latest = useRow(db as unknown as PutBase<TestSchema>, rowRef);
       return <div>{latest.data?.fields.name ?? latest.status}</div>;
     }
 
@@ -586,7 +584,7 @@ describe("@putbase/react", () => {
 
     function Probe() {
       renderCount += 1;
-      useQuery("tags", queryOptions, { client: db as unknown as PutBase<TestSchema> });
+      useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
       return null;
     }
 
@@ -607,7 +605,7 @@ describe("@putbase/react", () => {
     let latest: ReturnType<typeof useRowTarget<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useRowTarget<TestSchema>(null, { client: db as unknown as PutBase<TestSchema> });
+      latest = useRowTarget<TestSchema>(db as unknown as PutBase<TestSchema>, null);
       return <div>{latest.status}</div>;
     }
 
@@ -634,7 +632,7 @@ describe("@putbase/react", () => {
     };
 
     function Probe() {
-      useQuery("tags", queryOptions, { client: db as unknown as PutBase<TestSchema> });
+      useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
       return null;
     }
 
@@ -667,7 +665,8 @@ describe("@putbase/react", () => {
     let notifyActivity: (() => void) | null = null;
 
     function Probe() {
-      useQuery("tags", queryOptions);
+      const db = usePutBase<TestSchema>();
+      useQuery(db, "tags", queryOptions);
       return null;
     }
 

@@ -12,14 +12,19 @@ pnpm add @putbase/react @putbase/core
 
 ## Setup
 
-Create one `PutBase` instance and wrap your app in `<PutBaseProvider>`:
+Create one `PutBase` instance for your app.
 
 ```tsx
 import { PutBase } from "@putbase/core";
-import { PutBaseProvider } from "@putbase/react";
 import { schema } from "./schema";
 
 const db = new PutBase({ schema, appBaseUrl: window.location.origin });
+```
+
+If you want to read the client from React context once, wrap your app in `<PutBaseProvider>` and call `usePutBase()` where needed:
+
+```tsx
+import { PutBaseProvider, usePutBase, useSession } from "@putbase/react";
 
 export function App() {
   return (
@@ -27,6 +32,12 @@ export function App() {
       <AppShell />
     </PutBaseProvider>
   );
+}
+
+function AppShell() {
+  const db = usePutBase<Schema>();
+  const session = useSession(db);
+  return <Main session={session} />;
 }
 ```
 
@@ -36,9 +47,10 @@ Use `useSession` to gate your UI on the auth state:
 
 ```tsx
 import { useSession } from "@putbase/react";
+import { db } from "./db";
 
 function AppShell() {
-  const session = useSession();
+  const session = useSession(db);
 
   if (session.status === "loading") return <p>Checking session…</p>;
 
@@ -56,9 +68,10 @@ function AppShell() {
 
 ```tsx
 import { useQuery } from "@putbase/react";
+import { db } from "./db";
 
 function CardList({ board }: { board: BoardHandle }) {
-  const { rows: cards } = useQuery<Schema, "cards">("cards", {
+  const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
     in: board,
     index: "byCreatedAt",
     order: "asc",
@@ -80,16 +93,17 @@ function CardList({ board }: { board: BoardHandle }) {
 
 ```tsx
 import { useInviteLink, useInviteFromLocation } from "@putbase/react";
+import { db } from "./db";
 
 // Sharer side
 function ShareButton({ board }: { board: BoardHandle }) {
-  const { data: link } = useInviteLink(board);
+  const { data: link } = useInviteLink(db, board);
   return <button onClick={() => navigator.clipboard.writeText(link ?? "")}>Copy invite link</button>;
 }
 
 // Recipient side — call once near the app root
 function InviteHandler() {
-  useInviteFromLocation({
+  useInviteFromLocation(db, {
     onOpen: (board) => {
       // navigate to the shared board
     },
@@ -120,23 +134,23 @@ function AddCard({ board }: { board: BoardHandle }) {
 
 ## Hook reference
 
-All hooks accept an optional final `{ client?, enabled? }` argument to override the context client or conditionally disable the hook.
+All PutBase-backed hooks are client-first and accept an optional final `{ enabled? }` argument.
 
 | Hook | Arguments | Returns |
 |------|-----------|---------|
-| `useSession()` | — | `{ session, signIn, status, refresh }` |
-| `useCurrentUser()` | — | `{ data: PutBaseUser, status, refresh }` |
+| `useSession(client)` | `PutBase` client | `{ session, signIn, status, refresh }` |
+| `useCurrentUser(client)` | `PutBase` client | `{ data: PutBaseUser, status, refresh }` |
 | `usePutBase()` | — | `PutBase` client from context |
-| `usePutBaseReady()` | — | `{ status, refresh }` — resolves when auth + provisioning complete |
-| `useQuery(collection, options)` | collection name, query options | `{ rows, data, status, error, refresh }` |
-| `useRow(collection, row)` | collection name, row ref | `{ data: RowHandle, status, error, refresh }` |
-| `useRowTarget(target)` | target URL string | `{ data: RowHandle, status, error, refresh }` |
-| `useParents(row)` | row ref | `{ data: DbRowRef[], status, error, refresh }` |
-| `useMemberUsernames(row)` | row ref | `{ data: string[], status, error, refresh }` |
-| `useDirectMembers(row)` | row ref | `{ data: { username, role }[], status, error, refresh }` |
-| `useEffectiveMembers(row)` | row ref | `{ data: DbMemberInfo[], status, error, refresh }` |
-| `useInviteLink(row)` | row ref | `{ data: string, status, error, refresh }` |
-| `useInviteFromLocation(options?)` | `{ href?, clearLocation?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, error, refresh }` |
+| `usePutBaseReady(client)` | `PutBase` client | `{ status, refresh }` — resolves when auth + provisioning complete |
+| `useQuery(client, collection, options)` | client, collection name, query options | `{ rows, data, status, error, refresh }` |
+| `useRow(client, row)` | client, row ref | `{ data: RowHandle, status, error, refresh }` |
+| `useRowTarget(client, target)` | client, target URL string | `{ data: RowHandle, status, error, refresh }` |
+| `useParents(client, row)` | client, row ref | `{ data: DbRowRef[], status, error, refresh }` |
+| `useMemberUsernames(client, row)` | client, row ref | `{ data: string[], status, error, refresh }` |
+| `useDirectMembers(client, row)` | client, row ref | `{ data: { username, role }[], status, error, refresh }` |
+| `useEffectiveMembers(client, row)` | client, row ref | `{ data: DbMemberInfo[], status, error, refresh }` |
+| `useInviteLink(client, row)` | client, row ref | `{ data: string, status, error, refresh }` |
+| `useInviteFromLocation(client, options?)` | client, `{ href?, clearLocation?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, error, refresh }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
 All data-fetching hooks return `status: "idle" | "loading" | "success" | "error"`.

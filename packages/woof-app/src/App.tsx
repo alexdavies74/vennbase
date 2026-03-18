@@ -1,5 +1,5 @@
 import { puter } from "@heyputer/puter.js";
-import { useInviteFromLocation, useInviteLink, useMutation, useSession } from "@putbase/react";
+import { useInviteFromLocation, useInviteLink, useMutation, usePutBase, useSession } from "@putbase/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { DogProfile } from "./profile";
@@ -152,8 +152,9 @@ function RoomScreen(props: {
   onRelinquished(): void;
   profile: DogProfile;
 }) {
+  const db = usePutBase<WoofSchema>();
   const [copyStatus, setCopyStatus] = useState("");
-  const inviteLink = useInviteLink(props.profile.row);
+  const inviteLink = useInviteLink(db, props.profile.row);
   const relinquish = useMutation(async () => {
     await service.relinquish();
     props.onRelinquished();
@@ -213,7 +214,8 @@ function RoomScreen(props: {
 }
 
 export function App() {
-  const session = useSession();
+  const db = usePutBase<WoofSchema>();
+  const session = useSession(db);
   const signedInUser =
     session.status === "success" && session.data?.state === "signed-in"
       ? session.data.user
@@ -224,7 +226,7 @@ export function App() {
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
   const [profile, setProfile] = useState<DogProfile | null>(null);
   const bootPromise = useRef<Promise<DogProfile | null> | null>(null);
-  const incomingInvite = useInviteFromLocation<WoofSchema, DogProfile>({
+  const incomingInvite = useInviteFromLocation<WoofSchema, DogProfile>(db, {
     clearLocation: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";

@@ -1,4 +1,4 @@
-import { PutBaseProvider, useInviteFromLocation, useInviteLink, useMutation, useQuery, useSession } from "@putbase/react";
+import { useInviteFromLocation, useInviteLink, useMutation, useQuery, useSession } from "@putbase/react";
 import { useState } from "react";
 import type { RowHandle, RowFields } from "@putbase/core";
 import { db } from "./db";
@@ -14,10 +14,9 @@ export default function App() {
   const [board, setBoard] = useState<BoardHandle | null>(null);
   const [loginError, setLoginError] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
-  const session = useSession({ client: db });
+  const session = useSession(db);
   const signedIn = session.status === "success" && session.data?.state === "signed-in";
-  const incomingInvite = useInviteFromLocation<Schema>({
-    client: db,
+  const incomingInvite = useInviteFromLocation<Schema>(db, {
     enabled: board === null,
     onOpen: (handle) => {
       setBoard(handle as BoardHandle);
@@ -30,44 +29,40 @@ export default function App() {
       ? "Failed to open invite link."
       : "";
 
-  return (
-    <PutBaseProvider client={db}>
-      {!signedIn
-        ? (
-          <main>
-            <h1>PutBase Todo</h1>
-            <section>
-              <h2>{invitePending ? "Log in to join board" : "Log in to start"}</h2>
-              <p>{invitePending ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
-              <button
-                type="button"
-                disabled={loginStatus === "loading" || session.status === "loading"}
-                onClick={() => {
-                  setLoginError("");
-                  setLoginStatus("loading");
-                  void session.signIn()
-                    .catch((error) => {
-                      const message = error instanceof Error ? error.message : "Sign-in failed.";
-                      setLoginError(message);
-                    })
-                    .finally(() => {
-                      setLoginStatus("idle");
-                    });
-                }}
-              >
-                {loginStatus === "loading" || session.status === "loading" ? "Opening Puter…" : invitePending ? "Log in to join" : "Log in with Puter"}
-              </button>
-              {loginError ? <p className="error">{loginError}</p> : null}
-            </section>
-          </main>
-        )
-        : board
-        ? <BoardView board={board} onLeave={() => setBoard(null)} />
-        : invitePending && incomingInvite.status !== "error"
-          ? <OpeningInviteView />
-          : <LandingView errorMessage={inviteError} onBoard={setBoard} />}
-    </PutBaseProvider>
-  );
+  return !signedIn
+    ? (
+      <main>
+        <h1>PutBase Todo</h1>
+        <section>
+          <h2>{invitePending ? "Log in to join board" : "Log in to start"}</h2>
+          <p>{invitePending ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
+          <button
+            type="button"
+            disabled={loginStatus === "loading" || session.status === "loading"}
+            onClick={() => {
+              setLoginError("");
+              setLoginStatus("loading");
+              void session.signIn()
+                .catch((error) => {
+                  const message = error instanceof Error ? error.message : "Sign-in failed.";
+                  setLoginError(message);
+                })
+                .finally(() => {
+                  setLoginStatus("idle");
+                });
+            }}
+          >
+            {loginStatus === "loading" || session.status === "loading" ? "Opening Puter…" : invitePending ? "Log in to join" : "Log in with Puter"}
+          </button>
+          {loginError ? <p className="error">{loginError}</p> : null}
+        </section>
+      </main>
+    )
+    : board
+    ? <BoardView board={board} onLeave={() => setBoard(null)} />
+    : invitePending && incomingInvite.status !== "error"
+      ? <OpeningInviteView />
+      : <LandingView errorMessage={inviteError} onBoard={setBoard} />;
 }
 
 // ─── Landing: create or join ──────────────────────────────────────────────────
@@ -130,13 +125,13 @@ function OpeningInviteView() {
 function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void }) {
   const [text, setText] = useState("");
 
-  const { rows: cards } = useQuery<Schema, "cards">("cards", {
+  const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
     in: board,
     index: "byCreatedAt",
     order: "asc",
   });
 
-  const { data: inviteLink } = useInviteLink(board);
+  const { data: inviteLink } = useInviteLink(db, board);
 
   const addCard = useMutation(async (cardText: string) => {
     await db.put("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board });

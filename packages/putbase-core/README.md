@@ -16,14 +16,14 @@ const board = await db.put("boards", { title: "Launch checklist" });
 await db.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
 
 // Read (React)
-const { rows: cards } = useQuery<Schema, "cards">("cards", {
+const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
   in: board,
   index: "byCreatedAt",
   order: "asc",
 });
 
 // Share
-const { data: inviteLink } = useInviteLink(board);
+const { data: inviteLink } = useInviteLink(db, board);
 ```
 
 ---
@@ -153,7 +153,7 @@ const cards = await db.query("cards", {
 import { useQuery } from "@putbase/react";
 
 function CardList({ board }: { board: BoardHandle }) {
-  const { rows: cards } = useQuery<Schema, "cards">("cards", {
+  const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
     in: board,
     index: "byCreatedAt",
     order: "asc",
@@ -171,15 +171,14 @@ function CardList({ board }: { board: BoardHandle }) {
 
 `rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
 
-Wrap your app in `<PutBaseProvider client={db}>` to make the client available to all hooks.
 
-For app boot, prefer `useSession()`:
+For app boot, prefer `useSession(db)`:
 
 ```tsx
 import { useSession } from "@putbase/react";
 
 function AppShell() {
-  const session = useSession();
+  const session = useSession(db);
 
   if (session.status === "loading") {
     return <p>Checking session…</p>;
@@ -215,7 +214,7 @@ const board = await db.openInvite(link);
 
 `openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ target, inviteToken? }` object from `db.parseInvite(input)`.
 
-In React apps, `useInviteFromLocation()` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, and optionally clear the invite params from the address bar after success.
+In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, and optionally clear the invite params from the address bar after success.
 
 Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
 
