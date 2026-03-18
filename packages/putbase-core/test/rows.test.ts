@@ -242,6 +242,39 @@ describe("PutBase rows", () => {
     });
   });
 
+  it("lets invite-joined writers update shared child rows", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = buildDb({ username: "alice", network });
+    const bobDb = buildDb({ username: "bob", network });
+
+    const project = await aliceDb.put("projects", { name: "Roadmap" });
+    const task = await aliceDb.put("tasks", { title: "Review" }, { in: project.toRef() });
+    const invite = await aliceDb.createInviteToken(task);
+    const inviteLink = aliceDb.createInviteLink(task, invite.token);
+
+    const joined = await bobDb.openInvite(inviteLink);
+    expect(joined.collection).toBe("tasks");
+    if (joined.collection !== "tasks") {
+      throw new Error(`Expected tasks row, got ${joined.collection}`);
+    }
+
+    await bobDb.update("tasks", joined.toRef(), { status: "done" });
+
+    const refreshed = await aliceDb.getRow("tasks", task.toRef());
+    expect(refreshed.fields.status).toBe("done");
+
+    const rows = await aliceDb.query("tasks", {
+      in: project.toRef(),
+      where: { status: "done" },
+    });
+    expect(rows.some((row) => row.id === task.id)).toBe(true);
+
+    const directMembers = await aliceDb.listDirectMembers(task);
+    expect(directMembers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ username: "bob", role: "writer" }),
+    ]));
+  });
+
   it("rejects legacy row-worker URLs without /rows/{id}", async () => {
     const network = new TestWorkerNetwork();
     const db = buildDb({ username: "alice", network });

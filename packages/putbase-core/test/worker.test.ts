@@ -221,6 +221,21 @@ describe("RowWorker", () => {
 
     expect(guestJoin.status).toBe(200);
 
+    const directMembers = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("row_1", "members/direct"),
+        action: "members/direct",
+        rowId: "row_1",
+        username: "owner",
+      }),
+    );
+
+    expect(directMembers.status).toBe(200);
+    expect((await jsonBody(directMembers)).members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ username: "owner", role: "admin" }),
+      expect.objectContaining({ username: "guest", role: "writer" }),
+    ]));
+
     const outsiderRead = await worker.handle(
       await authedRequest({
         url: rowEndpoint("row_1", "sync/poll"),
@@ -464,6 +479,59 @@ describe("RowWorker", () => {
       signedBy: "guest",
       sequence: 1,
     });
+  });
+
+  it("blocks sync sends from reader members", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    await createRow(worker, "row_reader");
+
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("row_reader", "row/join"),
+        action: "row/join",
+        rowId: "row_reader",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("row_reader", "members/add"),
+        action: "members/add",
+        rowId: "row_reader",
+        username: "owner",
+        body: {
+          username: "reader",
+          role: "reader",
+        },
+      }),
+    );
+
+    const post = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("row_reader", "sync/send"),
+        action: "sync/send",
+        rowId: "row_reader",
+        username: "reader",
+        body: {
+          id: "msg_reader",
+          rowId: "row_reader",
+          body: { userType: "user", content: "hello" },
+          createdAt: 100,
+        },
+      }),
+    );
+
+    expect(post.status).toBe(401);
+    expect((await jsonBody(post)).code).toBe("UNAUTHORIZED");
   });
 
   it("returns messages sorted by createdAt and id", async () => {

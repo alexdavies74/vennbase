@@ -217,6 +217,8 @@ const board = await db.openInvite(link);
 
 In React apps, `useInviteFromLocation()` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, and optionally clear the invite params from the address bar after success.
 
+Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
+
 ---
 
 ## Membership
@@ -243,6 +245,8 @@ Membership inherited through a parent row is visible via `listEffectiveMembers`.
 ## Real-time sync (CRDT)
 
 PutBase includes a CRDT message bridge. Connect any CRDT library to a row and all members receive each other's updates in real time.
+
+Sending CRDT updates requires `"writer"` or `"admin"` access, but all members can poll and receive them.
 
 Here is the full integration with [Yjs](https://yjs.dev):
 
@@ -305,11 +309,11 @@ pnpm --filter todo-app dev
 | `getExistingInviteToken(row)` | Return the existing token if one exists, or `null`. |
 | `createInviteLink(row, token)` | Build a shareable URL containing the row target and token. |
 | `parseInvite(input)` | Parse an invite URL or worker URL into `{ target, inviteToken? }`. |
-| `openInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. |
+| `openInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. Invite joins become direct `"writer"` members by default. |
 | `listMembers(row)` | Returns `string[]` of all member usernames. |
 | `listDirectMembers(row)` | Returns `{ username, role }[]` for directly-granted members. |
 | `listEffectiveMembers(row)` | Returns resolved membership including grants inherited from parents. |
-| `addMember(row, username, role)` | Grant a user access. Roles: `"owner"`, `"writer"`, `"reader"`. |
+| `addMember(row, username, role)` | Grant a user access. Roles: `"owner"`, `"writer"`, `"reader"`. `"writer"` and `"admin"` can update fields and send CRDT messages; `"reader"` is read-only. |
 | `removeMember(row, username)` | Revoke a user's access. |
 | `addParent(child, parent)` | Link a row to an additional parent after creation. |
 | `removeParent(child, parent)` | Unlink a row from a parent. |

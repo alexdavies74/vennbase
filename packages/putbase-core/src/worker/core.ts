@@ -577,6 +577,10 @@ export class RowWorker {
         return await this.updateIndex(request, rowRoute.rowId, ctx);
       }
 
+      if (request.method === "POST" && rowRoute.endpoint === "parents/list") {
+        return await this.listParents(request, rowRoute.rowId, ctx);
+      }
+
       if (request.method === "POST" && rowRoute.endpoint === "db/query") {
         return await this.dbQuery(request, rowRoute.rowId, ctx);
       }
@@ -850,7 +854,7 @@ export class RowWorker {
 
     if (!isOwner) {
       const roles = await this.getMemberRoles(rowId);
-      roles[body.username] = roles[body.username] ?? "reader";
+      roles[body.username] = roles[body.username] ?? "writer";
       await this.kv.set(rowMemberRolesKey(rowId), roles);
     }
 
@@ -914,7 +918,7 @@ export class RowWorker {
       action: "sync/send",
       rowId,
     });
-    await this.assertMember(rowId, principal, ctx);
+    await this.assertWriterOrAdmin(rowId, principal, ctx);
 
     if (payload.rowId !== rowId) {
       error(400, "BAD_REQUEST", "Payload rowId does not match route rowId");
@@ -1031,22 +1035,27 @@ export class RowWorker {
     parentRowId: string,
     ctx: WorkerRequestContext,
   ): Promise<Response> {
-    const { payload: body, principal } = await this.requireProtectedPayload<RegisterChildRequest>(request, {
+    const { payload: body, principal, auth } = await this.requireProtectedPayload<RegisterChildRequest>(request, {
       action: "parents/register-child",
       rowId: parentRowId,
     });
 
     const childTarget = stripTrailingSlash(body.childTarget ?? body.childWorkerUrl ?? "");
+    const parentTarget = inferRowWorkerUrlFromRequest(request.url, parentRowId, this.config.workerUrl);
 
     if (!body.childRowId || !body.childOwner || !childTarget || !body.collection) {
       error(400, "BAD_REQUEST", "childRowId, childOwner, childTarget, and collection are required");
     }
 
-    if (principal.username !== body.childOwner) {
-      error(401, "UNAUTHORIZED", "Only child owner can register child");
-    }
-
-    await this.assertMember(parentRowId, principal, ctx);
+    await this.assertCanMaintainParentIndex({
+      auth,
+      childOwner: body.childOwner,
+      childTarget,
+      ctx,
+      parentRowId,
+      parentTarget,
+      principal,
+    });
 
     const schema = this.normalizeChildSchema(body.schema);
     if (schema) {
@@ -1119,7 +1128,7 @@ export class RowWorker {
     parentRowId: string,
     ctx: WorkerRequestContext,
   ): Promise<Response> {
-    const { payload: body, principal } = await this.requireProtectedPayload<UpdateIndexRequest>(request, {
+    const { payload: body, principal, auth } = await this.requireProtectedPayload<UpdateIndexRequest>(request, {
       action: "parents/update-index",
       rowId: parentRowId,
       requireRequestProof: false,
@@ -1129,20 +1138,25 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "childRowId, childOwner, collection, and fields are required");
     }
 
-    if (principal.username !== body.childOwner) {
-      error(401, "UNAUTHORIZED", "Only child owner can update indexes");
-    }
-
-    await this.assertMember(parentRowId, principal, ctx);
+    const childTarget = stripTrailingSlash(body.childTarget ?? body.childWorkerUrl ?? "");
+    const parentTarget = inferRowWorkerUrlFromRequest(request.url, parentRowId, this.config.workerUrl);
+    await this.assertCanMaintainParentIndex({
+      auth,
+      childOwner: body.childOwner,
+      childTarget,
+      ctx,
+      parentRowId,
+      parentTarget,
+      principal,
+    });
 
     const schema = await this.getChildSchema(parentRowId, body.collection);
     const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, body.childRowId);
     const existing = await this.kv.get<ChildEntry>(childKey);
-    const childTarget = stripTrailingSlash(body.childTarget ?? body.childWorkerUrl ?? existing?.target ?? "");
     const nextEntry: ChildEntry = {
       rowId: body.childRowId,
       owner: body.childOwner,
-      target: childTarget,
+      target: childTarget || stripTrailingSlash(existing?.target ?? ""),
       collection: body.collection,
       fields: toJsonRecord(body.fields),
       addedAt: existing?.addedAt ?? this.now(),
@@ -1164,6 +1178,23 @@ export class RowWorker {
     return jsonResponse(200, {
       ok: true,
       updated: true,
+    });
+  }
+
+  private async listParents(
+    request: Request,
+    rowId: string,
+    ctx: WorkerRequestContext,
+  ): Promise<Response> {
+    const { principal } = await this.requireProtectedPayload<Record<string, never>>(request, {
+      action: "parents/list",
+      rowId,
+      requireRequestProof: false,
+    });
+    await this.assertMember(rowId, principal, ctx);
+
+    return jsonResponse(200, {
+      parentRefs: await this.getParentRefs(rowId),
     });
   }
 
@@ -1411,6 +1442,135 @@ export class RowWorker {
     return jsonResponse(200, {
       members: Array.from(members.values()),
     });
+  }
+
+  private async assertCanMaintainParentIndex(args: {
+    auth: ProtectedRequest<unknown>["auth"];
+    childOwner: string;
+    childTarget: string;
+    ctx: WorkerRequestContext;
+    parentRowId: string;
+    parentTarget: string;
+    principal: VerifiedPrincipal;
+  }): Promise<void> {
+    const isParentMember = await this.hasRole(args.parentRowId, args.principal, args.ctx, ["admin", "writer", "reader"]);
+    const canWriteChild = await this.canWriteChildRow(args);
+
+    if (isParentMember && canWriteChild) {
+      return;
+    }
+
+    if (
+      canWriteChild
+      && await this.remoteRowHasParent(args.childTarget, args.parentTarget, args.auth.principal, args.ctx)
+    ) {
+      return;
+    }
+
+    error(401, "UNAUTHORIZED", "Must be a parent member or a writer on a linked child row");
+  }
+
+  private async canWriteChildRow(args: {
+    auth: ProtectedRequest<unknown>["auth"];
+    childOwner: string;
+    childTarget: string;
+    ctx: WorkerRequestContext;
+    principal: VerifiedPrincipal;
+  }): Promise<boolean> {
+    if (args.principal.username === args.childOwner) {
+      return true;
+    }
+
+    if (!args.childTarget) {
+      return false;
+    }
+
+    const role = await this.resolveRemoteRowRole(args.childTarget, args.auth.principal, args.ctx, 1);
+    return role === "admin" || role === "writer";
+  }
+
+  private async resolveRemoteRowRole(
+    target: string,
+    principal: PrincipalProof,
+    ctx: WorkerRequestContext,
+    ttl: number,
+  ): Promise<MemberRole | null> {
+    if (!ctx.workersExec) {
+      return null;
+    }
+
+    try {
+      const forwarded: ProtectedRequest<RoleResolutionRequest> = {
+        auth: {
+          principal,
+        },
+        payload: {
+          ttl,
+        },
+      };
+      const response = await ctx.workersExec(
+        `${stripTrailingSlash(target)}/members/role`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-puter-no-auth": "1",
+          },
+          body: JSON.stringify(forwarded),
+        },
+      );
+      const payload = await response.json().catch(() => null) as { role?: MemberRole } | null;
+      if (!response.ok) {
+        return null;
+      }
+
+      if (payload?.role === "admin" || payload?.role === "writer" || payload?.role === "reader") {
+        return payload.role;
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  private async remoteRowHasParent(
+    target: string,
+    parentTarget: string,
+    principal: PrincipalProof,
+    ctx: WorkerRequestContext,
+  ): Promise<boolean> {
+    if (!ctx.workersExec) {
+      return false;
+    }
+
+    try {
+      const forwarded: ProtectedRequest<Record<string, never>> = {
+        auth: {
+          principal,
+        },
+        payload: {},
+      };
+      const response = await ctx.workersExec(
+        `${stripTrailingSlash(target)}/parents/list`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-puter-no-auth": "1",
+          },
+          body: JSON.stringify(forwarded),
+        },
+      );
+      const payload = await response.json().catch(() => null) as { parentRefs?: Array<{ target?: string }> } | null;
+      if (!response.ok) {
+        return false;
+      }
+
+      return (payload?.parentRefs ?? []).some((parentRef) => stripTrailingSlash(parentRef.target ?? "") === parentTarget);
+    } catch {
+      return false;
+    }
   }
 
   private async queryByIndex(

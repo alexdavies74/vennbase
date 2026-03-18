@@ -114,6 +114,8 @@ router.options("/rows/:rowId/parents/unregister-child", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rows/:rowId/parents/update-index", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
+router.options("/rows/:rowId/parents/list", () =>
+  new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rows/:rowId/db/query", () =>
   new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS }));
 router.options("/rows/:rowId/parents/link-parent", () =>
@@ -145,6 +147,7 @@ router.post("/rows/:rowId/sync/send", route);
 router.post("/rows/:rowId/parents/register-child", route);
 router.post("/rows/:rowId/parents/unregister-child", route);
 router.post("/rows/:rowId/parents/update-index", route);
+router.post("/rows/:rowId/parents/list", route);
 router.post("/rows/:rowId/parents/link-parent", route);
 router.post("/rows/:rowId/parents/unlink-parent", route);
 router.post("/rows/:rowId/members/add", route);
