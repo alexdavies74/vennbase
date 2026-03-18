@@ -276,7 +276,9 @@ export function App() {
       bootPromise.current = service.restoreProfile();
     }
 
-    void bootPromise.current
+    const pendingBoot = bootPromise.current;
+
+    void pendingBoot
       .then((restoredProfile) => {
         if (cancelled) {
           return;
@@ -294,6 +296,11 @@ export function App() {
         setProfile(null);
         setBootError(getErrorMessage(error, "Could not restore saved room."));
         setBootStatus("ready");
+      })
+      .finally(() => {
+        if (bootPromise.current === pendingBoot) {
+          bootPromise.current = null;
+        }
       });
 
     return () => {
