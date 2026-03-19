@@ -413,6 +413,10 @@ export function makeIncomingInviteKey(inviteInput: string): string {
   return `incoming-invite:${inviteInput}`;
 }
 
+export function makePerUserRowKey(username: string, rowKey: string, inviteInput: string | null): string {
+  return `per-user-row:${username}:${rowKey}:${inviteInput ?? ""}`;
+}
+
 export const snapshots = {
   queryRows: snapshotQueryRows,
   row: snapshotRowHandle,

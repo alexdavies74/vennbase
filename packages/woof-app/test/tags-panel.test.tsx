@@ -123,29 +123,27 @@ afterEach(() => {
 
 describe("TagsPanel", () => {
   it("renders tags from the React query hook", async () => {
-    const profile = {
-      row: {
+    const row = {
+      id: "dog_1",
+      collection: "dogs" as const,
+      owner: "alex",
+      target: "https://worker.example/rows/dog_1",
+      fields: { name: "Rex" },
+      connectCrdt: () => ({
+        disconnect: () => undefined,
+        flush: async () => undefined,
+      }),
+      toRef: () => ({
         id: "dog_1",
         collection: "dogs" as const,
         owner: "alex",
         target: "https://worker.example/rows/dog_1",
-        fields: { name: "Rex" },
-        connectCrdt: () => ({
-          disconnect: () => undefined,
-          flush: async () => undefined,
-        }),
-        toRef: () => ({
-          id: "dog_1",
-          collection: "dogs" as const,
-          owner: "alex",
-          target: "https://worker.example/rows/dog_1",
-        }),
-      },
+      }),
     };
 
     const app = await renderApp(
       <PutBaseProvider client={new FakeDb() as unknown as PutBase<typeof woofSchema>}>
-        <TagsPanel profile={profile} onCreateTag={async () => undefined} />
+        <TagsPanel row={row} onCreateTag={async () => undefined} />
       </PutBaseProvider>,
     );
 

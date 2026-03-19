@@ -171,7 +171,7 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
-`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
+`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `usePerUserRow`, `useMemberUsernames`, `useDirectMembers`, `useMutation`.
 
 
 For app boot, prefer `useSession(db)`:
@@ -217,6 +217,8 @@ const board = await db.openInvite(link);
 `openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ target, inviteToken? }` object from `db.parseInvite(input)`.
 
 In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, and optionally clear the invite params from the address bar after success.
+
+If your app has a single "current row" per signed-in user, `db.rememberPerUserRow(key, row)` plus `usePerUserRow(db, { key })` gives you a lightweight restore path backed by Puter KV.
 
 Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
 
@@ -311,6 +313,9 @@ pnpm --filter todo-app dev
 | `createInviteLink(row, token)` | Build a shareable URL containing the row target and token. |
 | `parseInvite(input)` | Parse an invite URL or worker URL into `{ target, inviteToken? }`. |
 | `openInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. Invite joins become direct `"writer"` members by default. |
+| `rememberPerUserRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
+| `openRememberedPerUserRow(key)` | Re-open the remembered row for the signed-in user, or `null`. |
+| `clearRememberedPerUserRow(key)` | Remove the remembered row for the signed-in user. |
 | `listMembers(row)` | Returns `string[]` of all member usernames. |
 | `listDirectMembers(row)` | Returns `{ username, role }[]` for directly-granted members. |
 | `listEffectiveMembers(row)` | Returns resolved membership including grants inherited from parents. |

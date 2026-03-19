@@ -4,23 +4,15 @@ import type {
   CrdtConnection,
   PutBaseUser,
 } from "@putbase/core";
-import type { AI, ChatMessage, ChatResponse, KV } from "@heyputer/puter.js";
+import type { AI, ChatMessage, ChatResponse } from "@heyputer/puter.js";
 
-import {
-  clearProfile,
-  loadStoredTarget,
-  saveStoredTarget,
-  type DogProfile,
-} from "./profile";
 import type { DogRowHandle, TagRowHandle, WoofDb, WoofSchema } from "./schema";
-
-type KvLike = Pick<KV, "get" | "set" | "del">;
 
 type PuterAI = Pick<AI, "chat">;
 
 export type WoofDbPort = Pick<
   WoofDb,
-  "whoAmI" | "put" | "openTarget" | "openInvite" | "listMembers"
+  "whoAmI" | "put" | "listMembers"
 >;
 
 export interface ChatEntry {
@@ -69,7 +61,6 @@ export class WoofService {
 
   constructor(
     private readonly db: WoofDbPort,
-    private readonly kv: KvLike,
     private readonly doc: Y.Doc = new Y.Doc(),
   ) {
     this.doc.on("update", (update: Uint8Array) => {
@@ -83,47 +74,17 @@ export class WoofService {
     return this.doc.getArray<ChatEntry>("messages");
   }
 
-  async restoreProfile(): Promise<DogProfile | null> {
-    const target = await loadStoredTarget(this.kv);
-    if (!target) {
-      return null;
-    }
-
-    try {
-      const row = expectDogRow(await this.db.openTarget(target));
-      return { row };
-    } catch (error) {
-      await clearProfile(this.kv);
-      throw error;
-    }
+  async enterChat(args: { dogName: string }): Promise<DogRowHandle> {
+    return await this.db.put("dogs", { name: args.dogName });
   }
 
-  async enterChat(args: { dogName: string }): Promise<DogProfile> {
-    const row = await this.db.put("dogs", { name: args.dogName });
-    await saveStoredTarget(row, this.kv);
-    return { row };
+  expectDogRow(row: AnyRowHandle<WoofSchema>): DogRowHandle {
+    return expectDogRow(row);
   }
 
-  async joinFromInvite(inviteInput: string): Promise<DogProfile> {
-    const row = expectDogRow(await this.db.openInvite(inviteInput.trim()));
-    await saveStoredTarget(row, this.kv);
-    return { row };
-  }
-
-  async refreshProfileCanonical(profile: DogProfile): Promise<DogProfile> {
-    try {
-      const row = expectDogRow(await this.db.openTarget(profile.row.target));
-      await saveStoredTarget(row, this.kv);
-      return { row };
-    } catch (error) {
-      await clearProfile(this.kv);
-      throw error;
-    }
-  }
-
-  connectToRow(profile: DogProfile): void {
+  connectToRow(row: DogRowHandle): void {
     this.connection?.disconnect();
-    this.connection = profile.row.connectCrdt({
+    this.connection = row.connectCrdt({
       applyRemoteUpdate: (body) => {
         const update = decodeUpdate(body);
         if (update) {
@@ -143,10 +104,10 @@ export class WoofService {
     this.connection = null;
   }
 
-  async sendTurn(profile: DogProfile, content: string, puterAI?: PuterAI): Promise<void> {
+  async sendTurn(row: DogRowHandle, content: string, puterAI?: PuterAI): Promise<void> {
     const actor = await this.db.whoAmI();
-    const members = await this.db.listMembers(profile.row);
-    const dogName = String(profile.row.fields.name ?? "");
+    const members = await this.db.listMembers(row);
+    const dogName = String(row.fields.name ?? "");
 
     const userEntry: ChatEntry = {
       id: crypto.randomUUID(),
@@ -188,7 +149,7 @@ export class WoofService {
     await this.connection?.flush();
   }
 
-  async createTag(profile: DogProfile, label: string): Promise<void> {
+  async createTag(row: DogRowHandle, label: string): Promise<void> {
     const trimmed = label.trim();
     if (!trimmed) {
       throw new Error("Tag text is required.");
@@ -207,14 +168,13 @@ export class WoofService {
         createdAt: Date.now(),
       },
       {
-        in: profile.row.toRef(),
+        in: row.toRef(),
       },
     );
   }
 
   async relinquish(): Promise<void> {
     this.disconnectRow();
-    await clearProfile(this.kv);
   }
 
   private async getDogReplies(args: {

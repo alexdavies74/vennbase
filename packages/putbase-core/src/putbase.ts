@@ -3,6 +3,11 @@ import { Identity } from "./identity";
 import { Invites } from "./invites";
 import { Members } from "./members";
 import { Parents } from "./parents";
+import {
+  clearRememberedPerUserRow,
+  loadRememberedPerUserRow,
+  rememberPerUserRow,
+} from "./per-user-rows";
 import { Provisioning } from "./provisioning";
 import { Query } from "./query";
 import { RowHandle, type AnyRowHandle, type RowHandleBackend } from "./row-handle";
@@ -115,6 +120,30 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   async whoAmI(): Promise<PutBaseUser> {
     return this.identity.whoAmI();
+  }
+
+  async rememberPerUserRow(rowKey: string, row: Pick<DbRowLocator, "target">): Promise<void> {
+    const user = await this.identity.whoAmI();
+    await rememberPerUserRow(resolveBackend(this.options.backend), user.username, rowKey, row);
+  }
+
+  async openRememberedPerUserRow(rowKey: string): Promise<AnyRowHandle<Schema> | null> {
+    const user = await this.identity.whoAmI();
+    const rememberedRow = await loadRememberedPerUserRow(
+      resolveBackend(this.options.backend),
+      user.username,
+      rowKey,
+    );
+    if (!rememberedRow) {
+      return null;
+    }
+
+    return this.openTarget(rememberedRow.target);
+  }
+
+  async clearRememberedPerUserRow(rowKey: string): Promise<void> {
+    const user = await this.identity.whoAmI();
+    await clearRememberedPerUserRow(resolveBackend(this.options.backend), user.username, rowKey);
   }
 
   async put<TCollection extends CollectionName<Schema>>(

@@ -33,6 +33,7 @@ import {
   makeInviteLinkKey,
   makeIncomingInviteKey,
   makeMembersKey,
+  makePerUserRowKey,
   makeParentsKey,
   makeQueryKey,
   makeRowKey,
@@ -79,6 +80,25 @@ export interface UseInviteFromLocationOptions<
 export interface UseInviteFromLocationResult<TResult> extends UseResourceResult<TResult> {
   hasInvite: boolean;
   inviteInput: string | null;
+}
+
+export interface UsePerUserRowOptions<
+  Schema extends DbSchema,
+  TResult = AnyRowHandle<Schema>,
+> extends UseHookOptions {
+  key: string;
+  href?: string | null;
+  clearLocation?: boolean | ((url: URL) => string);
+  loadRememberedRow?: (row: AnyRowHandle<Schema>, client: PutBase<Schema>) => Promise<TResult> | TResult;
+  openInvite?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
+  getRow?: (result: TResult) => Pick<DbRowLocator, "target">;
+}
+
+export interface UsePerUserRowResult<TResult> extends UseResourceResult<TResult | null> {
+  hasInvite: boolean;
+  inviteInput: string | null;
+  remember(result: TResult): Promise<void>;
+  clear(): Promise<void>;
 }
 
 export interface PutBaseProviderProps<Schema extends DbSchema> {
@@ -210,6 +230,30 @@ function clearInviteLocation(
 
   current.search = "";
   window.history.replaceState({}, "", `${current.pathname}${current.hash}`);
+}
+
+function hasTarget(value: unknown): value is { target: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return typeof (value as { target?: unknown }).target === "string";
+}
+
+function getRowFromResult<TResult>(
+  result: TResult,
+  getRow?: (result: TResult) => Pick<DbRowLocator, "target">,
+): Pick<DbRowLocator, "target"> {
+  const row = getRow
+    ? getRow(result)
+    : hasTarget(result)
+      ? result
+      : null;
+  const normalized = row?.target?.trim();
+  if (!normalized) {
+    throw new Error("usePerUserRow could not resolve a row. Pass getRow when returning non-row data.");
+  }
+  return { target: normalized };
 }
 
 export function PutBaseProvider<Schema extends DbSchema>({
@@ -598,6 +642,187 @@ export function useInviteFromLocation<
     ...resource,
     hasInvite: true,
     inviteInput,
+  };
+}
+
+export function usePerUserRow<
+  Schema extends DbSchema,
+  TResult = AnyRowHandle<Schema>,
+>(
+  client: PutBase<Schema>,
+  options: UsePerUserRowOptions<Schema, TResult>,
+): UsePerUserRowResult<TResult> {
+  const runtime = useRuntime(client);
+  const session = useSessionResource(runtime, options.enabled ?? true);
+  const inviteInput = options.href ?? getInviteHrefFromLocation();
+  const clearLocationOption = options.clearLocation ?? true;
+  const sessionUser =
+    session.status === "success" && session.data?.state === "signed-in"
+      ? session.data.user
+      : null;
+  const scopeKey = sessionUser ? `${sessionUser.username}:${options.key}` : null;
+  const resourceKey = sessionUser
+    ? makePerUserRowKey(sessionUser.username, options.key, inviteInput)
+    : null;
+  const [localData, setLocalData] = useState<{ scopeKey: string; data: TResult | null } | null>(null);
+  const clearedInviteRef = useRef<string | null>(null);
+
+  const resource = useOptionalResource(
+    (options.enabled ?? true)
+      && !!resourceKey
+      && session.status === "success"
+      && session.data?.state === "signed-in",
+    resourceKey,
+    runtime,
+    () => runtime.getLoadOnce(
+      resourceKey as string,
+      async () => {
+        if (inviteInput) {
+          const opened = options.openInvite
+            ? await options.openInvite(inviteInput, runtime.client)
+            : await runtime.client.openInvite(inviteInput) as TResult;
+          await runtime.client.rememberPerUserRow(
+            options.key,
+            getRowFromResult(opened, options.getRow),
+          );
+          return opened;
+        }
+
+        try {
+          const rememberedRow = await runtime.client.openRememberedPerUserRow(options.key);
+          if (!rememberedRow) {
+            return null;
+          }
+
+          return options.loadRememberedRow
+            ? await options.loadRememberedRow(rememberedRow, runtime.client)
+            : rememberedRow as TResult;
+        } catch (error) {
+          await runtime.client.clearRememberedPerUserRow(options.key);
+          throw error;
+        }
+      },
+    ),
+  );
+
+  useEffect(() => {
+    if (!inviteInput || resource.status !== "success") {
+      return;
+    }
+
+    if (clearLocationOption && clearedInviteRef.current !== inviteInput) {
+      clearedInviteRef.current = inviteInput;
+      clearInviteLocation(clearLocationOption, inviteInput);
+    }
+  }, [clearLocationOption, inviteInput, resource.status]);
+
+  const localOverride = localData && localData.scopeKey === scopeKey
+    ? localData
+    : null;
+  const effective = localOverride
+    ? {
+      data: localOverride.data,
+      error: undefined,
+      status: "success" as const,
+    }
+    : resource;
+
+  const refresh = async (): Promise<void> => {
+    if (localOverride) {
+      setLocalData(null);
+    }
+
+    if (!(options.enabled ?? true)) {
+      return;
+    }
+
+    if (session.status !== "success" || session.data?.state !== "signed-in") {
+      await session.refresh();
+      return;
+    }
+
+    await resource.refresh();
+  };
+
+  const remember = async (result: TResult): Promise<void> => {
+    await runtime.client.rememberPerUserRow(
+      options.key,
+      getRowFromResult(result, options.getRow),
+    );
+    if (scopeKey) {
+      setLocalData({ scopeKey, data: result });
+    }
+  };
+
+  const clear = async (): Promise<void> => {
+    await runtime.client.clearRememberedPerUserRow(options.key);
+    if (scopeKey) {
+      setLocalData({ scopeKey, data: null });
+      return;
+    }
+
+    setLocalData(null);
+  };
+
+  if (!(options.enabled ?? true)) {
+    return {
+      clear,
+      data: undefined,
+      error: undefined,
+      hasInvite: !!inviteInput,
+      inviteInput,
+      remember,
+      refresh,
+      status: "idle",
+    };
+  }
+
+  if (session.status === "error") {
+    return {
+      clear,
+      data: undefined,
+      error: session.error,
+      hasInvite: !!inviteInput,
+      inviteInput,
+      remember,
+      refresh,
+      status: "error",
+    };
+  }
+
+  if (session.status !== "success") {
+    return {
+      clear,
+      data: undefined,
+      error: undefined,
+      hasInvite: !!inviteInput,
+      inviteInput,
+      remember,
+      refresh,
+      status: "loading",
+    };
+  }
+
+  if (session.data?.state !== "signed-in") {
+    return {
+      clear,
+      data: undefined,
+      error: undefined,
+      hasInvite: !!inviteInput,
+      inviteInput,
+      remember,
+      refresh,
+      status: "idle",
+    };
+  }
+
+  return {
+    ...effective,
+    clear,
+    hasInvite: !!inviteInput,
+    inviteInput,
+    remember,
+    refresh,
   };
 }
 

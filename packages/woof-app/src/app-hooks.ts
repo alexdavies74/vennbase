@@ -1,29 +1,29 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import type { DogProfile } from "./profile";
+import type { DogRowHandle } from "./schema";
 import type { ChatEntry, WoofService } from "./service";
 
 function emptyEntries(): ChatEntry[] {
   return [];
 }
 
-export function useRowConnection(service: WoofService, profile: DogProfile | null): void {
+export function useRowConnection(service: WoofService, row: DogRowHandle | null): void {
   useEffect(() => {
-    if (!profile) {
+    if (!row) {
       service.disconnectRow();
       return;
     }
 
-    service.connectToRow(profile);
+    service.connectToRow(row);
     return () => {
       service.disconnectRow();
     };
-  }, [profile, service]);
+  }, [row, service]);
 }
 
 export function useChatEntries(
   service: WoofService,
-  profile: DogProfile | null,
+  row: DogRowHandle | null,
   username: string | null,
 ): ChatEntry[] {
   const cacheRef = useRef<{ key: string; value: ChatEntry[] }>({
@@ -40,7 +40,7 @@ export function useChatEntries(
       };
     },
     () => {
-      if (!profile || !username) {
+      if (!row || !username) {
         return emptyEntries();
       }
 

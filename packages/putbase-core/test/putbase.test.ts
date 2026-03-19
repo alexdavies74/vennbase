@@ -46,6 +46,10 @@ class MapKv {
   async set<T = unknown>(key: string, value: T): Promise<void> {
     this.store.set(key, value);
   }
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
 }
 
 function deferred<T>() {
@@ -192,6 +196,115 @@ describe("PutBase", () => {
       user: { username: "owner" },
     });
     expect(signInCalls).toBe(1);
+  });
+
+  it("remembers, reopens, and clears per-user rows", async () => {
+    const kv = new MapKv();
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      backend: { workers: {}, kv } as BackendClient,
+      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
+        const url = asUrl(input);
+        if (url.endsWith("/row/get")) {
+          return new Response(
+            JSON.stringify({
+              id: "row_1",
+              name: "Rex",
+              owner: "owner",
+              target: "https://worker.example/rows/row_1",
+              createdAt: 1,
+              collection: "rows",
+              members: ["owner"],
+              parentRefs: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        if (url.endsWith("/fields/get")) {
+          return new Response(
+            JSON.stringify({ fields: { name: "Rex" }, collection: "rows" }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
+
+    await db.rememberPerUserRow("current-row", { target: "https://worker.example/rows/row_1" });
+    await expect(db.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+      id: "row_1",
+      target: "https://worker.example/rows/row_1",
+    });
+
+    await db.clearRememberedPerUserRow("current-row");
+    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
+  });
+
+  it("isolates remembered rows by username", async () => {
+    const kv = new MapKv();
+    const fetchFn = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = asUrl(input);
+      const rowId = url.includes("friend_row") ? "friend_row" : "owner_row";
+      if (url.endsWith("/row/get")) {
+        return new Response(
+          JSON.stringify({
+            id: rowId,
+            name: rowId,
+            owner: rowId === "friend_row" ? "friend" : "owner",
+            target: `https://worker.example/rows/${rowId}`,
+            createdAt: 1,
+            collection: "rows",
+            members: ["owner"],
+            parentRefs: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.endsWith("/fields/get")) {
+        return new Response(
+          JSON.stringify({ fields: { name: rowId }, collection: "rows" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const ownerDb = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      backend: { workers: {}, kv } as BackendClient,
+      fetchFn,
+    });
+    const friendDb = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "friend" }),
+      backend: { workers: {}, kv } as BackendClient,
+      fetchFn,
+    });
+
+    await ownerDb.rememberPerUserRow("current-row", { target: "https://worker.example/rows/owner_row" });
+    await friendDb.rememberPerUserRow("current-row", { target: "https://worker.example/rows/friend_row" });
+
+    await expect(ownerDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+      id: "owner_row",
+      target: "https://worker.example/rows/owner_row",
+    });
+    await expect(friendDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+      id: "friend_row",
+      target: "https://worker.example/rows/friend_row",
+    });
   });
 
   it("explains how to provide Puter when signIn is called without a backend", async () => {

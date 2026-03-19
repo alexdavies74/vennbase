@@ -1,20 +1,21 @@
 import { puter } from "@heyputer/puter.js";
-import { useInviteFromLocation, useInviteLink, useMutation, usePutBase, useSession } from "@putbase/react";
+import { useInviteLink, useMutation, usePerUserRow, usePutBase, useSession } from "@putbase/react";
 import { useEffect, useRef, useState } from "react";
 
-import type { DogProfile } from "./profile";
 import type { ChatEntry } from "./service";
 import { useChatEntries, useRowConnection } from "./app-hooks";
-import type { WoofSchema } from "./schema";
+import type { DogRowHandle, WoofSchema } from "./schema";
 import { TagsPanel } from "./tags-panel";
 import { getErrorMessage } from "./utils";
 import { service } from "./services";
+
+const DOG_ROOM_KEY = "myDog";
 
 function SetupPanel(props: {
   busyMessage?: string;
   disabled: boolean;
   initialError: string;
-  onEnter(profile: DogProfile): void;
+  onEnter(row: DogRowHandle): Promise<void>;
 }) {
   const [dogName, setDogName] = useState("");
   const enterChat = useMutation(async (nextDogName: string) => service.enterChat({ dogName: nextDogName }));
@@ -38,9 +39,9 @@ function SetupPanel(props: {
             return;
           }
 
-          void enterChat.mutate(trimmed).then((profile) => {
+          void enterChat.mutate(trimmed).then((row) => {
             setDogName("");
-            props.onEnter(profile);
+            return props.onEnter(row);
           }).catch((error) => {
             console.error("[woof-app] enterChat failed", {
               error,
@@ -92,12 +93,12 @@ function SignInPanel(props: {
 function ChatPanel(props: {
   currentUsername: string | null;
   entries: ChatEntry[];
-  profile: DogProfile;
+  row: DogRowHandle;
 }) {
   const [message, setMessage] = useState("");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sendTurn = useMutation(async (content: string) => {
-    await service.sendTurn(props.profile, content, puter.ai);
+    await service.sendTurn(props.row, content, puter.ai);
   });
 
   useEffect(() => {
@@ -113,7 +114,7 @@ function ChatPanel(props: {
       <div ref={containerRef} id="messages">
         {props.entries.map((entry) => (
           <div key={entry.id} className={`message ${entry.userType === "dog" ? "dog" : "user"}`}>
-            {entry.userType === "dog" ? String(props.profile.row.fields.name ?? "") : "You"}: {entry.content}
+            {entry.userType === "dog" ? String(props.row.fields.name ?? "") : "You"}: {entry.content}
           </div>
         ))}
       </div>
@@ -149,22 +150,22 @@ function ChatPanel(props: {
 
 function RoomScreen(props: {
   currentUsername: string | null;
-  onRelinquished(): void;
-  profile: DogProfile;
+  onRelinquished(): Promise<void>;
+  row: DogRowHandle;
 }) {
   const db = usePutBase<WoofSchema>();
   const [copyStatus, setCopyStatus] = useState("");
-  const inviteLink = useInviteLink(db, props.profile.row);
+  const inviteLink = useInviteLink(db, props.row);
   const relinquish = useMutation(async () => {
     await service.relinquish();
-    props.onRelinquished();
+    await props.onRelinquished();
   });
-  useRowConnection(service, props.profile);
-  const entries = useChatEntries(service, props.profile, props.currentUsername);
+  useRowConnection(service, props.row);
+  const entries = useChatEntries(service, props.row, props.currentUsername);
 
   return (
     <section className="panel">
-      <h1>{String(props.profile.row.fields.name ?? "")}&apos;s Room</h1>
+      <h1>{String(props.row.fields.name ?? "")}&apos;s Room</h1>
       <div className="toolbar">
         <button
           id="copy-link"
@@ -204,10 +205,10 @@ function RoomScreen(props: {
         </span>
       </p>
       <TagsPanel
-        profile={props.profile}
-        onCreateTag={(label) => service.createTag(props.profile, label)}
+        row={props.row}
+        onCreateTag={(label) => service.createTag(props.row, label)}
       />
-      <ChatPanel currentUsername={props.currentUsername} entries={entries} profile={props.profile} />
+      <ChatPanel currentUsername={props.currentUsername} entries={entries} row={props.row} />
       <p className="muted">{relinquish.error ? getErrorMessage(relinquish.error, "Failed to relinquish dog.") : ""}</p>
     </section>
   );
@@ -220,97 +221,27 @@ export function App() {
     session.status === "success" && session.data?.state === "signed-in"
       ? session.data.user
       : null;
-  const [bootError, setBootError] = useState("");
-  const [bootStatus, setBootStatus] = useState<"idle" | "loading" | "ready">("idle");
   const [loginError, setLoginError] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
-  const [profile, setProfile] = useState<DogProfile | null>(null);
-  const bootPromise = useRef<Promise<DogProfile | null> | null>(null);
-  const incomingInvite = useInviteFromLocation<WoofSchema, DogProfile>(db, {
+  const perUserRow = usePerUserRow<WoofSchema, DogRowHandle>(db, {
+    key: DOG_ROOM_KEY,
     clearLocation: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";
       url.hash = "";
       return url.toString();
     },
-    enabled: profile === null,
-    onOpen: (joinedProfile) => {
-      bootPromise.current = null;
-      setBootStatus("ready");
-      setBootError("");
-      setProfile(joinedProfile);
-    },
-    open: async (inviteInput) => service.joinFromInvite(inviteInput),
+    openInvite: async (inviteInput, client) => service.expectDogRow(await client.openInvite(inviteInput)),
+    loadRememberedRow: async (row) => service.expectDogRow(row),
   });
-
-  useEffect(() => {
-    if (!signedInUser) {
-      bootPromise.current = null;
-      setBootStatus("idle");
-      setProfile(null);
-      setBootError("");
-      return;
-    }
-
-    if (profile) {
-      setBootStatus("ready");
-      return;
-    }
-
-    if (incomingInvite.hasInvite) {
-      bootPromise.current = null;
-
-      if (incomingInvite.status === "error") {
-        setProfile(null);
-        setBootError(getErrorMessage(incomingInvite.error, "Failed to join invite link."));
-        setBootStatus("ready");
-      } else {
-        setBootError("");
-        setBootStatus("loading");
-      }
-
-      return;
-    }
-
-    let cancelled = false;
-    setBootStatus("loading");
-    if (bootPromise.current === null) {
-      bootPromise.current = service.restoreProfile();
-    }
-
-    const pendingBoot = bootPromise.current;
-
-    void pendingBoot
-      .then((restoredProfile) => {
-        if (cancelled) {
-          return;
-        }
-
-        setProfile(restoredProfile);
-        setBootError("");
-        setBootStatus("ready");
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setProfile(null);
-        setBootError(getErrorMessage(error, "Could not restore saved room."));
-        setBootStatus("ready");
-      })
-      .finally(() => {
-        if (bootPromise.current === pendingBoot) {
-          bootPromise.current = null;
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [incomingInvite.error, incomingInvite.hasInvite, incomingInvite.status, profile, signedInUser?.username]);
-
-  const invitePending = incomingInvite.hasInvite;
+  const invitePending = perUserRow.hasInvite;
+  const row = perUserRow.data ?? null;
+  const bootError = perUserRow.status === "error"
+    ? getErrorMessage(
+      perUserRow.error,
+      invitePending ? "Failed to join invite link." : "Could not restore saved room.",
+    )
+    : "";
 
   if (session.status === "loading") {
     return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;
@@ -348,28 +279,37 @@ export function App() {
     );
   }
 
-  if (bootStatus === "loading") {
+  if (perUserRow.status === "loading") {
     return (
       <SetupPanel
         busyMessage={invitePending ? "Opening shared dog room…" : "Initializing app…"}
         disabled
         initialError=""
-        onEnter={setProfile}
+        onEnter={async (nextRow) => {
+          await perUserRow.remember(nextRow);
+        }}
       />
     );
   }
 
-  if (!profile) {
-    return <SetupPanel disabled={false} initialError={bootError} onEnter={setProfile} />;
+  if (!row) {
+    return (
+      <SetupPanel
+        disabled={false}
+        initialError={bootError}
+        onEnter={async (nextRow) => {
+          await perUserRow.remember(nextRow);
+        }}
+      />
+    );
   }
 
   return (
-        <RoomScreen
+    <RoomScreen
       currentUsername={signedInUser?.username ?? null}
-      profile={profile}
-      onRelinquished={() => {
-        setProfile(null);
-        setBootError("");
+      row={row}
+      onRelinquished={async () => {
+        await perUserRow.clear();
       }}
     />
   );

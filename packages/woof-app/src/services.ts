@@ -1,4 +1,3 @@
-import { puter } from "@heyputer/puter.js";
 import * as Y from "yjs";
 import { PutBase } from "@putbase/core";
 
@@ -12,4 +11,4 @@ export const db: WoofDb = new PutBase({
 
 const doc = new Y.Doc();
 
-export const service = new WoofService(db, puter.kv, doc);
+export const service = new WoofService(db, doc);

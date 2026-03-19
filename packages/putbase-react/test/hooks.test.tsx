@@ -18,6 +18,7 @@ import {
   PutBaseProvider,
   useCurrentUser,
   useInviteFromLocation,
+  usePerUserRow,
   usePutBase,
   useQuery,
   useRow,
@@ -105,6 +106,9 @@ class FakeDb {
   inviteDogName = "Buddy";
   queryRows = [makeTagRow("tag_1", "friendly")];
   activitySubscriber: (() => void) | null = null;
+  rememberedTargets = new Map<string, string>();
+  failRememberedOpen = false;
+  lastOpenedTarget: string | null = null;
 
   async getSession(): Promise<{ state: "signed-out" } | { state: "signed-in"; user: { username: string } }> {
     if (this.failSession) {
@@ -152,8 +156,12 @@ class FakeDb {
     return makeDogRow(this.dogName);
   }
 
-  async openTarget(): Promise<ReturnType<typeof makeDogRow>> {
+  async openTarget(target?: string): Promise<ReturnType<typeof makeDogRow>> {
     this.openTargetCalls += 1;
+    if (this.failRememberedOpen) {
+      throw new Error("remembered row failed");
+    }
+    this.lastOpenedTarget = target ?? null;
     return makeDogRow(this.dogName);
   }
 
@@ -194,6 +202,23 @@ class FakeDb {
 
   createInviteLink(row: Pick<DbRowRef, "target">, token: string): string {
     return `${row.target}?token=${token}`;
+  }
+
+  async rememberPerUserRow(key: string, row: { target: string }): Promise<void> {
+    this.rememberedTargets.set(`${this.username}:${key}`, row.target);
+  }
+
+  async openRememberedPerUserRow(key: string): Promise<ReturnType<typeof makeDogRow> | null> {
+    const remembered = this.rememberedTargets.get(`${this.username}:${key}`);
+    if (!remembered) {
+      return null;
+    }
+
+    return this.openTarget(remembered);
+  }
+
+  async clearRememberedPerUserRow(key: string): Promise<void> {
+    this.rememberedTargets.delete(`${this.username}:${key}`);
   }
 }
 
@@ -470,6 +495,152 @@ describe("@putbase/react", () => {
     });
 
     expect(db.openInviteCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("keeps per-user rows idle while signed out", async () => {
+    const db = new FakeDb();
+    db.sessionState = "signed-out";
+    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+        key: "myDog",
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.status).toBe("idle");
+    expect(db.openTargetCalls).toBe(0);
+    expect(db.openInviteCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("restores a remembered per-user row after session resolution", async () => {
+    const db = new FakeDb();
+    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/dog_1");
+    const session = deferred<{ state: "signed-in"; user: { username: string } }>();
+    db.sessionPromise = session.promise;
+    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+        key: "myDog",
+      });
+      return <div>{latest.data?.fields.name ?? latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.status).toBe("loading");
+    expect(db.openTargetCalls).toBe(0);
+
+    await act(async () => {
+      session.resolve({ state: "signed-in", user: { username: "alex" } });
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.data?.fields.name).toBe("Rex");
+    expect(db.openTargetCalls).toBe(1);
+    expect(db.lastOpenedTarget).toBe("https://worker.example/rows/dog_1");
+    await app.unmount();
+  });
+
+  it("prefers invite input over remembered per-user rows and rewrites storage", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?target=https%3A%2F%2Fworker.example%2Frows%2Fdog_2&token=invite_1",
+    );
+
+    const db = new FakeDb();
+    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/old_dog");
+    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+        key: "myDog",
+      });
+      return <div>{latest.data?.fields.name ?? latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("success");
+      expect(latest?.data?.fields.name).toBe("Buddy");
+    });
+
+    expect(db.openInviteCalls).toBe(1);
+    expect(db.openTargetCalls).toBe(0);
+    expect(db.rememberedTargets.get("alex:myDog")).toBe("https://worker.example/rows/dog_1");
+    expect(window.location.search).toBe("");
+    await app.unmount();
+  });
+
+  it("remembers and clears per-user rows locally without reopening", async () => {
+    const db = new FakeDb();
+    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+        key: "myDog",
+      });
+      return <div>{latest.data?.fields.name ?? "empty"}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("success");
+      expect(latest?.data).toBeNull();
+    });
+
+    await act(async () => {
+      await latest?.remember(makeDogRow("Buddy"));
+      await flushMicrotasks();
+    });
+
+    expect(latest?.data?.fields.name).toBe("Buddy");
+    expect(db.rememberedTargets.get("alex:myDog")).toBe("https://worker.example/rows/dog_1");
+    expect(db.openTargetCalls).toBe(0);
+
+    await act(async () => {
+      await latest?.clear();
+      await flushMicrotasks();
+    });
+
+    expect(latest?.data).toBeNull();
+    expect(db.rememberedTargets.get("alex:myDog")).toBeUndefined();
+    expect(db.openTargetCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("clears invalid remembered targets when reopening fails", async () => {
+    const db = new FakeDb();
+    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/dog_1");
+    db.failRememberedOpen = true;
+    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+        key: "myDog",
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("error");
+      expect(latest?.error).toBeInstanceOf(Error);
+    });
+
+    expect(db.rememberedTargets.get("alex:myDog")).toBeUndefined();
     await app.unmount();
   });
 

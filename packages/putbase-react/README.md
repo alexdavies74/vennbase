@@ -112,6 +112,26 @@ function InviteHandler() {
 }
 ```
 
+For a single "current row" per signed-in user, `usePerUserRow` combines invite precedence, remembered target restore, and explicit `remember()` / `clear()` helpers:
+
+```tsx
+import { usePerUserRow } from "@putbase/react";
+
+function AppShell() {
+  const currentBoard = usePerUserRow(db, {
+    key: "current-board",
+  });
+
+  if (currentBoard.status === "loading") return <p>Opening board…</p>;
+  if (currentBoard.data == null) return <button onClick={async () => {
+    const board = await db.put("boards", { title: "Launch checklist" });
+    await currentBoard.remember(board);
+  }}>Create board</button>;
+
+  return <BoardScreen board={currentBoard.data} />;
+}
+```
+
 ## Mutations
 
 `useMutation` wraps any async call with `loading` / `success` / `error` state:
@@ -151,6 +171,7 @@ All PutBase-backed hooks are client-first and accept an optional final `{ enable
 | `useEffectiveMembers(client, row)` | client, row ref | `{ data: DbMemberInfo[], status, error, refresh }` |
 | `useInviteLink(client, row)` | client, row ref | `{ data: string, status, error, refresh }` |
 | `useInviteFromLocation(client, options?)` | client, `{ href?, clearLocation?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, error, refresh }` |
+| `usePerUserRow(client, options)` | client, `{ key, href?, clearLocation?, loadRememberedRow?, openInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, error, refresh, remember, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
 All data-fetching hooks return `status: "idle" | "loading" | "success" | "error"`.
