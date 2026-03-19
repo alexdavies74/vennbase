@@ -59,7 +59,6 @@ export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
     <section className="tag-section">
       <h2>Tags</h2>
       {tagsQuery.status === "loading" && tags.length === 0 ? <p className="muted">Loading tags…</p> : null}
-      {tagsQuery.isRefreshing && tags.length > 0 ? <p className="muted">Refreshing tags…</p> : null}
       <ul className="tag-list">
         {tags.length === 0 ? (
           <li className="tag-empty">No tags yet.</li>
