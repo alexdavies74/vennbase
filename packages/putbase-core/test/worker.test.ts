@@ -740,7 +740,7 @@ describe("RowWorker", () => {
     expect((await jsonBody(response)).code).toBe("BAD_REQUEST");
   });
 
-  it("normalizes legacy admin member roles to writer access", async () => {
+  it("does not grant writer access to legacy admin member roles", async () => {
     const kv = new InMemoryKv();
     const worker = new RowWorker(
       {
@@ -802,7 +802,8 @@ describe("RowWorker", () => {
       }),
     );
 
-    expect(sendResponse.status).toBe(200);
+    expect(sendResponse.status).toBe(401);
+    expect((await jsonBody(sendResponse)).code).toBe("UNAUTHORIZED");
 
     const membersResponse = await worker.handle(
       await authedRequest({
@@ -815,9 +816,9 @@ describe("RowWorker", () => {
 
     expect(membersResponse.status).toBe(200);
     expect((await jsonBody(membersResponse)).members).toEqual(expect.arrayContaining([
-      expect.objectContaining({ username: "guest", role: "writer" }),
+      expect.objectContaining({ username: "guest", role: "reader" }),
     ]));
-    await expect(kv.get(rowMemberRolesStorageKey("row_legacy_role"))).resolves.toEqual({ guest: "writer" });
+    await expect(kv.get(rowMemberRolesStorageKey("row_legacy_role"))).resolves.toEqual({ guest: "admin" });
   });
 
   it("returns messages sorted by createdAt and id", async () => {
