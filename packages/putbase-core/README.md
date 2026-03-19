@@ -284,12 +284,18 @@ connection.disconnect();
 
 ---
 
-## Example app
+## Example apps
 
-`packages/todo-app` in this repository is a working React app built entirely from the code shown above. It lets users create a board, add cards, check them off, and share the board with others via invite link. Run it with:
+`packages/todo-app` is the code from this README assembled into a working app — boards, cards, and invite links. Run it with:
 
 ```bash
 pnpm --filter todo-app dev
+```
+
+For a fuller picture of how the pieces fit together in a real app, read `packages/woof-app`. It uses CRDT-backed live chat, the `usePerUserRow` restore/invite flow, child rows with per-user metadata, and role-aware UI — the patterns you'll reach for once basic reads and writes are working.
+
+```bash
+pnpm --filter woof-app dev
 ```
 
 ---
