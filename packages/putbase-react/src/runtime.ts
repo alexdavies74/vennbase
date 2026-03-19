@@ -21,6 +21,8 @@ export type LoadStatus = "idle" | "loading" | "success" | "error";
 export interface ResourceSnapshot<TData> {
   data: TData | undefined;
   error: unknown;
+  refreshError: unknown;
+  isRefreshing: boolean;
   status: LoadStatus;
 }
 
@@ -39,6 +41,8 @@ interface ResourceOptions<TData> {
 const idleSnapshot: ResourceSnapshot<never> = {
   data: undefined,
   error: undefined,
+  refreshError: undefined,
+  isRefreshing: false,
   status: "idle",
 };
 
@@ -247,13 +251,23 @@ class Resource<TData> implements ResourceController<TData> {
       return this.inFlight;
     }
 
-    if (
+    if (this.snapshot.status === "success") {
+      this.setSnapshot({
+        data: this.snapshot.data,
+        error: undefined,
+        refreshError: undefined,
+        isRefreshing: true,
+        status: "success",
+      });
+    } else if (
       this.snapshot.status === "idle"
       || (this.snapshot.data === undefined && this.snapshot.status !== "loading")
     ) {
       this.setSnapshot({
         data: this.snapshot.data,
         error: undefined,
+        refreshError: undefined,
+        isRefreshing: false,
         status: "loading",
       });
     }
@@ -262,13 +276,15 @@ class Resource<TData> implements ResourceController<TData> {
       try {
         const data = await this.options.load();
         const nextValueSnapshot = this.options.snapshotOf?.(data) ?? snapshotValue(data);
-        const changed = this.lastValueSnapshot !== nextValueSnapshot || this.snapshot.status !== "success";
+        const changed = this.lastValueSnapshot !== nextValueSnapshot;
         this.lastValueSnapshot = nextValueSnapshot;
 
         if (changed) {
           this.setSnapshot({
             data,
             error: undefined,
+            refreshError: undefined,
+            isRefreshing: false,
             status: "success",
           });
           if (typeof options.markActivity === "function") {
@@ -277,10 +293,17 @@ class Resource<TData> implements ResourceController<TData> {
           return;
         }
 
-        if (this.snapshot.status === "loading") {
+        if (
+          this.snapshot.status !== "success"
+          || this.snapshot.error !== undefined
+          || this.snapshot.refreshError !== undefined
+          || this.snapshot.isRefreshing
+        ) {
           this.setSnapshot({
             data: this.snapshot.data,
             error: undefined,
+            refreshError: undefined,
+            isRefreshing: false,
             status: "success",
           });
         }
@@ -295,9 +318,22 @@ class Resource<TData> implements ResourceController<TData> {
   }
 
   private fail(error: unknown): void {
+    if (this.snapshot.status === "success") {
+      this.setSnapshot({
+        data: this.snapshot.data,
+        error: undefined,
+        refreshError: error,
+        isRefreshing: false,
+        status: "success",
+      });
+      return;
+    }
+
     this.setSnapshot({
       data: this.snapshot.data,
       error,
+      refreshError: undefined,
+      isRefreshing: false,
       status: "error",
     });
   }
@@ -306,6 +342,8 @@ class Resource<TData> implements ResourceController<TData> {
     if (
       this.snapshot.status === next.status &&
       this.snapshot.error === next.error &&
+      this.snapshot.refreshError === next.refreshError &&
+      this.snapshot.isRefreshing === next.isRefreshing &&
       this.snapshot.data === next.data
     ) {
       return;

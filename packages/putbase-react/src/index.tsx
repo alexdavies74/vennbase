@@ -113,6 +113,20 @@ const RuntimeContext = createContext<PutBaseReactRuntime<any> | null>(null);
 const noopSubscribe = () => () => undefined;
 const noopRefresh = async () => undefined;
 
+function makeResourceResult<TData>(
+  snapshot: Partial<ResourceSnapshot<TData>> & Pick<ResourceSnapshot<TData>, "status">,
+  refresh: () => Promise<void> = noopRefresh,
+): UseResourceResult<TData> {
+  return {
+    data: snapshot.data,
+    error: snapshot.error,
+    refreshError: snapshot.refreshError,
+    isRefreshing: snapshot.isRefreshing ?? false,
+    status: snapshot.status,
+    refresh,
+  };
+}
+
 function useRuntime<Schema extends DbSchema>(client?: PutBase<Schema>): PutBaseReactRuntime<Schema> {
   const contextRuntime = useContext(RuntimeContext);
   if (client) {
@@ -174,21 +188,16 @@ function blockedResourceResult<TData>(
   session: UseResourceResult<AuthSession>,
 ): UseResourceResult<TData> | null {
   if (session.status === "error") {
-    return {
-      data: undefined,
+    return makeResourceResult<TData>({
       error: session.error,
       status: "error",
-      refresh: session.refresh,
-    };
+    }, session.refresh);
   }
 
   if (session.status !== "success" || session.data?.state !== "signed-in") {
-    return {
-      data: undefined,
-      error: undefined,
+    return makeResourceResult<TData>({
       status: "idle",
-      refresh: session.refresh,
-    };
+    }, session.refresh);
   }
 
   return null;
@@ -317,29 +326,22 @@ export function useCurrentUser<Schema extends DbSchema>(
   const runtime = useRuntime(client);
   const session = useSessionResource(runtime, options.enabled ?? true);
   if (session.status === "error") {
-    return {
-      data: undefined,
+    return makeResourceResult<PutBaseUser>({
       error: session.error,
       status: "error",
-      refresh: session.refresh,
-    };
+    }, session.refresh);
   }
 
   if (session.status !== "success" || session.data?.state !== "signed-in") {
-    return {
-      data: undefined,
-      error: undefined,
+    return makeResourceResult<PutBaseUser>({
       status: "idle",
-      refresh: session.refresh,
-    };
+    }, session.refresh);
   }
 
-  return {
+  return makeResourceResult<PutBaseUser>({
     data: session.data.user,
-    error: undefined,
     status: "success",
-    refresh: session.refresh,
-  };
+  }, session.refresh);
 }
 
 export function useQuery<
@@ -593,45 +595,42 @@ export function useInviteFromLocation<
 
   if (!(options.enabled ?? true) || !inviteInput) {
     return {
-      data: undefined,
-      error: undefined,
       hasInvite: false,
       inviteInput: null,
-      refresh: noopRefresh,
-      status: "idle",
+      ...makeResourceResult({
+        status: "idle",
+      }, noopRefresh),
     };
   }
 
   if (session.status === "error") {
     return {
-      data: undefined,
-      error: session.error,
       hasInvite: true,
       inviteInput,
-      refresh: session.refresh,
-      status: "error",
+      ...makeResourceResult({
+        error: session.error,
+        status: "error",
+      }, session.refresh),
     };
   }
 
   if (session.status !== "success") {
     return {
-      data: undefined,
-      error: undefined,
       hasInvite: true,
       inviteInput,
-      refresh: session.refresh,
-      status: "loading",
+      ...makeResourceResult({
+        status: "loading",
+      }, session.refresh),
     };
   }
 
   if (session.data?.state !== "signed-in") {
     return {
-      data: undefined,
-      error: undefined,
       hasInvite: true,
       inviteInput,
-      refresh: session.refresh,
-      status: "idle",
+      ...makeResourceResult({
+        status: "idle",
+      }, session.refresh),
     };
   }
 
@@ -717,11 +716,10 @@ export function usePerUserRow<
     ? localData
     : null;
   const effective = localOverride
-    ? {
+    ? makeResourceResult({
       data: localOverride.data,
-      error: undefined,
       status: "success" as const,
-    }
+    })
     : resource;
 
   const refresh = async (): Promise<void> => {
@@ -763,53 +761,54 @@ export function usePerUserRow<
 
   if (!(options.enabled ?? true)) {
     return {
+      ...makeResourceResult<TResult | null>({
+        status: "idle",
+      }, refresh),
       clear,
-      data: undefined,
-      error: undefined,
       hasInvite: !!inviteInput,
       inviteInput,
       remember,
       refresh,
-      status: "idle",
     };
   }
 
   if (session.status === "error") {
     return {
+      ...makeResourceResult<TResult | null>({
+        error: session.error,
+        status: "error",
+      }, refresh),
       clear,
-      data: undefined,
-      error: session.error,
       hasInvite: !!inviteInput,
       inviteInput,
       remember,
       refresh,
-      status: "error",
     };
   }
 
   if (session.status !== "success") {
     return {
+      ...makeResourceResult<TResult | null>({
+        status: "loading",
+      }, refresh),
       clear,
-      data: undefined,
-      error: undefined,
       hasInvite: !!inviteInput,
       inviteInput,
       remember,
       refresh,
-      status: "loading",
     };
   }
 
   if (session.data?.state !== "signed-in") {
     return {
+      ...makeResourceResult<TResult | null>({
+        status: "idle",
+      }, refresh),
       clear,
-      data: undefined,
-      error: undefined,
       hasInvite: !!inviteInput,
       inviteInput,
       remember,
       refresh,
-      status: "idle",
     };
   }
 

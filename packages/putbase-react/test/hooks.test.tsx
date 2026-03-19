@@ -106,6 +106,8 @@ class FakeDb {
   dogName = "Rex";
   inviteDogName = "Buddy";
   queryRows = [makeTagRow("tag_1", "friendly")];
+  nextQueryError: Error | null = null;
+  nextQueryPromise: Promise<typeof this.queryRows> | null = null;
   activitySubscriber: (() => void) | null = null;
   rememberedTargets = new Map<string, string>();
   failRememberedOpen = false;
@@ -149,6 +151,16 @@ class FakeDb {
 
   async query(): Promise<typeof this.queryRows> {
     this.queryCalls += 1;
+    if (this.nextQueryPromise) {
+      const pending = this.nextQueryPromise;
+      this.nextQueryPromise = null;
+      return pending;
+    }
+    if (this.nextQueryError) {
+      const error = this.nextQueryError;
+      this.nextQueryError = null;
+      throw error;
+    }
     return this.queryRows;
   }
 
@@ -324,6 +336,8 @@ describe("@putbase/react", () => {
 
     expect(latest?.status).toBe("success");
     expect(latest?.data).toEqual({ username: "alex" });
+    expect(latest?.isRefreshing).toBe(false);
+    expect(latest?.refreshError).toBeUndefined();
 
     db.username = "sam";
     await act(async () => {
@@ -332,6 +346,8 @@ describe("@putbase/react", () => {
     });
 
     expect(latest?.data).toEqual({ username: "sam" });
+    expect(latest?.isRefreshing).toBe(false);
+    expect(latest?.refreshError).toBeUndefined();
     await app.unmount();
   });
 
@@ -349,6 +365,8 @@ describe("@putbase/react", () => {
 
     expect(latest?.status).toBe("error");
     expect(latest?.error).toBeInstanceOf(Error);
+    expect(latest?.refreshError).toBeUndefined();
+    expect(latest?.isRefreshing).toBe(false);
     await app.unmount();
   });
 
@@ -712,6 +730,165 @@ describe("@putbase/react", () => {
     await app.unmount();
   });
 
+  it("uses loading only for an initial live query without data", async () => {
+    const db = new FakeDb();
+    const initialQuery = deferred<typeof db.queryRows>();
+    db.nextQueryPromise = initialQuery.promise;
+    const queryOptions = {
+      in: {
+        id: "dog_1",
+        collection: "dogs",
+        owner: "alex",
+        target: "https://worker.example/rows/dog_1",
+      },
+      index: "byCreatedAt" as const,
+      order: "asc" as const,
+      limit: 100,
+    };
+    let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
+
+    function Probe() {
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.status).toBe("loading");
+    expect(latest?.rows).toEqual([]);
+    expect(latest?.isRefreshing).toBe(false);
+    expect(latest?.refreshError).toBeUndefined();
+
+    await act(async () => {
+      initialQuery.resolve([makeTagRow("tag_1", "friendly"), makeTagRow("tag_2", "sleepy")]);
+      await flushMicrotasks();
+    });
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.rows.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
+    expect(latest?.isRefreshing).toBe(false);
+    expect(latest?.refreshError).toBeUndefined();
+    await app.unmount();
+  });
+
+  it("keeps live query status successful while polling with stale data", async () => {
+    vi.useFakeTimers();
+    const db = new FakeDb();
+    const queryOptions = {
+      in: {
+        id: "dog_1",
+        collection: "dogs",
+        owner: "alex",
+        target: "https://worker.example/rows/dog_1",
+      },
+      index: "byCreatedAt" as const,
+      order: "asc" as const,
+      limit: 100,
+    };
+    let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
+    const refreshQuery = deferred<typeof db.queryRows>();
+
+    function Probe() {
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
+      return <div>{latest.rows.map((row) => row.fields.label).join(",")}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.isRefreshing).toBe(false);
+
+    db.nextQueryPromise = refreshQuery.promise;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flushMicrotasks();
+    });
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.rows.map((row) => row.fields.label)).toEqual(["friendly"]);
+    expect(latest?.isRefreshing).toBe(true);
+    expect(latest?.refreshError).toBeUndefined();
+
+    await act(async () => {
+      refreshQuery.resolve([makeTagRow("tag_1", "friendly"), makeTagRow("tag_2", "sleepy")]);
+      await flushMicrotasks();
+    });
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.rows.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
+    expect(latest?.isRefreshing).toBe(false);
+    expect(latest?.refreshError).toBeUndefined();
+    await app.unmount();
+  });
+
+  it("keeps stale live query data visible when a background refresh fails", async () => {
+    vi.useFakeTimers();
+    const db = new FakeDb();
+    const queryOptions = {
+      in: {
+        id: "dog_1",
+        collection: "dogs",
+        owner: "alex",
+        target: "https://worker.example/rows/dog_1",
+      },
+      index: "byCreatedAt" as const,
+      order: "asc" as const,
+      limit: 100,
+    };
+    let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
+
+    function Probe() {
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
+      return <div>{latest.rows.map((row) => row.fields.label).join(",")}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    db.nextQueryError = new Error("query refresh failed");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flushMicrotasks();
+    });
+
+    expect(latest?.status).toBe("success");
+    expect(latest?.rows.map((row) => row.fields.label)).toEqual(["friendly"]);
+    expect(latest?.error).toBeUndefined();
+    expect(latest?.refreshError).toBeInstanceOf(Error);
+    expect(latest?.isRefreshing).toBe(false);
+    await app.unmount();
+  });
+
+  it("surfaces an initial live query failure as a blocking error", async () => {
+    const db = new FakeDb();
+    db.nextQueryError = new Error("query failed");
+    const queryOptions = {
+      in: {
+        id: "dog_1",
+        collection: "dogs",
+        owner: "alex",
+        target: "https://worker.example/rows/dog_1",
+      },
+      index: "byCreatedAt" as const,
+      order: "asc" as const,
+      limit: 100,
+    };
+    let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
+
+    function Probe() {
+      latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", queryOptions);
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.status).toBe("error");
+    expect(latest?.rows).toEqual([]);
+    expect(latest?.error).toBeInstanceOf(Error);
+    expect(latest?.refreshError).toBeUndefined();
+    expect(latest?.isRefreshing).toBe(false);
+    await app.unmount();
+  });
+
   it("accepts a row handle in live query options", async () => {
     const db = new FakeDb();
     const boardHandle = makeDogRow("Rex");
@@ -764,7 +941,7 @@ describe("@putbase/react", () => {
     await app.unmount();
   });
 
-  it("avoids rerendering when a live query snapshot is unchanged", async () => {
+  it("rerenders only for refresh-state transitions when a live query snapshot is unchanged", async () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
@@ -794,7 +971,7 @@ describe("@putbase/react", () => {
       await flushMicrotasks();
     });
 
-    expect(renderCount).toBe(settledCount);
+    expect(renderCount).toBe(settledCount + 2);
     await app.unmount();
   });
 

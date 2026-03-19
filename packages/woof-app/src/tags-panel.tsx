@@ -52,12 +52,14 @@ export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
 
   const errorMessage = validationError
     || (createTag.error ? getErrorMessage(createTag.error, "Failed to add tag.") : "")
-    || (tagsQuery.error ? getErrorMessage(tagsQuery.error, "Failed to load tags.") : "");
+    || (tagsQuery.error ? getErrorMessage(tagsQuery.error, "Failed to load tags.") : "")
+    || (tagsQuery.refreshError ? getErrorMessage(tagsQuery.refreshError, "Failed to refresh tags.") : "");
 
   return (
     <section className="tag-section">
       <h2>Tags</h2>
       {tagsQuery.status === "loading" && tags.length === 0 ? <p className="muted">Loading tags…</p> : null}
+      {tagsQuery.isRefreshing && tags.length > 0 ? <p className="muted">Refreshing tags…</p> : null}
       <ul className="tag-list">
         {tags.length === 0 ? (
           <li className="tag-empty">No tags yet.</li>

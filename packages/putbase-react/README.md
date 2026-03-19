@@ -158,20 +158,20 @@ All PutBase-backed hooks are client-first and accept an optional final `{ enable
 
 | Hook | Arguments | Returns |
 |------|-----------|---------|
-| `useSession(client)` | `PutBase` client | `{ session, signIn, status, refresh }` |
-| `useCurrentUser(client)` | `PutBase` client | `{ data: PutBaseUser, status, refresh }` |
+| `useSession(client)` | `PutBase` client | `{ session, status, isRefreshing, error, refreshError, signIn, refresh }` |
+| `useCurrentUser(client)` | `PutBase` client | `{ data: PutBaseUser, status, isRefreshing, error, refreshError, refresh }` |
 | `usePutBase()` | — | `PutBase` client from context |
-| `usePutBaseReady(client)` | `PutBase` client | `{ status, refresh }` — resolves when auth + provisioning complete |
-| `useQuery(client, collection, options)` | client, collection name, query options | `{ rows, data, status, error, refresh }` |
-| `useRow(client, row)` | client, row ref | `{ data: RowHandle, status, error, refresh }` |
-| `useRowTarget(client, target)` | client, target URL string | `{ data: RowHandle, status, error, refresh }` |
-| `useParents(client, row)` | client, row ref | `{ data: DbRowRef[], status, error, refresh }` |
-| `useMemberUsernames(client, row)` | client, row ref | `{ data: string[], status, error, refresh }` |
-| `useDirectMembers(client, row)` | client, row ref | `{ data: { username, role }[], status, error, refresh }` |
-| `useEffectiveMembers(client, row)` | client, row ref | `{ data: DbMemberInfo[], status, error, refresh }` |
-| `useInviteLink(client, row)` | client, row ref | `{ data: string, status, error, refresh }` |
-| `useInviteFromLocation(client, options?)` | client, `{ href?, clearLocation?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, error, refresh }` |
-| `usePerUserRow(client, options)` | client, `{ key, href?, clearLocation?, loadRememberedRow?, openInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, error, refresh, remember, clear }` |
+| `usePutBaseReady(client)` | `PutBase` client | `{ status, isRefreshing, error, refreshError, refresh }` — resolves when auth + provisioning complete |
+| `useQuery(client, collection, options)` | client, collection name, query options | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` |
+| `useRow(client, row)` | client, row ref | `{ data: RowHandle, status, isRefreshing, error, refreshError, refresh }` |
+| `useRowTarget(client, target)` | client, target URL string | `{ data: RowHandle, status, isRefreshing, error, refreshError, refresh }` |
+| `useParents(client, row)` | client, row ref | `{ data: DbRowRef[], status, isRefreshing, error, refreshError, refresh }` |
+| `useMemberUsernames(client, row)` | client, row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |
+| `useDirectMembers(client, row)` | client, row ref | `{ data: { username, role }[], status, isRefreshing, error, refreshError, refresh }` |
+| `useEffectiveMembers(client, row)` | client, row ref | `{ data: DbMemberInfo[], status, isRefreshing, error, refreshError, refresh }` |
+| `useInviteLink(client, row)` | client, row ref | `{ data: string, status, isRefreshing, error, refreshError, refresh }` |
+| `useInviteFromLocation(client, options?)` | client, `{ href?, clearLocation?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
+| `usePerUserRow(client, options)` | client, `{ key, href?, clearLocation?, loadRememberedRow?, openInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh, remember, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
-All data-fetching hooks return `status: "idle" | "loading" | "success" | "error"`.
+All data-fetching hooks return `status: "idle" | "loading" | "success" | "error"`. `loading` means there is no usable data yet. Once a hook has usable data, it stays `success` during background reloads and exposes that work through `isRefreshing` / `refreshError`.
