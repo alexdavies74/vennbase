@@ -1,4 +1,4 @@
-import { resolveBackend } from "./backend";
+import { resolveBackendAsync } from "./backend";
 import type { DbRowLocator } from "./schema";
 import type { BackendClient } from "./types";
 
@@ -35,7 +35,7 @@ export async function loadRememberedPerUserRow(
   username: string,
   key: string,
 ): Promise<Pick<DbRowLocator, "target"> | null> {
-  const resolvedBackend = resolveBackend(backend);
+  const resolvedBackend = await resolveBackendAsync(backend);
   const entryKey = rememberedRowKey(username, key);
   const kv = resolvedBackend?.kv;
   const stored = kv?.get
@@ -55,7 +55,7 @@ export async function rememberPerUserRow(
   key: string,
   row: Pick<DbRowLocator, "target">,
 ): Promise<void> {
-  const resolvedBackend = resolveBackend(backend);
+  const resolvedBackend = await resolveBackendAsync(backend);
   const entryKey = rememberedRowKey(username, key);
   const value = resolveStoredRow(row);
   const kv = resolvedBackend?.kv;
@@ -72,7 +72,7 @@ export async function clearRememberedPerUserRow(
   username: string,
   key: string,
 ): Promise<void> {
-  const resolvedBackend = resolveBackend(backend);
+  const resolvedBackend = await resolveBackendAsync(backend);
   const entryKey = rememberedRowKey(username, key);
   const kv = resolvedBackend?.kv as (BackendClient["kv"] & KvDeleteLike) | undefined;
   if (typeof kv?.delete === "function") {

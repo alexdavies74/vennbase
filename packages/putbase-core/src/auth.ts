@@ -1,4 +1,4 @@
-import { resolveBackend } from "./backend";
+import { resolveBackend, resolveBackendAsync } from "./backend";
 import {
   exportPrivateJwk,
   exportPublicJwk,
@@ -326,7 +326,7 @@ export class AuthManager {
 
   private async loadKeyPair(username: string): Promise<StoredSignerKey | null> {
     const key = `${SIGNER_KEY_KV_PREFIX}:${username}`;
-    const backend = resolveBackend(this.backend);
+    const backend = await resolveBackendAsync(this.backend);
     const kv = backend?.kv;
     const stored = kv?.get
       ? await kv.get<unknown>(key).catch(() => undefined)
@@ -350,7 +350,7 @@ export class AuthManager {
 
   private async saveKeyPair(username: string, stored: StoredSignerKey): Promise<void> {
     const key = `${SIGNER_KEY_KV_PREFIX}:${username}`;
-    const backend = resolveBackend(this.backend);
+    const backend = await resolveBackendAsync(this.backend);
     const kv = backend?.kv;
     if (kv?.set) {
       await kv.set(key, stored).catch(() => undefined);

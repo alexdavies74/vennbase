@@ -107,8 +107,6 @@ import { schema } from "./schema";
 export const db = new PutBase({ schema, appBaseUrl: window.location.origin });
 ```
 
-Construction is safe on first paint: PutBase may probe whether a session already exists, but it will never open the Puter login popup unless you call `db.signIn()` explicitly.
-
 ## Auth and startup
 
 Use `getSession()` to detect whether the current browser already has a Puter session, and call `signIn()` from a user gesture when it does not:

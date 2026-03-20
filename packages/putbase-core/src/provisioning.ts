@@ -1,6 +1,6 @@
 import type { AuthManager } from "./auth";
 import { CLASSIC_WORKER_RUNTIME_ID, buildClassicWorkerScript } from "./worker/template";
-import { resolveBackend } from "./backend";
+import { resolveBackend, resolveBackendAsync } from "./backend";
 import { missingPuterProvisioningMessage } from "./errors";
 import type { WorkerDeployment } from "@heyputer/puter.js";
 import type { Identity } from "./identity";
@@ -43,6 +43,7 @@ export class Provisioning {
   }
 
   async ensureFederationWorkerForCurrentUser(): Promise<boolean> {
+    this.backend = await resolveBackendAsync(this.backend);
     if (!this.canDeployFederationWorker()) {
       return false;
     }
@@ -53,6 +54,7 @@ export class Provisioning {
   }
 
   async getFederationWorkerUrl(username: string): Promise<string> {
+    this.backend = await resolveBackendAsync(this.backend);
     if (this.federationWorkerUrl) {
       return this.federationWorkerUrl;
     }

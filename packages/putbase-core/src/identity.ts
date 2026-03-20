@@ -1,4 +1,4 @@
-import { resolveBackend } from "./backend";
+import { resolveBackend, resolveBackendAsync } from "./backend";
 import { missingPuterClientMessage, signedOutError } from "./errors";
 import type { PutBaseOptions } from "./putbase";
 import type { AuthSession, BackendClient, PutBaseUser } from "./types";
@@ -63,7 +63,9 @@ export class Identity {
   async whoAmI(): Promise<PutBaseUser> {
     const session = await this.getSession();
     if (session.state !== "signed-in") {
-      if (!this.options.identityProvider && !resolveBackend(this.backend)) {
+      const backend = this.options.identityProvider ? undefined : await resolveBackendAsync(this.backend);
+      this.backend = backend;
+      if (!this.options.identityProvider && !backend) {
         throw signedOutError(missingPuterClientMessage());
       }
       throw signedOutError();
@@ -86,7 +88,7 @@ export class Identity {
       return user;
     }
 
-    this.backend = resolveBackend(this.backend);
+    this.backend = await resolveBackendAsync(this.backend);
     const auth = this.backend?.auth;
     if (!auth?.signIn) {
       throw signedOutError(missingPuterClientMessage());
@@ -106,7 +108,7 @@ export class Identity {
       };
     }
 
-    this.backend = resolveBackend(this.backend);
+    this.backend = await resolveBackendAsync(this.backend);
 
     const auth = this.backend?.auth;
     if (auth?.isSignedIn && !auth.isSignedIn()) {
