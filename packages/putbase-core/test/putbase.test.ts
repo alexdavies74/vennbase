@@ -334,7 +334,7 @@ describe("PutBase", () => {
       message: expect.stringContaining("No Puter client found."),
     });
     await expect(db.signIn()).rejects.toMatchObject<Partial<PutBaseError>>({
-      message: expect.stringContaining("@heyputer/puter.js"),
+      message: expect.stringContaining("default Puter browser client"),
     });
   });
 
@@ -355,7 +355,7 @@ describe("PutBase", () => {
       } as BackendClient,
     });
 
-    await expect(db.ensureReady()).rejects.toThrow("@heyputer/puter.js");
+    await expect(db.ensureReady()).rejects.toThrow("default Puter browser client");
     await expect(db.ensureReady()).rejects.toThrow("workers.create");
   });
 
