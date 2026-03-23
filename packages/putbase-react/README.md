@@ -191,8 +191,6 @@ function AddCard({ board }: { board: BoardHandle }) {
 
 ## Hook reference
 
-All PutBase-backed hooks are client-first and accept an optional final `{ enabled? }` argument.
-
 | Hook | Arguments | Returns |
 |------|-----------|---------|
 | `useSession(client)` | `PutBase` client | `{ session, status, isRefreshing, error, refreshError, signIn, refresh }` |
@@ -330,4 +328,21 @@ function useInviteFromLocation<
 
 - `href` defaults to `window.location.href`.
 - `clearLocation` defaults to `true`.
+- `onOpen` runs after invite acceptance succeeds.
 - Override `open` when invite acceptance should return something other than `db.openInvite(...)`.
+
+### `useMutation`
+
+```ts
+function useMutation<TArgs extends unknown[], TResult>(
+  fn: (...args: TArgs) => Promise<TResult>,
+): {
+  mutate: (...args: TArgs) => Promise<TResult>;
+  data: TResult | undefined;
+  status: "idle" | "loading" | "success" | "error";
+  error: unknown;
+  reset(): void;
+}
+```
+=
+- Use it to wrap writes like `db.put(...)`, `row.update(...)`, or any other async workflow you want to expose as a React action state.
