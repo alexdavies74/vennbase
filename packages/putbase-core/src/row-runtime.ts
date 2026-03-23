@@ -1,7 +1,8 @@
 import type { Identity } from "./identity";
 import type { Provisioning } from "./provisioning";
+import type { RowRef } from "./schema";
 import type { Transport } from "./transport";
-import { buildRowTarget } from "./transport";
+import { buildRowUrl, normalizeBaseUrl } from "./transport";
 import type { JoinOptions, PutBaseUser, Row, RowSnapshot } from "./types";
 
 interface PostMessageResponse {
@@ -15,6 +16,7 @@ export interface PlannedRowState {
 
 export interface PlannedRow {
   row: Row;
+  ref: RowRef;
 }
 
 export class RowRuntime {
@@ -46,15 +48,20 @@ export class RowRuntime {
   planRow(name: string): PlannedRow {
     const state = this.assertPlannedState();
     const rowId = this.transport.createId("row");
-    const rowTarget = buildRowTarget(state.federationWorkerUrl, rowId);
+    const baseUrl = normalizeBaseUrl(state.federationWorkerUrl);
 
     return {
       row: {
         id: rowId,
         name,
         owner: state.user.username,
-        target: rowTarget,
+        baseUrl,
         createdAt: Date.now(),
+      },
+      ref: {
+        id: rowId,
+        collection: "unknown",
+        baseUrl,
       },
     };
   }
@@ -71,14 +78,14 @@ export class RowRuntime {
       },
     });
 
-    await this.joinRow(plan.row.target, {});
+    await this.joinRow(plan.ref, {});
 
-    const row = await this.getRow(plan.row.target);
+    const row = await this.getRow(plan.ref);
     return {
       id: row.id,
       name: row.name,
       owner: row.owner,
-      target: row.target,
+      baseUrl: row.baseUrl,
       createdAt: row.createdAt,
     };
   }
@@ -91,51 +98,51 @@ export class RowRuntime {
     return this.commitPlannedRow(this.planRow(name));
   }
 
-  async joinRow(target: string, options: JoinOptions = {}): Promise<Row> {
+  async joinRow(rowRef: Pick<RowRef, "id" | "baseUrl">, options: JoinOptions = {}): Promise<Row> {
     const user = await this.identity.whoAmI();
-    const row = this.transport.row(target);
+    const row = this.transport.row(rowRef);
 
     await row.request("row/join", {
       username: user.username,
       inviteToken: options.inviteToken,
     });
 
-    const snapshot = await this.getRow(target);
+    const snapshot = await this.getRow(rowRef);
     return {
       id: snapshot.id,
       name: snapshot.name,
       owner: snapshot.owner,
-      target: snapshot.target,
+      baseUrl: snapshot.baseUrl,
       createdAt: snapshot.createdAt,
     };
   }
 
-  async getRow(target: string): Promise<RowSnapshot> {
-    return this.transport.row(target).request<RowSnapshot>("row/get", {});
+  async getRow(rowRef: Pick<RowRef, "id" | "baseUrl">): Promise<RowSnapshot> {
+    return this.transport.row(rowRef).request<RowSnapshot>("row/get", {});
   }
 
-  async listMembers(target: string): Promise<string[]> {
-    const snapshot = await this.getRow(target);
+  async listMembers(rowRef: Pick<RowRef, "id" | "baseUrl">): Promise<string[]> {
+    const snapshot = await this.getRow(rowRef);
     return snapshot.members;
   }
 
-  async sendSyncMessage(target: string, rowId: string, body: unknown): Promise<{ sequence: number }> {
+  async sendSyncMessage(rowRef: Pick<RowRef, "id" | "baseUrl">, body: unknown): Promise<{ sequence: number }> {
     const payload = {
       id: this.transport.createId("msg"),
-      rowId,
+      rowId: rowRef.id,
       body,
       createdAt: Date.now(),
     };
 
-    const response = await this.transport.row({ id: rowId, target }).request<PostMessageResponse>("sync/send", payload);
+    const response = await this.transport.row(rowRef).request<PostMessageResponse>("sync/send", payload);
 
     return response.message;
   }
 
   async pollSyncMessages(
-    target: string,
+    rowRef: Pick<RowRef, "id" | "baseUrl">,
     sinceSequence: number,
   ): Promise<{ messages: Array<{ body: unknown; sequence: number; createdAt: number; id: string }>; latestSequence: number }> {
-    return this.transport.row(target).request("sync/poll", { sinceSequence });
+    return this.transport.row(rowRef).request("sync/poll", { sinceSequence });
   }
 }

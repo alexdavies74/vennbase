@@ -9,11 +9,11 @@ export const schema = defineSchema({
   recentBoards: collection({
     in: ["user"],
     fields: {
-      boardTarget: field.string(),
+      boardRef: field.ref("boards"),
       openedAt: field.number(),
     },
     indexes: {
-      byBoardTarget: index("boardTarget"),
+      byBoardRef: index("boardRef"),
       byOpenedAt: index("openedAt"),
     },
   }),

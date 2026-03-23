@@ -4,7 +4,7 @@ import { resolveBackend } from "./backend";
 import type { WorkersHandler } from "@heyputer/puter.js";
 import type { PutBaseOptions } from "./putbase";
 import type { BackendClient } from "./types";
-import type { DbRowLocator } from "./schema";
+import type { RowRef } from "./schema";
 
 type RowAction =
   | "db/query"
@@ -45,54 +45,23 @@ export function stripTrailingSlash(input: string): string {
   return input.replace(/\/+$/g, "");
 }
 
-export function rowIdFromTarget(target: string): string {
-  const parsed = new URL(target);
-  const segments = parsed.pathname.split("/").filter(Boolean);
-  const rowsIndex = segments.indexOf("rows");
-
-  if (rowsIndex < 0 || rowsIndex + 1 >= segments.length) {
-    throw new Error(
-      `Unsupported row target: ${target}. Legacy non-federated row targets are no longer supported.`,
-    );
-  }
-
-  return decodeURIComponent(segments[rowsIndex + 1]);
-}
-
-export function normalizeTarget(input: string): string {
+export function normalizeBaseUrl(input: string): string {
   return stripTrailingSlash(input);
 }
 
-export function buildRowTarget(federationWorkerBaseUrl: string, rowId: string): string {
-  return `${stripTrailingSlash(federationWorkerBaseUrl)}/rows/${encodeURIComponent(rowId)}`;
+export function buildRowUrl(row: Pick<RowRef, "id" | "baseUrl">): string {
+  return `${normalizeBaseUrl(row.baseUrl)}/rows/${encodeURIComponent(row.id)}`;
 }
 
 function rowEndpointUrl(
-  target: string,
-  rowId: string,
+  row: Pick<RowRef, "id" | "baseUrl">,
   endpoint: string,
 ): string {
-  const targetUrl = new URL(normalizeTarget(target));
-  const segments = targetUrl.pathname.split("/").filter(Boolean);
-  const rowsIndex = segments.indexOf("rows");
-
-  if (rowsIndex < 0 || rowsIndex + 1 >= segments.length) {
-    throw new Error(
-      `Unsupported row target: ${target}. Legacy non-federated row targets are no longer supported.`,
-    );
-  }
-
-  const routeRowId = decodeURIComponent(segments[rowsIndex + 1]);
-  if (routeRowId !== rowId) {
-    throw new Error(`Row target/id mismatch: ${target} does not match row id ${rowId}.`);
-  }
-
-  const prefix = segments.slice(0, rowsIndex + 2).join("/");
-  targetUrl.pathname = `/${prefix}/${endpoint}`;
-
-  targetUrl.search = "";
-  targetUrl.hash = "";
-  return targetUrl.toString();
+  const url = new URL(buildRowUrl(row));
+  url.pathname = `${url.pathname.replace(/\/+$/g, "")}/${endpoint}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 export class Transport {
@@ -129,18 +98,15 @@ export class Transport {
     return this.postJson<T>(args.url, body);
   }
 
-  row(rowOrTarget: string | Pick<DbRowLocator, "id" | "target">): {
+  row(rowRef: Pick<RowRef, "id" | "baseUrl">): {
     request<T, TPayload = unknown>(action: RowAction, payload: TPayload, options?: RowRequestOptions): Promise<T>;
-    target: string;
+    baseUrl: string;
     rowId: string;
   } {
-    const target = typeof rowOrTarget === "string" ? normalizeTarget(rowOrTarget) : normalizeTarget(rowOrTarget.target);
-    const rowId = typeof rowOrTarget === "string" ? rowIdFromTarget(target) : rowOrTarget.id;
-    const parsedRowId = rowIdFromTarget(target);
-
-    if (parsedRowId !== rowId) {
-      throw new Error(`Row target/id mismatch: ${target} does not match row id ${rowId}.`);
-    }
+    const normalizedRow = {
+      id: rowRef.id,
+      baseUrl: normalizeBaseUrl(rowRef.baseUrl),
+    };
 
     return {
       request: async <T, TPayload = unknown>(
@@ -149,15 +115,15 @@ export class Transport {
         options?: RowRequestOptions,
       ): Promise<T> => {
         return this.request<T, TPayload>({
-          url: rowEndpointUrl(target, rowId, action),
+          url: rowEndpointUrl(normalizedRow, action),
           action,
-          rowId,
+          rowId: normalizedRow.id,
           payload,
           includeRequestProof: options?.includeRequestProof,
         });
       },
-      target,
-      rowId,
+      baseUrl: normalizedRow.baseUrl,
+      rowId: normalizedRow.id,
     };
   }
 

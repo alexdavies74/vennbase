@@ -1,45 +1,43 @@
 import type { MutationReceipt } from "./mutation-receipt";
-import type { DbMemberInfo, DbRowLocator, DbRowRef, DbSchema, MemberRole } from "./schema";
+import type { DbMemberInfo, DbSchema, MemberRole, RowRef } from "./schema";
+import { rowRefKey, sameRowRef } from "./row-reference";
 import type { InviteToken, JsonValue } from "./types";
 
 type RowKey = string;
 
 export interface OptimisticRowRecord {
-  row: DbRowRef;
+  row: RowRef;
+  owner: string;
   collection: string;
   baseFields: Record<string, JsonValue>;
   overlayFields: Record<string, JsonValue>;
-  knownParents: DbRowRef[] | null;
+  knownParents: RowRef[] | null;
   pendingCreate: boolean;
   pendingCreateReceipt: Promise<unknown> | null;
-  pendingParentAdds: DbRowRef[];
-  pendingParentRemoves: DbRowRef[];
+  pendingParentAdds: RowRef[];
+  pendingParentRemoves: RowRef[];
   directMembers: Array<{ username: string; role: MemberRole }> | null;
   pendingMemberAdds: Array<{ username: string; role: MemberRole }>;
   pendingMemberRemoves: string[];
   pendingInviteToken: InviteToken | null;
 }
 
-function rowKey(row: Pick<DbRowLocator, "id" | "owner" | "target">): RowKey {
-  return `${row.owner}:${row.id}:${row.target}`;
+function rowKey(row: Pick<RowRef, "id" | "baseUrl">): RowKey {
+  return rowRefKey(row);
 }
 
-function sameRow(left: Pick<DbRowLocator, "id" | "owner" | "target">, right: Pick<DbRowLocator, "id" | "owner" | "target">): boolean {
-  return left.id === right.id && left.owner === right.owner && left.target === right.target;
-}
-
-function mergeUniqueRows(left: DbRowRef[], additions: DbRowRef[]): DbRowRef[] {
+function mergeUniqueRows(left: RowRef[], additions: RowRef[]): RowRef[] {
   const next = [...left];
   for (const row of additions) {
-    if (!next.some((candidate) => sameRow(candidate, row))) {
+    if (!next.some((candidate) => sameRowRef(candidate, row))) {
       next.push(row);
     }
   }
   return next;
 }
 
-function removeRows(left: DbRowRef[], removals: DbRowRef[]): DbRowRef[] {
-  return left.filter((candidate) => !removals.some((row) => sameRow(candidate, row)));
+function removeRows(left: RowRef[], removals: RowRef[]): RowRef[] {
+  return left.filter((candidate) => !removals.some((row) => sameRowRef(candidate, row)));
 }
 
 function mergeMembers(
@@ -61,10 +59,10 @@ function mergeMembers(
 
 export class OptimisticStore {
   private readonly rows = new Map<RowKey, OptimisticRowRecord>();
-  private readonly targets = new Map<string, RowKey>();
 
   private ensureRecord(args: {
-    row: DbRowRef;
+    row: RowRef;
+    owner: string;
     collection: string;
     baseFields?: Record<string, JsonValue>;
   }): OptimisticRowRecord {
@@ -76,6 +74,7 @@ export class OptimisticStore {
 
     const created: OptimisticRowRecord = {
       row: args.row,
+      owner: args.owner,
       collection: args.collection,
       baseFields: { ...(args.baseFields ?? {}) },
       overlayFields: {},
@@ -91,17 +90,18 @@ export class OptimisticStore {
     };
 
     this.rows.set(key, created);
-    this.targets.set(args.row.target, key);
     return created;
   }
 
   upsertBaseRow(
-    row: DbRowRef,
+    row: RowRef,
+    owner: string,
     collection: string,
     fields: Record<string, JsonValue>,
-    parents?: DbRowRef[] | null,
+    parents?: RowRef[] | null,
   ): void {
-    const record = this.ensureRecord({ row, collection, baseFields: fields });
+    const record = this.ensureRecord({ row, owner, collection, baseFields: fields });
+    record.owner = owner;
     record.collection = collection;
     record.baseFields = { ...fields };
     if (parents !== undefined) {
@@ -110,17 +110,20 @@ export class OptimisticStore {
   }
 
   beginCreate(args: {
-    row: DbRowRef;
+    row: RowRef;
+    owner: string;
     collection: string;
     fields: Record<string, JsonValue>;
-    parents: DbRowRef[];
+    parents: RowRef[];
     receipt: MutationReceipt<unknown>;
   }): void {
     const record = this.ensureRecord({
       row: args.row,
+      owner: args.owner,
       collection: args.collection,
       baseFields: args.fields,
     });
+    record.owner = args.owner;
     record.pendingCreate = true;
     record.pendingCreateReceipt = args.receipt.settled;
     record.knownParents = [...args.parents];
@@ -128,7 +131,7 @@ export class OptimisticStore {
     record.overlayFields = {};
   }
 
-  confirmCreate(row: DbRowRef): void {
+  confirmCreate(row: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
@@ -137,18 +140,17 @@ export class OptimisticStore {
     record.pendingCreateReceipt = null;
   }
 
-  rollbackCreate(row: DbRowRef): void {
+  rollbackCreate(row: RowRef): void {
     const key = rowKey(row);
     const record = this.rows.get(key);
     if (!record) {
       return;
     }
     this.rows.delete(key);
-    this.targets.delete(record.row.target);
   }
 
-  applyOverlay(row: DbRowRef, collection: string, fields: Record<string, JsonValue>): Record<string, JsonValue> {
-    const record = this.ensureRecord({ row, collection });
+  applyOverlay(row: RowRef, collection: string, fields: Record<string, JsonValue>): Record<string, JsonValue> {
+    const record = this.ensureRecord({ row, owner: "", collection });
     record.overlayFields = {
       ...record.overlayFields,
       ...fields,
@@ -156,7 +158,7 @@ export class OptimisticStore {
     return this.getLogicalFields(row) ?? { ...record.baseFields, ...record.overlayFields };
   }
 
-  commitOverlay(row: DbRowRef): void {
+  commitOverlay(row: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
@@ -168,13 +170,13 @@ export class OptimisticStore {
     record.overlayFields = {};
   }
 
-  rollbackOverlay(row: DbRowRef, fields: Record<string, JsonValue>): void {
-    const record = this.ensureRecord({ row, collection: row.collection, baseFields: fields });
+  rollbackOverlay(row: RowRef, fields: Record<string, JsonValue>): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection, baseFields: fields });
     record.overlayFields = {};
     record.baseFields = { ...fields };
   }
 
-  getLogicalFields(row: Pick<DbRowLocator, "id" | "owner" | "target">): Record<string, JsonValue> | null {
+  getLogicalFields(row: Pick<RowRef, "id" | "baseUrl">): Record<string, JsonValue> | null {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return null;
@@ -185,79 +187,83 @@ export class OptimisticStore {
     };
   }
 
-  getCollection(row: Pick<DbRowLocator, "id" | "owner" | "target">): string | null {
+  getCollection(row: Pick<RowRef, "id" | "baseUrl">): string | null {
     return this.rows.get(rowKey(row))?.collection ?? null;
   }
 
-  getRowByTarget(target: string): OptimisticRowRecord | null {
-    const key = this.targets.get(target);
-    return key ? this.rows.get(key) ?? null : null;
+  getOwner(row: Pick<RowRef, "id" | "baseUrl">): string | null {
+    const owner = this.rows.get(rowKey(row))?.owner ?? null;
+    return owner && owner.length > 0 ? owner : null;
   }
 
-  getPendingCreateDependency(row: Pick<DbRowLocator, "id" | "owner" | "target">): Promise<unknown> | null {
+  getRowByRef(row: Pick<RowRef, "id" | "baseUrl">): OptimisticRowRecord | null {
+    return this.rows.get(rowKey(row)) ?? null;
+  }
+
+  getPendingCreateDependency(row: Pick<RowRef, "id" | "baseUrl">): Promise<unknown> | null {
     return this.rows.get(rowKey(row))?.pendingCreateReceipt ?? null;
   }
 
-  hasPendingCreate(row: Pick<DbRowLocator, "id" | "owner" | "target">): boolean {
+  hasPendingCreate(row: Pick<RowRef, "id" | "baseUrl">): boolean {
     return this.rows.get(rowKey(row))?.pendingCreate ?? false;
   }
 
-  recordParents(row: DbRowRef, parents: DbRowRef[]): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
+  recordParents(row: RowRef, parents: RowRef[]): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
     record.knownParents = [...parents];
   }
 
-  addParent(row: DbRowRef, parent: DbRowRef): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
-    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRow(candidate, parent));
-    if (!record.pendingParentAdds.some((candidate) => sameRow(candidate, parent))) {
+  addParent(row: RowRef, parent: RowRef): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
+    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRowRef(candidate, parent));
+    if (!record.pendingParentAdds.some((candidate) => sameRowRef(candidate, parent))) {
       record.pendingParentAdds.push(parent);
     }
   }
 
-  removeParent(row: DbRowRef, parent: DbRowRef): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
-    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRow(candidate, parent));
-    if (!record.pendingParentRemoves.some((candidate) => sameRow(candidate, parent))) {
+  removeParent(row: RowRef, parent: RowRef): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
+    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRowRef(candidate, parent));
+    if (!record.pendingParentRemoves.some((candidate) => sameRowRef(candidate, parent))) {
       record.pendingParentRemoves.push(parent);
     }
   }
 
-  confirmParentAdd(row: DbRowRef, parent: DbRowRef): void {
+  confirmParentAdd(row: RowRef, parent: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
     }
-    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRow(candidate, parent));
+    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRowRef(candidate, parent));
     record.knownParents = mergeUniqueRows(record.knownParents ?? [], [parent]);
   }
 
-  rollbackParentAdd(row: DbRowRef, parent: DbRowRef): void {
+  rollbackParentAdd(row: RowRef, parent: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
     }
-    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRow(candidate, parent));
+    record.pendingParentAdds = record.pendingParentAdds.filter((candidate) => !sameRowRef(candidate, parent));
   }
 
-  confirmParentRemove(row: DbRowRef, parent: DbRowRef): void {
+  confirmParentRemove(row: RowRef, parent: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
     }
-    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRow(candidate, parent));
+    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRowRef(candidate, parent));
     record.knownParents = removeRows(record.knownParents ?? [], [parent]);
   }
 
-  rollbackParentRemove(row: DbRowRef, parent: DbRowRef): void {
+  rollbackParentRemove(row: RowRef, parent: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
     }
-    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRow(candidate, parent));
+    record.pendingParentRemoves = record.pendingParentRemoves.filter((candidate) => !sameRowRef(candidate, parent));
   }
 
-  getCurrentParents(row: DbRowRef, serverParents: DbRowRef[] = []): DbRowRef[] {
+  getCurrentParents(row: RowRef, serverParents: RowRef[] = []): RowRef[] {
     const record = this.rows.get(rowKey(row));
     const base = record?.knownParents ?? serverParents;
     if (!record) {
@@ -266,28 +272,28 @@ export class OptimisticStore {
     return removeRows(mergeUniqueRows([...base], record.pendingParentAdds), record.pendingParentRemoves);
   }
 
-  getOptimisticQueryRows(collection: string, parents: DbRowRef[]): OptimisticRowRecord[] {
+  getOptimisticQueryRows(collection: string, parents: RowRef[]): OptimisticRowRecord[] {
     return Array.from(this.rows.values()).filter((record) => {
       if (record.collection !== collection) {
         return false;
       }
       const currentParents = this.getCurrentParents(record.row, []);
-      return currentParents.some((parent) => parents.some((candidate) => sameRow(candidate, parent)));
+      return currentParents.some((parent) => parents.some((candidate) => sameRowRef(candidate, parent)));
     });
   }
 
-  shouldExcludeFromParent(row: DbRowRef, parent: DbRowRef): boolean {
+  shouldExcludeFromParent(row: RowRef, parent: RowRef): boolean {
     const record = this.rows.get(rowKey(row));
-    return record?.pendingParentRemoves.some((candidate) => sameRow(candidate, parent)) ?? false;
+    return record?.pendingParentRemoves.some((candidate) => sameRowRef(candidate, parent)) ?? false;
   }
 
-  recordDirectMembers(row: DbRowRef, members: Array<{ username: string; role: MemberRole }>): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
+  recordDirectMembers(row: RowRef, members: Array<{ username: string; role: MemberRole }>): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
     record.directMembers = [...members];
   }
 
-  addMember(row: DbRowRef, username: string, role: MemberRole): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
+  addMember(row: RowRef, username: string, role: MemberRole): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
     record.pendingMemberRemoves = record.pendingMemberRemoves.filter((candidate) => candidate !== username);
     const existingIndex = record.pendingMemberAdds.findIndex((candidate) => candidate.username === username);
     if (existingIndex >= 0) {
@@ -297,15 +303,15 @@ export class OptimisticStore {
     }
   }
 
-  removeMember(row: DbRowRef, username: string): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
+  removeMember(row: RowRef, username: string): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
     record.pendingMemberAdds = record.pendingMemberAdds.filter((candidate) => candidate.username !== username);
     if (!record.pendingMemberRemoves.includes(username)) {
       record.pendingMemberRemoves.push(username);
     }
   }
 
-  confirmMemberMutation(row: DbRowRef): void {
+  confirmMemberMutation(row: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
@@ -315,7 +321,7 @@ export class OptimisticStore {
     record.pendingMemberRemoves = [];
   }
 
-  rollbackMemberMutation(row: DbRowRef): void {
+  rollbackMemberMutation(row: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
@@ -324,7 +330,7 @@ export class OptimisticStore {
     record.pendingMemberRemoves = [];
   }
 
-  getDirectMembers(row: DbRowRef): Array<{ username: string; role: MemberRole }> | null {
+  getDirectMembers(row: RowRef): Array<{ username: string; role: MemberRole }> | null {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return null;
@@ -332,13 +338,13 @@ export class OptimisticStore {
     return mergeMembers(record.directMembers ?? [], record.pendingMemberAdds, record.pendingMemberRemoves);
   }
 
-  getMemberUsernames(row: DbRowRef): string[] | null {
+  getMemberUsernames(row: RowRef): string[] | null {
     const direct = this.getDirectMembers(row);
     return direct ? direct.map((member) => member.username) : null;
   }
 
   getEffectiveMembers<Schema extends DbSchema>(
-    row: DbRowRef,
+    row: RowRef,
     base: Array<DbMemberInfo<Schema>>,
   ): Array<DbMemberInfo<Schema>> {
     const direct = this.getDirectMembers(row);
@@ -357,12 +363,12 @@ export class OptimisticStore {
     return Array.from(byUsername.values());
   }
 
-  setInviteToken(row: DbRowRef, inviteToken: InviteToken): void {
-    const record = this.ensureRecord({ row, collection: row.collection });
+  setInviteToken(row: RowRef, inviteToken: InviteToken): void {
+    const record = this.ensureRecord({ row, owner: "", collection: row.collection });
     record.pendingInviteToken = inviteToken;
   }
 
-  clearInviteToken(row: DbRowRef): void {
+  clearInviteToken(row: RowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
@@ -370,7 +376,7 @@ export class OptimisticStore {
     record.pendingInviteToken = null;
   }
 
-  getInviteToken(row: DbRowRef): InviteToken | null {
+  getInviteToken(row: RowRef): InviteToken | null {
     return this.rows.get(rowKey(row))?.pendingInviteToken ?? null;
   }
 }

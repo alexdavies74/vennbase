@@ -1,4 +1,4 @@
-import { useInviteFromLocation, useInviteLink, useMutation, useQuery, useRowTarget, useSession } from "@putbase/react";
+import { useInviteFromLocation, useInviteLink, useMutation, useQuery, useRow, useSession } from "@putbase/react";
 import { useEffect, useState } from "react";
 import type { RowHandle, RowFields } from "@putbase/core";
 import { db } from "./db";
@@ -13,21 +13,21 @@ async function rememberRecentBoard(board: BoardHandle): Promise<void> {
   // `recentBoards` is declared as `in: ["user"]`, so omitting `in` uses the
   // current signed-in user's built-in user row.
   const existingRecentBoards = await db.query("recentBoards", {
-    index: "byBoardTarget",
-    value: board.target,
+    index: "byBoardRef",
+    value: board.ref,
     limit: 1,
   });
   const existingRecentBoard = existingRecentBoards[0] ?? null;
 
   if (existingRecentBoard) {
-    await db.update("recentBoards", existingRecentBoard, {
+    await db.update("recentBoards", existingRecentBoard.ref, {
       openedAt: Date.now(),
     });
     return;
   }
 
   await db.put("recentBoards", {
-    boardTarget: board.target,
+    boardRef: board.ref,
     openedAt: Date.now(),
   });
 }
@@ -42,11 +42,7 @@ async function loadRecentBoards(): Promise<RecentBoardHandle[]> {
 }
 
 async function openRecentBoard(recentBoard: RecentBoardHandle): Promise<BoardHandle> {
-  const row = await db.openTarget(recentBoard.fields.boardTarget);
-  if (row.collection !== "boards") {
-    throw new Error(`Expected boards row, got ${row.collection}`);
-  }
-
+  const row = await db.getRow(recentBoard.fields.boardRef);
   await rememberRecentBoard(row);
   return row;
 }
@@ -200,10 +196,8 @@ function RecentBoardListItem(props: {
   onOpen: (recentBoard: RecentBoardHandle) => Promise<void>;
   recentBoard: RecentBoardHandle;
 }) {
-  const board = useRowTarget(db, props.recentBoard.fields.boardTarget);
-  const boardRow = board.status === "success" && board.data?.collection === "boards"
-    ? board.data
-    : null;
+  const board = useRow(db, props.recentBoard.fields.boardRef);
+  const boardRow = board.status === "success" ? board.data : null;
 
   const label = boardRow
     ? boardRow.fields.title
@@ -247,19 +241,19 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
   const [text, setText] = useState("");
 
   const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
-    in: board,
+    in: board.ref,
     index: "byCreatedAt",
     order: "asc",
   });
 
-  const { inviteLink } = useInviteLink(db, board);
+  const { inviteLink } = useInviteLink(db, board.ref);
 
   const addCard = useMutation(async (cardText: string) => {
-    await db.put("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board });
+    await db.put("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board.ref });
   });
 
   const toggleDone = useMutation(async (card: CardHandle) => {
-    await db.update("cards", card, { done: !card.fields.done });
+    await db.update("cards", card.ref, { done: !card.fields.done });
   });
 
   return (

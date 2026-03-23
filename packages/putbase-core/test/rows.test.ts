@@ -78,11 +78,11 @@ const schema = defineSchema({
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameTarget: field.string(),
+      gameRef: field.ref("projects"),
       role: field.string(),
     },
     indexes: {
-      byGameTarget: index("gameTarget"),
+      byGameRef: index("gameRef"),
     },
   }),
 });
@@ -99,7 +99,11 @@ function buildWatchRow(id: string, title: string) {
     id,
     collection: "tasks",
     owner: "alice",
-    target: `https://worker.example/rows/${id}`,
+    ref: {
+      id,
+      collection: "tasks",
+      baseUrl: "https://worker.example/rows",
+    },
     fields: { title, status: "todo" },
   };
 }
@@ -159,12 +163,12 @@ describe("PutBase rows", () => {
     const db = await buildReadyDb({ username: "alice", network });
 
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.toRef() });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
-    await db.update("tasks", task.toRef(), { status: "done" });
+    await db.update("tasks", task.ref, { status: "done" });
 
     const done = await db.query("tasks", {
-      in: project.toRef(),
+      in: project.ref,
       where: { status: "done" },
     });
 
@@ -179,16 +183,16 @@ describe("PutBase rows", () => {
     const db = await buildReadyDb({ username: "alice", network });
 
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.toRef() });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
-    await db.update("tasks", task.toRef(), { status: "done" });
+    await db.update("tasks", task.ref, { status: "done" });
 
     const todo = await db.query("tasks", {
-      in: project.toRef(),
+      in: project.ref,
       where: { status: "todo" },
     });
     const done = await db.query("tasks", {
-      in: project.toRef(),
+      in: project.ref,
       where: { status: "done" },
     });
 
@@ -197,15 +201,15 @@ describe("PutBase rows", () => {
     expect(done[0].id).toBe(task.id);
   });
 
-  it("accepts a parent row handle for put and query inputs", async () => {
+  it("accepts a parent row ref for put and query inputs", async () => {
     const network = new TestWorkerNetwork();
     const db = await buildReadyDb({ username: "alice", network });
 
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
     const tasks = await db.query("tasks", {
-      in: project,
+      in: project.ref,
       where: { status: "todo" },
     });
 
@@ -217,15 +221,16 @@ describe("PutBase rows", () => {
   it("puts and queries user-scoped rows without explicit parents", async () => {
     const network = new TestWorkerNetwork();
     const db = await buildReadyDb({ username: "alice", network });
+    const project = await db.put("projects", { name: "Game 1" });
 
     const record = await db.put("gameRecords", {
-      gameTarget: "https://games.example/rows/game_1",
+      gameRef: project.ref,
       role: "owner",
     });
 
     const records = await db.query("gameRecords", {
-      index: "byGameTarget",
-      value: "https://games.example/rows/game_1",
+      index: "byGameRef",
+      value: project.ref,
     });
     const parents = await record.in.list();
 
@@ -234,7 +239,6 @@ describe("PutBase rows", () => {
     expect(parents).toEqual([
       expect.objectContaining({
         collection: "user",
-        owner: "alice",
       }),
     ]);
   });
@@ -243,9 +247,10 @@ describe("PutBase rows", () => {
     const network = new TestWorkerNetwork();
     const backend = { workers: {}, kv: new InMemoryKv() } as BackendClient;
     const db = await buildReadyDb({ username: "alice", network, backend });
+    const firstProject = await db.put("projects", { name: "Game 1" });
 
     await db.put("gameRecords", {
-      gameTarget: "https://games.example/rows/game_1",
+      gameRef: firstProject.ref,
       role: "owner",
     });
 
@@ -254,14 +259,17 @@ describe("PutBase rows", () => {
 
     await db.query("gameRecords", { where: { role: "owner" } });
     const rememberedAfterReuse = await loadRememberedPerUserRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY);
-    expect(rememberedAfterReuse?.target).toBe(rememberedBefore?.target);
+    expect(rememberedAfterReuse).toEqual(rememberedBefore);
 
     await rememberPerUserRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY, {
-      target: "https://alice-federation.example/rows/row_missing",
+      id: "row_missing",
+      collection: "user",
+      baseUrl: "https://alice-federation.example/rows",
     });
+    const secondProject = await db.put("projects", { name: "Game 2" });
 
     await db.put("gameRecords", {
-      gameTarget: "https://games.example/rows/game_2",
+      gameRef: secondProject.ref,
       role: "reader",
     });
 
@@ -270,7 +278,7 @@ describe("PutBase rows", () => {
 
     expect(recreated).toHaveLength(1);
     expect(rememberedAfterRecreate).toBeTruthy();
-    expect(rememberedAfterRecreate?.target).toBeTruthy();
+    expect(rememberedAfterRecreate?.baseUrl).toBeTruthy();
   });
 
   it("reuses row handles for the life of a row and updates fields in place", async () => {
@@ -278,20 +286,20 @@ describe("PutBase rows", () => {
     const db = await buildReadyDb({ username: "alice", network });
 
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
-    const firstGet = await db.getRow("tasks", task);
-    const secondGet = await db.getRow("tasks", task);
-    const firstOpen = await db.openTarget(task.target);
-    const secondOpen = await db.openTarget(task.target);
+    const firstGet = await db.getRow(task.ref);
+    const secondGet = await db.getRow(task.ref);
+    const firstReopen = await db.getRow(task.ref);
+    const secondReopen = await db.getRow(task.ref);
 
     expect(secondGet).toBe(firstGet);
-    expect(firstOpen).toBe(firstGet);
-    expect(secondOpen).toBe(firstGet);
+    expect(firstReopen).toBe(firstGet);
+    expect(secondReopen).toBe(firstGet);
 
-    await db.update("tasks", task, { status: "done" });
+    await db.update("tasks", task.ref, { status: "done" });
 
-    const afterChange = await db.getRow("tasks", task);
+    const afterChange = await db.getRow(task.ref);
     expect(afterChange).toBe(firstGet);
     expect(afterChange.fields.status).toBe("done");
     expect(firstGet.fields.status).toBe("done");
@@ -306,10 +314,10 @@ describe("PutBase rows", () => {
     await aliceProject.members.add("bob", { role: "reader" }).settled;
 
     const bobProject = await bobDb.put("projects", { name: "Bob scope" });
-    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.toRef() });
-    await bobTask.in.add(aliceProject.toRef()).settled;
+    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.ref });
+    await bobTask.in.add(aliceProject.ref).settled;
 
-    const tasks = await aliceDb.query("tasks", { in: aliceProject.toRef() });
+    const tasks = await aliceDb.query("tasks", { in: aliceProject.ref });
 
     expect(tasks.some((task) => task.id === bobTask.id)).toBe(true);
   });
@@ -323,8 +331,8 @@ describe("PutBase rows", () => {
     await aliceProject.members.add("bob", { role: "reader" }).settled;
 
     const bobProject = await bobDb.put("projects", { name: "Bob scope" });
-    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.toRef() });
-    await bobTask.in.add(aliceProject.toRef()).settled;
+    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.ref });
+    await bobTask.in.add(aliceProject.ref).settled;
 
     const parents = await bobTask.in.list();
     expect(parents).toHaveLength(2);
@@ -332,12 +340,12 @@ describe("PutBase rows", () => {
       expect.objectContaining({
         id: aliceProject.id,
         collection: "projects",
-        owner: "alice",
+        baseUrl: aliceProject.ref.baseUrl,
       }),
       expect.objectContaining({
         id: bobProject.id,
         collection: "projects",
-        owner: "bob",
+        baseUrl: bobProject.ref.baseUrl,
       }),
     ]));
 
@@ -357,14 +365,10 @@ describe("PutBase rows", () => {
     await aliceProject.members.add("bob", { role: "reader" }).settled;
 
     const bobProject = await bobDb.put("projects", { name: "Bob scope" });
-    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.toRef() });
-    await bobTask.in.add(aliceProject.toRef()).settled;
+    const bobTask = await bobDb.put("tasks", { title: "Review" }, { in: bobProject.ref });
+    await bobTask.in.add(aliceProject.ref).settled;
 
-    const aliceTask = await aliceDb.openTarget(bobTask.target);
-    expect(aliceTask.collection).toBe("tasks");
-    if (aliceTask.collection !== "tasks") {
-      throw new Error(`Expected tasks row, got ${aliceTask.collection}`);
-    }
+    const aliceTask = await aliceDb.getRow(bobTask.ref);
 
     const members = await aliceTask.members.effective();
     const aliceMember = members.find((member) => member.username === "alice");
@@ -375,8 +379,7 @@ describe("PutBase rows", () => {
       via: {
         id: aliceProject.id,
         collection: "projects",
-        owner: "alice",
-        target: aliceProject.target,
+        baseUrl: aliceProject.ref.baseUrl,
       },
     });
   });
@@ -387,10 +390,10 @@ describe("PutBase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await aliceDb.put("projects", { name: "Roadmap" });
-    const task = await aliceDb.put("tasks", { title: "Review" }, { in: project.toRef() });
-    const invite = aliceDb.createInviteToken(task);
+    const task = await aliceDb.put("tasks", { title: "Review" }, { in: project.ref });
+    const invite = aliceDb.createInviteToken(task.ref);
     await invite.settled;
-    const inviteLink = aliceDb.createInviteLink(task, invite.value.token);
+    const inviteLink = aliceDb.createInviteLink(task.ref, invite.value.token);
 
     const joined = await bobDb.openInvite(inviteLink);
     expect(joined.collection).toBe("tasks");
@@ -398,19 +401,19 @@ describe("PutBase rows", () => {
       throw new Error(`Expected tasks row, got ${joined.collection}`);
     }
 
-    const updated = bobDb.update("tasks", joined.toRef(), { status: "done" });
+    const updated = bobDb.update("tasks", joined.ref, { status: "done" });
     await updated.settled;
 
-    const refreshed = await aliceDb.getRow("tasks", task.toRef());
+    const refreshed = await aliceDb.getRow(task.ref);
     expect(refreshed.fields.status).toBe("done");
 
     const rows = await aliceDb.query("tasks", {
-      in: project.toRef(),
+      in: project.ref,
       where: { status: "done" },
     });
     expect(rows.some((row) => row.id === task.id)).toBe(true);
 
-    const directMembers = await aliceDb.listDirectMembers(task);
+    const directMembers = await aliceDb.listDirectMembers(task.ref);
     expect(directMembers).toEqual(expect.arrayContaining([
       expect.objectContaining({ username: "bob", role: "writer" }),
     ]));
@@ -429,27 +432,11 @@ describe("PutBase rows", () => {
     ).toThrow("Field projects.name must be a string");
 
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.toRef() });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
     expect(
-      () => db.update("tasks", task.toRef(), { status: ["done"] } as never),
+      () => db.update("tasks", task.ref, { status: ["done"] } as never),
     ).toThrow("Field tasks.status must be a string");
-  });
-
-  it("rejects legacy row-worker URLs without /rows/{id}", async () => {
-    const network = new TestWorkerNetwork();
-    const db = await buildReadyDb({ username: "alice", network });
-
-    const project = await db.put("projects", { name: "Website" });
-    await db.put("tasks", { title: "Ship v2", status: "todo" }, { in: project.toRef() });
-
-    const directTarget = `https://alice-row-${project.id}.example`;
-    await expect(
-      db.query("tasks", {
-        in: { ...project.toRef(), target: directTarget },
-        where: { status: "todo" },
-      }),
-    ).rejects.toThrow("Legacy non-federated row targets are no longer supported");
   });
 
   it("rejects query results when canonical row hydration fails", async () => {
@@ -459,7 +446,7 @@ describe("PutBase rows", () => {
           rows: [{
             rowId: "task_1",
             owner: "alice",
-            target: "https://worker.example/rows/task_1/",
+            baseUrl: "https://worker.example/rows/",
             collection: "tasks",
             fields: { title: "Embedded snapshot", status: "todo" },
           }],
@@ -479,16 +466,14 @@ describe("PutBase rows", () => {
       in: {
         id: "project_1",
         collection: "projects",
-        owner: "alice",
-        target: "https://worker.example/rows/project_1",
+        baseUrl: "https://worker.example/rows",
       },
     })).rejects.toThrow("canonical fetch failed");
 
-    expect(getRow).toHaveBeenCalledWith("tasks", {
+    expect(getRow).toHaveBeenCalledWith({
       id: "task_1",
       collection: "tasks",
-      owner: "alice",
-      target: "https://worker.example/rows/task_1",
+      baseUrl: "https://worker.example/rows",
     });
   });
 
@@ -517,14 +502,14 @@ describe("PutBase rows", () => {
           {
             rowId: "card_2",
             owner: "alice",
-            target: "https://worker.example/rows/card_2",
+            baseUrl: "https://worker.example/rows",
             collection: "cards",
             fields: { rank: 2 },
           },
           {
             rowId: "card_3",
             owner: "alice",
-            target: "https://worker.example/rows/card_3",
+            baseUrl: "https://worker.example/rows",
             collection: "cards",
             fields: { rank: 3 },
           },
@@ -535,14 +520,14 @@ describe("PutBase rows", () => {
           {
             rowId: "card_1",
             owner: "alice",
-            target: "https://worker.example/rows/card_1",
+            baseUrl: "https://worker.example/rows",
             collection: "cards",
             fields: { rank: 1 },
           },
           {
             rowId: "card_2",
             owner: "alice",
-            target: "https://worker.example/rows/card_2",
+            baseUrl: "https://worker.example/rows",
             collection: "cards",
             fields: { rank: 2 },
           },
@@ -555,11 +540,11 @@ describe("PutBase rows", () => {
         request: vi.fn().mockResolvedValue(parentResponses.get(parent.id)),
       })),
     };
-    const getRow = vi.fn(async (_collection: string, row: { id: string; owner: string; target: string }) => ({
+    const getRow = vi.fn(async (row: { id: string; collection: string; baseUrl: string }) => ({
       id: row.id,
       collection: "cards",
-      owner: row.owner,
-      target: row.target,
+      owner: "alice",
+      ref: row,
       fields: {},
     }));
     const optimisticStore = new OptimisticStore();
@@ -575,14 +560,12 @@ describe("PutBase rows", () => {
         {
           id: "shelf_1",
           collection: "shelves",
-          owner: "alice",
-          target: "https://worker.example/rows/shelf_1",
+          baseUrl: "https://worker.example/rows",
         },
         {
           id: "shelf_2",
           collection: "shelves",
-          owner: "alice",
-          target: "https://worker.example/rows/shelf_2",
+          baseUrl: "https://worker.example/rows",
         },
       ],
       index: "byRank",
@@ -591,7 +574,7 @@ describe("PutBase rows", () => {
     });
 
     expect(rows.map((row) => row.id)).toEqual(["card_1", "card_2"]);
-    expect(getRow.mock.calls.map(([, row]) => row.id)).toEqual(["card_1", "card_2"]);
+    expect(getRow.mock.calls.map(([row]) => row.id)).toEqual(["card_1", "card_2"]);
   });
 
   it("skips remote querying when the parent exists only as a pending optimistic create", async () => {
@@ -604,11 +587,11 @@ describe("PutBase rows", () => {
     const parent = {
       id: "project_1",
       collection: "projects",
-      owner: "alice",
-      target: "https://worker.example/rows/project_1",
+      baseUrl: "https://worker.example/rows",
     } as const;
     optimisticStore.beginCreate({
       row: parent,
+      owner: "alice",
       collection: "projects",
       fields: { name: "Website" },
       parents: [],
@@ -633,11 +616,11 @@ describe("PutBase rows", () => {
     const network = new TestWorkerNetwork();
     const db = await buildReadyDb({ username: "alice", network });
     const project = await db.put("projects", { name: "Website" });
-    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.toRef() });
+    const task = await db.put("tasks", { title: "Ship v2" }, { in: project.ref });
 
     const changes: string[][] = [];
     const watcher = db.watchQuery("tasks", {
-      in: project.toRef(),
+      in: project.ref,
     }, {
       onChange: (rows) => {
         changes.push(rows.map((row) => row.id));
@@ -669,8 +652,7 @@ describe("Query watchQuery", () => {
       in: {
         id: "project_1",
         collection: "projects",
-        owner: "alice",
-        target: "https://worker.example/rows/project_1",
+        baseUrl: "https://worker.example/rows",
       },
     }, {
       onChange: (rows) => {
@@ -704,8 +686,7 @@ describe("Query watchQuery", () => {
       in: {
         id: "project_1",
         collection: "projects",
-        owner: "alice",
-        target: "https://worker.example/rows/project_1",
+        baseUrl: "https://worker.example/rows",
       },
     }, { onChange() {} });
 
@@ -741,8 +722,7 @@ describe("Query watchQuery", () => {
       in: {
         id: "project_1",
         collection: "projects",
-        owner: "alice",
-        target: "https://worker.example/rows/project_1",
+        baseUrl: "https://worker.example/rows",
       },
     }, {
       onChange: (rows) => { changes.push(rows.map((row) => row.id).join(",")); },
@@ -774,8 +754,7 @@ describe("Query watchQuery", () => {
       in: {
         id: "project_1",
         collection: "projects",
-        owner: "alice",
-        target: "https://worker.example/rows/project_1",
+        baseUrl: "https://worker.example/rows",
       },
     }, { onChange() {} });
 

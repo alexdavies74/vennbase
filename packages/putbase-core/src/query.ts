@@ -1,7 +1,7 @@
 import { createAdaptivePoller } from "./polling";
 import { OptimisticStore } from "./optimistic-store";
 import { RowHandle } from "./row-handle";
-import { normalizeParentRefs } from "./row-reference";
+import { normalizeParentRefs, normalizeRowRef } from "./row-reference";
 import type {
   AllowedParentCollections,
   CollectionName,
@@ -9,20 +9,20 @@ import type {
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbRowFields,
-  DbRowRef,
   DbSchema,
+  RowRef,
   RowFields,
 } from "./schema";
 import { getCollectionSpec, pickIndex } from "./schema";
 import { stableJsonStringify } from "./stable-json";
 import type { Transport } from "./transport";
-import { normalizeTarget } from "./transport";
+import { encodeFieldValue } from "./key-encoding";
 import type { JsonValue } from "./types";
 
 interface DbQueryRow {
   rowId: string;
   owner: string;
-  target: string;
+  baseUrl: string;
   collection: string;
   fields: Record<string, JsonValue>;
 }
@@ -39,7 +39,7 @@ function matchesWhere(
     return true;
   }
 
-  return Object.entries(where).every(([field, value]) => fields[field] === value);
+  return Object.entries(where).every(([field, value]) => encodeFieldValue(fields[field] ?? null) === encodeFieldValue(value));
 }
 
 function matchesIndexValue(
@@ -52,7 +52,7 @@ function matchesIndexValue(
   }
 
   const decoded = Array.isArray(value) ? value : [value];
-  return indexFields.every((field, index) => row.fields[field] === decoded[index]);
+  return indexFields.every((field, index) => encodeFieldValue(row.fields[field] ?? null) === encodeFieldValue(decoded[index] as JsonValue));
 }
 
 function resolveSelectedIndexValue(
@@ -81,6 +81,10 @@ function compareFieldValue(left: JsonValue | undefined, right: JsonValue | undef
 
   if (typeof left === "boolean" && typeof right === "boolean") {
     return Number(left) - Number(right);
+  }
+
+  if (typeof left === "object" || typeof right === "object") {
+    return stableJsonStringify(left).localeCompare(stableJsonStringify(right));
   }
 
   return String(left ?? "").localeCompare(String(right ?? ""));
@@ -113,7 +117,7 @@ function snapshotRows(rows: Array<RowHandle<string, DbRowFields>>): string {
     id: row.id,
     collection: row.collection,
     owner: row.owner,
-    target: row.target,
+    ref: row.ref,
     fields: row.fields,
   }));
   return stableJsonStringify(snapshot);
@@ -121,8 +125,7 @@ function snapshotRows(rows: Array<RowHandle<string, DbRowFields>>): string {
 
 interface QueryRowLoader<Schema extends DbSchema> {
   getRow<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    row: DbRowRef<TCollection>,
+    row: RowRef<TCollection>,
   ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>;
 }
 
@@ -179,9 +182,8 @@ export class Query<Schema extends DbSchema> {
         return response.rows.filter((row) => {
           return !this.optimisticStore.shouldExcludeFromParent({
             id: row.rowId,
-            owner: row.owner,
-            target: normalizeTarget(row.target),
             collection,
+            baseUrl: row.baseUrl,
           }, parent);
         });
       }),
@@ -190,7 +192,7 @@ export class Query<Schema extends DbSchema> {
     const deduped = new Map<string, DbQueryRow>();
     for (const result of parentResults) {
       for (const row of result) {
-        const key = `${row.owner}:${row.rowId}`;
+        const key = `${row.baseUrl}:${row.rowId}`;
         if (!deduped.has(key)) {
           deduped.set(key, row);
         }
@@ -200,8 +202,8 @@ export class Query<Schema extends DbSchema> {
     const optimisticRows = this.optimisticStore.getOptimisticQueryRows(collection, parentRefs)
       .map((record) => ({
         rowId: record.row.id,
-        owner: record.row.owner,
-        target: record.row.target,
+        owner: record.owner,
+        baseUrl: record.row.baseUrl,
         collection,
         fields: this.optimisticStore.getLogicalFields(record.row) ?? {},
       }))
@@ -220,7 +222,7 @@ export class Query<Schema extends DbSchema> {
       });
 
     for (const row of optimisticRows) {
-      const key = `${row.owner}:${row.rowId}`;
+      const key = `${row.baseUrl}:${row.rowId}`;
       if (!deduped.has(key)) {
         deduped.set(key, row);
       }
@@ -229,8 +231,7 @@ export class Query<Schema extends DbSchema> {
     const mergedRows = Array.from(deduped.values()).filter((row) => {
       const localFields = this.optimisticStore.getLogicalFields({
         id: row.rowId,
-        owner: row.owner,
-        target: normalizeTarget(row.target),
+        baseUrl: row.baseUrl,
       }) ?? row.fields;
 
       if (selectedIndex) {
@@ -262,14 +263,13 @@ export class Query<Schema extends DbSchema> {
     const limitedRows = mergedRows.slice(0, limit);
     const hydrated = await Promise.all(
       limitedRows.map(async (row) => {
-        const rowRef: DbRowRef<TCollection> = {
+        const rowRef: RowRef<TCollection> = normalizeRowRef({
           id: row.rowId,
           collection,
-          owner: row.owner,
-          target: normalizeTarget(row.target),
-        };
+          baseUrl: row.baseUrl,
+        });
 
-        return this.rowLoader.getRow(collection, rowRef);
+        return this.rowLoader.getRow(rowRef);
       }),
     );
 

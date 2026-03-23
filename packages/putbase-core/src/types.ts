@@ -1,5 +1,5 @@
 import type { Puter } from "@heyputer/puter.js";
-import type { DbRowRef } from "./schema";
+import type { RowRef } from "./schema";
 
 export type BackendClient = Pick<Puter, "auth" | "getUser" | "fs" | "workers" | "kv">;
 
@@ -8,6 +8,7 @@ export type JsonValue =
   | number
   | boolean
   | null
+  | RowRef
   | { [key: string]: JsonValue }
   | JsonValue[];
 
@@ -36,7 +37,7 @@ export interface Row {
   id: string;
   name: string;
   owner: string;
-  target: string;
+  baseUrl: string;
   createdAt: number;
 }
 
@@ -112,8 +113,8 @@ export interface CrdtConnection {
   flush(): Promise<void>;
 }
 
-export interface InviteTarget {
-  target: string;
+export interface ParsedInvite {
+  ref: RowRef;
   inviteToken?: string;
 }
 
@@ -132,5 +133,5 @@ export interface DeployWorkerArgs {
 export interface RowSnapshot extends Row {
   collection: string | null;
   members: string[];
-  parentRefs: DbRowRef[];
+  parentRefs: RowRef[];
 }

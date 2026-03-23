@@ -5,24 +5,23 @@ import type {
   CollectionName,
   DbMemberInfo,
   DbRowFields,
-  DbRowLocator,
-  DbRowRef,
   DbSchema,
   MemberRole,
+  RowRef,
   RowFields,
 } from "./schema";
 
 export interface RowHandleBackend<Schema extends DbSchema = DbSchema> {
-  addParent(child: DbRowRef, parent: DbRowRef): MutationReceipt<void>;
-  removeParent(child: DbRowRef, parent: DbRowRef): MutationReceipt<void>;
-  listParents<TParentCollection extends string>(child: DbRowRef): Promise<Array<DbRowRef<TParentCollection>>>;
-  addMember(row: DbRowLocator, username: string, role: MemberRole): MutationReceipt<void>;
-  removeMember(row: DbRowLocator, username: string): MutationReceipt<void>;
-  listDirectMembers(row: DbRowLocator): Promise<Array<{ username: string; role: MemberRole }>>;
-  listEffectiveMembers(row: DbRowLocator): Promise<Array<DbMemberInfo<Schema>>>;
-  refreshFields(row: DbRowLocator): Promise<Record<string, JsonValue>>;
-  connectCrdt(row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection;
-  listMembers(row: DbRowLocator): Promise<string[]>;
+  addParent(child: RowRef, parent: RowRef): MutationReceipt<void>;
+  removeParent(child: RowRef, parent: RowRef): MutationReceipt<void>;
+  listParents<TParentCollection extends string>(child: RowRef): Promise<Array<RowRef<TParentCollection>>>;
+  addMember(row: RowRef, username: string, role: MemberRole): MutationReceipt<void>;
+  removeMember(row: RowRef, username: string): MutationReceipt<void>;
+  listDirectMembers(row: RowRef): Promise<Array<{ username: string; role: MemberRole }>>;
+  listEffectiveMembers(row: RowRef): Promise<Array<DbMemberInfo<Schema>>>;
+  refreshFields(row: RowRef): Promise<Record<string, JsonValue>>;
+  connectCrdt(row: RowRef, callbacks: CrdtConnectCallbacks): CrdtConnection;
+  listMembers(row: RowRef): Promise<string[]>;
 }
 
 export type AnyRowHandle<Schema extends DbSchema> = {
@@ -46,15 +45,15 @@ export class RowHandle<
 
   readonly owner: string;
 
-  readonly target: string;
+  readonly ref: RowRef<TCollection>;
 
   fields: TFields;
   settled: Promise<this>;
 
   readonly in: {
-    add: (parent: DbRowRef<TAllowedParentCollections>) => MutationReceipt<void>;
-    remove: (parent: DbRowRef<TAllowedParentCollections>) => MutationReceipt<void>;
-    list: () => Promise<Array<DbRowRef<TAllowedParentCollections>>>;
+    add: (parent: RowRef<TAllowedParentCollections>) => MutationReceipt<void>;
+    remove: (parent: RowRef<TAllowedParentCollections>) => MutationReceipt<void>;
+    list: () => Promise<Array<RowRef<TAllowedParentCollections>>>;
   };
 
   readonly members: {
@@ -67,51 +66,43 @@ export class RowHandle<
 
   constructor(
     private readonly backend: RowHandleBackend<TSchema>,
-    row: DbRowRef<TCollection>,
+    row: RowRef<TCollection>,
+    owner: string,
     fields: TFields,
   ) {
     this.id = row.id;
     this.collection = row.collection;
-    this.owner = row.owner;
-    this.target = row.target;
+    this.owner = owner;
+    this.ref = row;
     this.fields = fields;
     this.settled = Promise.resolve(this);
 
     this.in = {
-      add: (parent: DbRowRef<TAllowedParentCollections>) => this.backend.addParent(this.toRef(), parent),
-      remove: (parent: DbRowRef<TAllowedParentCollections>) => this.backend.removeParent(this.toRef(), parent),
-      list: async () => this.backend.listParents<TAllowedParentCollections>(this.toRef()),
+      add: (parent: RowRef<TAllowedParentCollections>) => this.backend.addParent(this.ref, parent),
+      remove: (parent: RowRef<TAllowedParentCollections>) => this.backend.removeParent(this.ref, parent),
+      list: async () => this.backend.listParents<TAllowedParentCollections>(this.ref),
     };
 
     this.members = {
-      add: (username: string, options: { role: MemberRole }) => this.backend.addMember(this.toRef(), username, options.role),
-      remove: (username: string) => this.backend.removeMember(this.toRef(), username),
-      list: async () => this.backend.listDirectMembers(this.toRef()),
-      effective: async () => this.backend.listEffectiveMembers(this.toRef()),
-      listAll: async () => this.backend.listMembers(this.toRef()),
+      add: (username: string, options: { role: MemberRole }) => this.backend.addMember(this.ref, username, options.role),
+      remove: (username: string) => this.backend.removeMember(this.ref, username),
+      list: async () => this.backend.listDirectMembers(this.ref),
+      effective: async () => this.backend.listEffectiveMembers(this.ref),
+      listAll: async () => this.backend.listMembers(this.ref),
     };
   }
 
   connectCrdt(callbacks: CrdtConnectCallbacks): CrdtConnection {
-    return this.backend.connectCrdt(this.toRef(), callbacks);
+    return this.backend.connectCrdt(this.ref, callbacks);
   }
 
   async refresh(): Promise<TFields> {
-    this.fields = await this.backend.refreshFields(this.toRef()) as TFields;
+    this.fields = await this.backend.refreshFields(this.ref) as TFields;
     return this.fields;
   }
 
   attachSettlement(receipt: Pick<MutationReceipt<unknown>, "settled">): this {
     this.settled = receipt.settled.then(() => this);
     return this;
-  }
-
-  toRef(): DbRowRef<TCollection> {
-    return {
-      id: this.id,
-      collection: this.collection,
-      owner: this.owner,
-      target: this.target,
-    };
   }
 }

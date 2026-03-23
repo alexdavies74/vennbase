@@ -39,7 +39,7 @@ export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
   const [tagInput, setTagInput] = useState("");
   const [validationError, setValidationError] = useState("");
   const tagsQuery = useQuery(db, "tags", {
-    in: row.toRef(),
+    in: row.ref,
     index: "byCreatedAt",
     order: "asc",
     limit: 100,

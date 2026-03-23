@@ -4,7 +4,7 @@ import {
   defineSchema,
   field,
   index,
-  type DbRowRef,
+  type RowRef,
 } from "./schema";
 
 const typeTestSchema = defineSchema({
@@ -33,11 +33,11 @@ const typeTestSchema = defineSchema({
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameTarget: field.string(),
+      gameRef: field.ref("projects"),
       role: field.string(),
     },
     indexes: {
-      byGameTarget: index("gameTarget"),
+      byGameRef: index("gameRef"),
     },
   }),
   mixedRecords: collection({
@@ -48,9 +48,9 @@ const typeTestSchema = defineSchema({
   }),
 });
 
-declare const projectRef: DbRowRef<"projects">;
-declare const teamRef: DbRowRef<"teams">;
-declare const userRef: DbRowRef<"user">;
+declare const projectRef: RowRef<"projects">;
+declare const teamRef: RowRef<"teams">;
+declare const userRef: RowRef<"user">;
 
 const db = new PutBase({
   schema: typeTestSchema,
@@ -60,8 +60,8 @@ const db = new PutBase({
 // @ts-expect-error tasks require an explicit project scope on insert
 void db.put("tasks", { title: "Ship v2" });
 void db.put("tasks", { title: "Ship v2", points: 3 }, { in: projectRef });
-void db.put("gameRecords", { gameTarget: "https://workers.example/rows/game_1", role: "owner" });
-void db.put("gameRecords", { gameTarget: "https://workers.example/rows/game_1", role: "owner" }, { in: userRef });
+void db.put("gameRecords", { gameRef: projectRef, role: "owner" });
+void db.put("gameRecords", { gameRef: projectRef, role: "owner" }, { in: userRef });
 
 // @ts-expect-error tasks.title is required on insert
 void db.put("tasks", {});
@@ -73,7 +73,7 @@ void db.query("tasks", { in: projectRef, where: { status: "done" } });
 void db.query("tasks", { in: projectRef, index: "byStatus", value: "done" });
 void db.query("tasks", { in: projectRef, index: "byTitleStatus", value: ["Ship v2", "done"] });
 void db.query("gameRecords", { where: { role: "owner" } });
-void db.query("gameRecords", { index: "byGameTarget", value: "https://workers.example/rows/game_1" });
+void db.query("gameRecords", { index: "byGameRef", value: projectRef });
 
 // @ts-expect-error invalid where field
 void db.query("tasks", { in: projectRef, where: { missing: "nope" } });
@@ -116,28 +116,13 @@ void task.in.list().then((parents) => {
 // @ts-expect-error tasks can only link to projects
 void task.in.add(teamRef);
 
-void db.openTarget("https://workers.example/rows/row_1").then((row) => {
-  const collection: "projects" | "teams" | "tasks" | "gameRecords" | "mixedRecords" = row.collection;
+void db.getRow(projectRef).then((row) => {
+  const collection: "projects" = row.collection;
   void collection;
 
-  if (row.collection === "projects" || row.collection === "teams") {
+  if (row.collection === "projects") {
     const name: string = row.fields.name;
     void name;
-  }
-
-  if (row.collection === "tasks") {
-    const title: string = row.fields.title;
-    void title;
-  }
-
-  if (row.collection === "gameRecords") {
-    const role: string = row.fields.role;
-    void role;
-  }
-
-  if (row.collection === "mixedRecords") {
-    const label: string = row.fields.label;
-    void label;
   }
 });
 

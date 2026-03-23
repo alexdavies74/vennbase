@@ -9,10 +9,9 @@ import {
 } from "@putbase/core";
 import type {
   DbMemberInfo,
-  DbRowLocator,
-  DbRowRef,
   MemberRole,
   MutationReceipt,
+  RowRef,
   RowHandleBackend,
 } from "@putbase/core";
 import type { ChatMessage } from "@heyputer/puter.js";
@@ -62,15 +61,42 @@ function decodeUpdate(body: unknown): Uint8Array | null {
   }
 }
 
+function rowUrl(row: RowRef): string {
+  return `${row.baseUrl}/rows/${row.id}`;
+}
+
+function dogRef(id: string): RowRef<"dogs"> {
+  return {
+    id,
+    collection: "dogs",
+    baseUrl: "https://workers.puter.site/alex",
+  };
+}
+
+function tagRef(id: string): RowRef<"tags"> {
+  return {
+    id,
+    collection: "tags",
+    baseUrl: "https://workers.puter.site/alex",
+  };
+}
+
+function dogHistoryRef(id: string): RowRef<"dogHistory"> {
+  return {
+    id,
+    collection: "dogHistory",
+    baseUrl: "https://workers.puter.site/alex",
+  };
+}
+
 class MockDb implements WoofDbPort {
-  public failOpenTarget = false;
   public readonly memberList = ["alex", "friend"];
   public crdtCallbacks: CrdtConnectCallbacks | null = null;
 
   public putCalls: Array<{
     collection: string;
     fields: Record<string, unknown>;
-    options?: { in?: ReturnType<DogRowHandle["toRef"]> };
+    options?: { in?: RowRef<"dogs"> };
   }> = [];
 
   private readonly rowFields = new Map<string, Record<string, unknown>>();
@@ -81,7 +107,7 @@ class MockDb implements WoofDbPort {
   private readonly backend: RowHandleBackend<WoofSchema> = {
     addParent: () => settledReceipt(undefined),
     removeParent: () => settledReceipt(undefined),
-    listParents: async <TParentCollection extends string>() => [] as Array<DbRowRef<TParentCollection>>,
+    listParents: async <TParentCollection extends string>() => [] as Array<RowRef<TParentCollection>>,
     addMember: () => settledReceipt(undefined),
     removeMember: () => settledReceipt(undefined),
     listDirectMembers: async () => this.memberList.map((username) => ({
@@ -93,10 +119,10 @@ class MockDb implements WoofDbPort {
       role: this.roleFor(username),
       via: "direct",
     })) as Array<DbMemberInfo<WoofSchema>>,
-    refreshFields: async (row: DbRowLocator) => this.readFields(row.id),
-    connectCrdt: (row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection => {
+    refreshFields: async (row: RowRef) => this.readFields(row.id),
+    connectCrdt: (row: RowRef, callbacks: CrdtConnectCallbacks): CrdtConnection => {
       this.crdtCallbacks = callbacks;
-      const storedDoc = this.getRowDoc(row.target);
+      const storedDoc = this.getRowDoc(rowUrl(row));
       const storedMessages = storedDoc.getArray("messages");
       if (storedMessages.length > 0) {
         const update = Y.encodeStateAsUpdate(storedDoc);
@@ -118,7 +144,7 @@ class MockDb implements WoofDbPort {
             return;
           }
 
-          Y.applyUpdate(this.getRowDoc(row.target), decoded, "local-test");
+          Y.applyUpdate(this.getRowDoc(rowUrl(row)), decoded, "local-test");
         },
       };
     },
@@ -145,48 +171,32 @@ class MockDb implements WoofDbPort {
   }
 
   private makeDogRow(id: string, fields: Record<string, unknown>): DogRowHandle {
-    const target = `https://workers.puter.site/alex/rows/${id}`;
-    const rowRef: ReturnType<DogRowHandle["toRef"]> = {
-      id,
-      collection: "dogs",
-      owner: "alex",
-      target,
-    };
+    const rowRef = dogRef(id);
     const rowFields: DogFields = {
       name: typeof fields.name === "string" ? fields.name : "",
     };
     this.rowFields.set(id, rowFields);
-    return new RowHandle(this.backend, rowRef, rowFields);
+    return new RowHandle(this.backend, rowRef, "alex", rowFields);
   }
 
   private makeTagRow(id: string, fields: Record<string, unknown>): TagRowHandle {
-    const rowRef: ReturnType<TagRowHandle["toRef"]> = {
-      id,
-      collection: "tags",
-      owner: "alex",
-      target: `https://workers.puter.site/alex/rows/${id}`,
-    };
+    const rowRef = tagRef(id);
     const rowFields: TagFields = {
       label: typeof fields.label === "string" ? fields.label : "",
       createdBy: typeof fields.createdBy === "string" ? fields.createdBy : "",
       createdAt: typeof fields.createdAt === "number" ? fields.createdAt : 0,
     };
     this.rowFields.set(id, rowFields);
-    return new RowHandle(this.backend, rowRef, rowFields);
+    return new RowHandle(this.backend, rowRef, "alex", rowFields);
   }
 
   private makeDogHistoryRow(id: string, fields: Record<string, unknown>): DogHistoryRowHandle {
-    const rowRef: ReturnType<DogHistoryRowHandle["toRef"]> = {
-      id,
-      collection: "dogHistory",
-      owner: "alex",
-      target: `https://workers.puter.site/alex/rows/${id}`,
-    };
+    const rowRef = dogHistoryRef(id);
     const rowFields: DogHistoryFields = {
-      dogTarget: typeof fields.dogTarget === "string" ? fields.dogTarget : "",
+      dogRef: fields.dogRef as RowRef<"dogs"> ?? dogRef("row_created"),
       status: typeof fields.status === "string" ? fields.status : "inactive",
     };
-    const row = new RowHandle(this.backend, rowRef, rowFields);
+    const row = new RowHandle(this.backend, rowRef, "alex", rowFields);
     this.rowFields.set(id, rowFields);
     this.historyRows.set(id, row);
     return row;
@@ -201,12 +211,12 @@ class MockDb implements WoofDbPort {
   put(
     collection: "tags",
     fields: TagRowHandle["fields"],
-    options: { in: ReturnType<DogRowHandle["toRef"]> },
+    options: { in: RowRef<"dogs"> },
   ): TagRowHandle;
   put(
     collection: "dogs" | "dogHistory" | "tags",
     fields: Record<string, unknown>,
-    options?: { in?: ReturnType<DogRowHandle["toRef"]> },
+    options?: { in?: RowRef<"dogs"> },
   ): DogRowHandle | DogHistoryRowHandle | TagRowHandle {
     this.putCalls.push({ collection, fields, options });
     if (collection === "dogs") {
@@ -224,11 +234,13 @@ class MockDb implements WoofDbPort {
 
   async query(
     collection: "dogHistory",
-    options: { where?: { status?: string }; index?: "byDogTarget"; value?: string; limit?: number },
+    options: { where?: { status?: string }; index?: "byDogRef"; value?: RowRef<"dogs">; limit?: number },
   ): Promise<DogHistoryRowHandle[]> {
     const rows = Array.from(this.historyRows.values());
-    const filtered = options.index === "byDogTarget"
-      ? rows.filter((row) => row.fields.dogTarget === options.value)
+    const filtered = options.index === "byDogRef"
+      ? rows.filter((row) =>
+        row.fields.dogRef.id === options.value?.id
+        && row.fields.dogRef.baseUrl === options.value.baseUrl)
       : options.where?.status
         ? rows.filter((row) => row.fields.status === options.where?.status)
         : rows;
@@ -237,7 +249,7 @@ class MockDb implements WoofDbPort {
 
   update(
     collection: "dogHistory",
-    row: DogHistoryRowHandle,
+    row: RowRef<"dogHistory">,
     fields: Partial<DogHistoryFields>,
   ): DogHistoryRowHandle {
     const existing = this.historyRows.get(row.id);
@@ -253,21 +265,11 @@ class MockDb implements WoofDbPort {
     return existing;
   }
 
-  async openTarget(target: string): Promise<DogRowHandle> {
-    if (this.failOpenTarget) {
-      throw new Error("row lookup failed");
-    }
-    const joined = target.includes("row_joined");
-    const id = joined ? "row_joined" : "row_created";
-    const name = joined ? "Joined Canonical" : "Rex Canonical";
-    return this.makeDogRow(id, { name });
-  }
-
   async openInvite(_input: string): Promise<DogRowHandle> {
     return this.makeDogRow("row_joined", { name: "Joined" });
   }
 
-  async listMembers(_row: DogRowHandle): Promise<string[]> {
+  async listMembers(_row: RowRef): Promise<string[]> {
     return this.memberList;
   }
 }
@@ -295,7 +297,7 @@ describe("WoofService", () => {
     const row = service.enterChat({ dogName: "Rex" });
 
     expect(row.id).toBe("row_created");
-    expect(row.target).toBe("https://workers.puter.site/alex/rows/row_created");
+    expect(row.ref).toEqual(dogRef("row_created"));
   });
 
   it("narrows app rows to dogs rows", async () => {
@@ -322,8 +324,7 @@ describe("WoofService", () => {
     expect(tagCall!.options?.in).toMatchObject({
       id: row.id,
       collection: "dogs",
-      owner: row.owner,
-      target: row.target,
+      baseUrl: row.ref.baseUrl,
     });
   });
 

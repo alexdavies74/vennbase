@@ -63,7 +63,7 @@ export class WoofService {
     args: { content: string; doc: Y.Doc; flush?: () => Promise<void>; puterAI?: PuterAI },
   ): Promise<void> {
     const actor = await this.db.whoAmI();
-    const members = await this.db.listMembers(row);
+    const members = await this.db.listMembers(row.ref);
     const dogName = String(row.fields.name ?? "");
     const chatArray = getChatArray(args.doc);
 
@@ -126,7 +126,7 @@ export class WoofService {
         createdAt: Date.now(),
       },
       {
-        in: row.toRef(),
+        in: row.ref,
       },
     );
   }
@@ -137,13 +137,13 @@ export class WoofService {
 
   activateHistory(row: DogRowHandle): void {
     const historyRow = this.db.put("dogHistory", {
-      dogTarget: row.target,
+      dogRef: row.ref,
       status: "active",
     });
     void this.clearActiveHistory(historyRow.id).catch((error) => {
       console.error("[woof-app] failed to clear prior active dog history rows", {
         error,
-        target: row.target,
+        rowRef: row.ref,
       });
     });
   }
@@ -159,7 +159,7 @@ export class WoofService {
         historyRow.id === keepHistoryRowId
           ? Promise.resolve(historyRow)
           :
-        this.db.update("dogHistory", historyRow, { status: "inactive" })),
+        this.db.update("dogHistory", historyRow.ref, { status: "inactive" })),
     );
   }
 

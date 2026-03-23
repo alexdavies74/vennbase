@@ -22,22 +22,20 @@ import type {
   CollectionName,
   DbMemberInfo,
   DbPutArgs,
-  DbRowLocator,
   DbPutOptions,
   DbQueryOptions,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
-  DbRowRef,
   DbSchema,
   InsertFields,
   MemberRole,
+  RowRef,
   RowFields,
 } from "./schema";
 import { resolveBackend } from "./backend";
 import { missingPuterProvisioningMessage } from "./errors";
 import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, getCollectionSpec, hasImplicitUserScope, resolveCollectionName } from "./schema";
 import { stableJsonStringify } from "./stable-json";
-import { normalizeTarget } from "./transport";
 import { Transport } from "./transport";
 import type {
   AuthSession,
@@ -45,12 +43,13 @@ import type {
   CrdtConnectCallbacks,
   CrdtConnection,
   DeployWorkerArgs,
-  InviteTarget,
   InviteToken,
   JsonValue,
+  ParsedInvite,
   PutBaseUser,
 } from "./types";
 import { Sync } from "./sync";
+import { normalizeRowRef, rowRefKey } from "./row-reference";
 
 export interface PutBaseOptions<Schema extends DbSchema = DbSchema> {
   schema: Schema;
@@ -69,7 +68,7 @@ interface CachedRowHandle<Schema extends DbSchema> {
 interface ReadyMutationState {
   user: PutBaseUser;
   federationWorkerUrl: string;
-  userScopeRow: DbRowRef<typeof USER_SCOPE_COLLECTION> | null;
+  userScopeRow: RowRef<typeof USER_SCOPE_COLLECTION> | null;
 }
 
 const INTERNAL_USER_SCOPE_ROW_KEY = "__putbase_user_scope_v1__";
@@ -121,7 +120,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       options.schema,
       this.optimisticStore,
       this.writeSettler,
-      (collection, row, fields) => this.materializeRowHandle(collection, row, fields),
+      (collection, row, owner, fields) => this.materializeRowHandle(collection, row, owner, fields),
       (child, parent) => this.parentsModule.addRemote(child, parent),
       () => this.notifyLocalMutation(),
     );
@@ -133,7 +132,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     );
     this.queryModule = new Query(
       this.transport,
-      { getRow: (collection, row) => this.rowsModule.getRow(collection, row) },
+      { getRow: (row) => this.rowsModule.getRow(row) },
       this.optimisticStore,
       options.schema,
       (collection, queryOptions) => this.resolveImplicitQueryOptions(collection, queryOptions),
@@ -160,7 +159,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.identity.whoAmI();
   }
 
-  async rememberPerUserRow(rowKey: string, row: Pick<DbRowLocator, "target">): Promise<void> {
+  async rememberPerUserRow(rowKey: string, row: RowRef): Promise<void> {
     const user = await this.identity.whoAmI();
     await rememberPerUserRow(resolveBackend(this.options.backend), user.username, rowKey, row);
   }
@@ -176,7 +175,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       return null;
     }
 
-    return this.openTarget(rememberedRow.target);
+    return this.getRow(rememberedRow as RowRef<CollectionName<Schema>>);
   }
 
   async clearRememberedPerUserRow(rowKey: string): Promise<void> {
@@ -197,7 +196,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   update<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    row: DbRowRef<TCollection>,
+    row: RowRef<TCollection>,
     fields: Partial<RowFields<Schema, TCollection>>,
   ): RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema> {
     const updated = this.rowsModule.update(collection, row, fields);
@@ -206,31 +205,9 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   }
 
   async getRow<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    row: DbRowRef<TCollection>,
+    row: RowRef<TCollection>,
   ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>> {
-    return this.rowsModule.getRow(collection, row);
-  }
-
-  async openTarget(target: string): Promise<AnyRowHandle<Schema>> {
-    const optimisticRow = this.optimisticStore.getRowByTarget(normalizeTarget(target));
-    if (optimisticRow) {
-      return this.createRuntimeRowHandle(
-        optimisticRow.collection as CollectionName<Schema>,
-        optimisticRow.row,
-        this.optimisticStore.getLogicalFields(optimisticRow.row) ?? {},
-      );
-    }
-
-    const snapshot = await this.rowRuntime.getRow(target);
-    const locator: DbRowLocator = {
-      id: snapshot.id,
-      owner: snapshot.owner,
-      target: normalizeTarget(target),
-    };
-    const { fields, collection: discoveredCollection } = await this.rowsModule.fetchWithCollection(locator);
-    const collection = resolveCollectionName(this.options.schema, discoveredCollection ?? snapshot.collection);
-    return this.createRuntimeRowHandle(collection, locator, fields);
+    return this.rowsModule.getRow(row);
   }
 
   async query<TCollection extends CollectionName<Schema>>(
@@ -248,11 +225,11 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.queryModule.watchQuery(collection, options, callbacks);
   }
 
-  async getExistingInviteToken(row: DbRowRef): Promise<InviteToken | null> {
+  async getExistingInviteToken(row: RowRef): Promise<InviteToken | null> {
     return this.optimisticStore.getInviteToken(row) ?? this.invitesModule.getExistingInviteToken(row);
   }
 
-  createInviteToken(row: DbRowRef): MutationReceipt<InviteToken> {
+  createInviteToken(row: RowRef): MutationReceipt<InviteToken> {
     const state = this.assertReadyForMutation();
     const inviteToken = this.writePlanner.planInviteToken({
       rowId: row.id,
@@ -263,7 +240,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.notifyLocalMutation();
 
     this.scheduleConfirmableWrite({
-      key: `invite:${row.owner}:${row.id}`,
+      key: `invite:${rowRefKey(row)}`,
       operation: () => this.invitesModule.createInviteTokenRemote(row, inviteToken),
       confirm: () => this.optimisticStore.clearInviteToken(row),
       rollback: () => this.optimisticStore.clearInviteToken(row),
@@ -274,38 +251,38 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return receipt;
   }
 
-  createInviteLink(row: Pick<DbRowLocator, "target">, inviteToken: string): string {
+  createInviteLink(row: RowRef, inviteToken: string): string {
     return this.invitesModule.createInviteLink(row, inviteToken);
   }
 
-  parseInvite(input: string): InviteTarget {
+  parseInvite(input: string): ParsedInvite {
     return this.invitesModule.parseInvite(input);
   }
 
-  async openInvite(input: string | InviteTarget): Promise<AnyRowHandle<Schema>> {
+  async openInvite(input: string | ParsedInvite): Promise<AnyRowHandle<Schema>> {
     const invite = typeof input === "string" ? this.parseInvite(input) : input;
-    await this.rowRuntime.joinRow(invite.target, {
+    await this.rowRuntime.joinRow(invite.ref, {
       inviteToken: invite.inviteToken,
     });
-    const row = await this.openTarget(invite.target);
+    const row = await this.getRow(invite.ref as RowRef<CollectionName<Schema>>) as AnyRowHandle<Schema>;
     this.notifyLocalMutation();
     return row;
   }
 
-  async listMembers(row: DbRowLocator): Promise<string[]> {
-    const rowRef = toMemberRowRef(row);
+  async listMembers(row: RowRef): Promise<string[]> {
+    const rowRef = normalizeRowRef(row);
     if (this.optimisticStore.getPendingCreateDependency(rowRef)) {
       return Array.from(new Set([
-        row.owner,
+        this.optimisticStore.getOwner(rowRef) ?? this.readyMutationState?.user.username ?? "",
         ...(this.readyMutationState ? [this.readyMutationState.user.username] : []),
-      ]));
+      ].filter(Boolean)));
     }
-    const usernames = await this.rowRuntime.listMembers(row.target);
+    const usernames = await this.rowRuntime.listMembers(rowRef);
     const directMembers = await this.listDirectMembers(row);
     return Array.from(new Set([...usernames, ...directMembers.map((member) => member.username)]));
   }
 
-  addParent(child: DbRowRef, parent: DbRowRef): MutationReceipt<void> {
+  addParent(child: RowRef, parent: RowRef): MutationReceipt<void> {
     this.assertReadyForMutation();
     this.optimisticStore.addParent(child, parent);
     const receipt = createMutationReceipt(undefined);
@@ -316,7 +293,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     ].filter((dependency): dependency is Promise<unknown> => dependency !== null);
 
     this.scheduleConfirmableWrite({
-      key: `parent-add:${child.owner}:${child.id}`,
+      key: `parent-add:${rowRefKey(child)}`,
       operation: () => this.parentsModule.addRemote(child, parent),
       confirm: () => this.optimisticStore.confirmParentAdd(child, parent),
       rollback: () => this.optimisticStore.rollbackParentAdd(child, parent),
@@ -327,13 +304,13 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return receipt;
   }
 
-  removeParent(child: DbRowRef, parent: DbRowRef): MutationReceipt<void> {
+  removeParent(child: RowRef, parent: RowRef): MutationReceipt<void> {
     this.assertReadyForMutation();
     this.optimisticStore.removeParent(child, parent);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
     this.scheduleConfirmableWrite({
-      key: `parent-remove:${child.owner}:${child.id}`,
+      key: `parent-remove:${rowRefKey(child)}`,
       operation: () => this.parentsModule.removeRemote(child, parent),
       confirm: () => this.optimisticStore.confirmParentRemove(child, parent),
       rollback: () => this.optimisticStore.rollbackParentRemove(child, parent),
@@ -344,24 +321,24 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return receipt;
   }
 
-  async listParents<TParentCollection extends string>(child: DbRowRef): Promise<Array<DbRowRef<TParentCollection>>> {
+  async listParents<TParentCollection extends string>(child: RowRef): Promise<Array<RowRef<TParentCollection>>> {
     if (this.optimisticStore.getPendingCreateDependency(child)) {
-      return this.optimisticStore.getCurrentParents(child, []) as Array<DbRowRef<TParentCollection>>;
+      return this.optimisticStore.getCurrentParents(child, []) as Array<RowRef<TParentCollection>>;
     }
     const serverParents = await this.parentsModule.list<TParentCollection>(child);
-    this.optimisticStore.recordParents(child, serverParents as DbRowRef[]);
-    return this.optimisticStore.getCurrentParents(child, serverParents as DbRowRef[]) as Array<DbRowRef<TParentCollection>>;
+    this.optimisticStore.recordParents(child, serverParents as RowRef[]);
+    return this.optimisticStore.getCurrentParents(child, serverParents as RowRef[]) as Array<RowRef<TParentCollection>>;
   }
 
-  addMember(row: DbRowLocator, username: string, role: MemberRole): MutationReceipt<void> {
+  addMember(row: RowRef, username: string, role: MemberRole): MutationReceipt<void> {
     this.assertReadyForMutation();
-    const rowRef = toMemberRowRef(row);
+    const rowRef = normalizeRowRef(row);
     this.optimisticStore.addMember(rowRef, username, role);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
     this.scheduleConfirmableWrite({
-      key: `member-add:${row.owner}:${row.id}:${username}`,
-      operation: () => this.membersModule.addRemote(row, username, role),
+      key: `member-add:${rowRefKey(rowRef)}:${username}`,
+      operation: () => this.membersModule.addRemote(rowRef, username, role),
       confirm: () => this.optimisticStore.confirmMemberMutation(rowRef),
       rollback: () => this.optimisticStore.rollbackMemberMutation(rowRef),
       dependencies: [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
@@ -371,15 +348,15 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return receipt;
   }
 
-  removeMember(row: DbRowLocator, username: string): MutationReceipt<void> {
+  removeMember(row: RowRef, username: string): MutationReceipt<void> {
     this.assertReadyForMutation();
-    const rowRef = toMemberRowRef(row);
+    const rowRef = normalizeRowRef(row);
     this.optimisticStore.removeMember(rowRef, username);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
     this.scheduleConfirmableWrite({
-      key: `member-remove:${row.owner}:${row.id}:${username}`,
-      operation: () => this.membersModule.removeRemote(row, username),
+      key: `member-remove:${rowRefKey(rowRef)}:${username}`,
+      operation: () => this.membersModule.removeRemote(rowRef, username),
       confirm: () => this.optimisticStore.confirmMemberMutation(rowRef),
       rollback: () => this.optimisticStore.rollbackMemberMutation(rowRef),
       dependencies: [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
@@ -389,19 +366,19 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return receipt;
   }
 
-  async listDirectMembers(row: DbRowLocator): Promise<Array<{ username: string; role: MemberRole }>> {
-    const rowRef = toMemberRowRef(row);
+  async listDirectMembers(row: RowRef): Promise<Array<{ username: string; role: MemberRole }>> {
+    const rowRef = normalizeRowRef(row);
     const optimisticDirect = this.optimisticStore.getDirectMembers(rowRef);
     if (optimisticDirect && this.optimisticStore.getPendingCreateDependency(rowRef)) {
       return optimisticDirect;
     }
-    const direct = await this.membersModule.listDirect(row);
+    const direct = await this.membersModule.listDirect(rowRef);
     this.optimisticStore.recordDirectMembers(rowRef, direct);
     return this.optimisticStore.getDirectMembers(rowRef) ?? direct;
   }
 
-  async listEffectiveMembers(row: DbRowLocator): Promise<Array<DbMemberInfo<Schema>>> {
-    const rowRef = toMemberRowRef(row);
+  async listEffectiveMembers(row: RowRef): Promise<Array<DbMemberInfo<Schema>>> {
+    const rowRef = normalizeRowRef(row);
     if (this.optimisticStore.getPendingCreateDependency(rowRef)) {
       const direct = this.optimisticStore.getDirectMembers(rowRef) ?? [];
       return direct.map((member) => ({
@@ -410,15 +387,15 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
         via: "direct",
       })) as Array<DbMemberInfo<Schema>>;
     }
-    const effective = await this.membersModule.listEffective(row);
+    const effective = await this.membersModule.listEffective(rowRef);
     return this.optimisticStore.getEffectiveMembers(rowRef, effective);
   }
 
-  async refreshFields(row: DbRowLocator): Promise<Record<string, JsonValue>> {
+  async refreshFields(row: RowRef): Promise<Record<string, JsonValue>> {
     return this.rowsModule.refreshFields(row);
   }
 
-  connectCrdt(row: DbRowLocator, callbacks: CrdtConnectCallbacks): CrdtConnection {
+  connectCrdt(row: RowRef, callbacks: CrdtConnectCallbacks): CrdtConnection {
     return this.syncModule.connectCrdt(row, callbacks);
   }
 
@@ -530,24 +507,26 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
   private createRuntimeRowHandle<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    locator: DbRowLocator,
+    row: RowRef<TCollection>,
+    owner: string,
     fields: Record<string, JsonValue>,
   ): AnyRowHandle<Schema> {
-    return this.materializeRowHandle(collection, locator, fields) as unknown as AnyRowHandle<Schema>;
+    return this.materializeRowHandle(collection, row, owner, fields) as unknown as AnyRowHandle<Schema>;
   }
 
   private materializeRowHandle<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    locator: DbRowLocator,
+    row: RowRef<TCollection>,
+    owner: string,
     fields: Record<string, JsonValue>,
   ): RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema> {
-    const normalizedTarget = normalizeTarget(locator.target);
-    const cacheKey = `${collection}:${locator.owner}:${locator.id}:${normalizedTarget}`;
+    const rowRef = normalizeRowRef(row);
+    const cacheKey = `${collection}:${rowRefKey(rowRef)}`;
     const snapshot = stableJsonStringify({
-      id: locator.id,
+      id: rowRef.id,
       collection,
-      owner: locator.owner,
-      target: normalizedTarget,
+      owner,
+      ref: rowRef,
       fields,
     });
     const cached = this.rowHandleCache.get(cacheKey);
@@ -562,23 +541,9 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
         handle.fields = fields as RowFields<Schema, TCollection>;
         cached.snapshot = snapshot;
       }
-      this.optimisticStore.upsertBaseRow(
-        {
-          ...locator,
-          target: normalizedTarget,
-          collection,
-        },
-        collection,
-        fields,
-      );
+      this.optimisticStore.upsertBaseRow(rowRef, owner, collection, fields);
       return handle;
     }
-
-    const rowRef: DbRowRef<TCollection> = {
-      ...locator,
-      target: normalizedTarget,
-      collection,
-    };
 
     const handle = new RowHandle<
       TCollection,
@@ -588,13 +553,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     >(
       this,
       rowRef,
+      owner,
       fields as RowFields<Schema, TCollection>,
     );
     this.rowHandleCache.set(cacheKey, {
       handle: handle as unknown as AnyRowHandle<Schema>,
       snapshot,
     });
-    this.optimisticStore.upsertBaseRow(rowRef, collection, fields);
+    this.optimisticStore.upsertBaseRow(rowRef, owner, collection, fields);
     return handle;
   }
 
@@ -688,7 +654,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   private async ensureCurrentUserScopeRow(
     usernameOverride?: string,
     skipSharedReadiness = false,
-  ): Promise<DbRowRef<typeof USER_SCOPE_COLLECTION>> {
+  ): Promise<RowRef<typeof USER_SCOPE_COLLECTION>> {
     if (!skipSharedReadiness && !this.readyMutationState) {
       await this.awaitSharedReadiness();
     }
@@ -704,7 +670,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     );
 
     if (rememberedRow) {
-      const remembered = await this.resolveUserScopeRowFromTarget(rememberedRow.target, user.username);
+      const remembered = await this.resolveUserScopeRowFromRef(rememberedRow, user.username);
       if (remembered) {
         return remembered;
       }
@@ -712,11 +678,10 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
 
     const plan = this.rowRuntime.planRow(`${USER_SCOPE_COLLECTION}-scope-${crypto.randomUUID().slice(0, 8)}`);
     const created = await this.rowRuntime.commitPlannedRow(plan);
-    const rowRef: DbRowRef<typeof USER_SCOPE_COLLECTION> = {
+    const rowRef: RowRef<typeof USER_SCOPE_COLLECTION> = {
       id: created.id,
-      owner: created.owner,
-      target: normalizeTarget(created.target),
       collection: USER_SCOPE_COLLECTION,
+      baseUrl: created.baseUrl,
     };
 
     await this.transport.row(rowRef).request("fields/set", {
@@ -735,36 +700,23 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     return this.readyMutationState;
   }
 
-  private async resolveUserScopeRowFromTarget(
-    target: string,
+  private async resolveUserScopeRowFromRef(
+    rowRef: RowRef,
     username: string,
-  ): Promise<DbRowRef<typeof USER_SCOPE_COLLECTION> | null> {
+  ): Promise<RowRef<typeof USER_SCOPE_COLLECTION> | null> {
     try {
-      const snapshot = await this.rowRuntime.getRow(target);
+      const snapshot = await this.rowRuntime.getRow(rowRef);
       if (snapshot.collection !== USER_SCOPE_COLLECTION || snapshot.owner !== username) {
         return null;
       }
 
       return {
         id: snapshot.id,
-        owner: snapshot.owner,
-        target: normalizeTarget(snapshot.target),
         collection: USER_SCOPE_COLLECTION,
+        baseUrl: snapshot.baseUrl,
       };
     } catch {
       return null;
     }
   }
-}
-
-function toMemberRowRef(row: DbRowLocator): DbRowRef {
-  const collection = "collection" in row && typeof row.collection === "string"
-    ? row.collection
-    : "unknown";
-  return {
-    id: row.id,
-    owner: row.owner,
-    target: row.target,
-    collection,
-  };
 }

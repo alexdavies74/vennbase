@@ -6,11 +6,10 @@ import type {
   CollectionName,
   DbMemberInfo,
   DbQueryOptions,
-  DbRowLocator,
-  DbRowRef,
   DbSchema,
   MemberRole,
   PutBaseUser,
+  RowRef,
   RowFields,
 } from "@putbase/core";
 import type { RowHandle } from "@putbase/core";
@@ -94,7 +93,7 @@ function snapshotValue(value: unknown): string {
   return stableJsonStringify(canonicalizeKeyPart(value));
 }
 
-function isRowLocatorLike(value: unknown): value is DbRowLocator & { collection?: string } {
+function isRowRefLike(value: unknown): value is RowRef {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -102,23 +101,17 @@ function isRowLocatorLike(value: unknown): value is DbRowLocator & { collection?
   const record = value as Record<string, unknown>;
   return (
     typeof record.id === "string"
-    && typeof record.owner === "string"
-    && typeof record.target === "string"
+    && typeof record.collection === "string"
+    && typeof record.baseUrl === "string"
   );
 }
 
-function canonicalizeRowLocator(value: DbRowLocator & { collection?: string }): Record<string, string> {
-  const canonical: Record<string, string> = {
+function canonicalizeRowRef(value: RowRef): Record<string, string> {
+  return {
     id: value.id,
-    owner: value.owner,
-    target: value.target,
+    collection: value.collection,
+    baseUrl: value.baseUrl,
   };
-
-  if (typeof value.collection === "string") {
-    canonical.collection = value.collection;
-  }
-
-  return canonical;
 }
 
 function canonicalizeKeyPart(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -126,8 +119,8 @@ function canonicalizeKeyPart(value: unknown, seen = new WeakSet<object>()): unkn
     return value;
   }
 
-  if (isRowLocatorLike(value)) {
-    return canonicalizeRowLocator(value);
+  if (isRowRefLike(value)) {
+    return canonicalizeRowRef(value);
   }
 
   if (seen.has(value)) {
@@ -156,25 +149,24 @@ function snapshotRowHandle(row: {
   id: string;
   collection: string;
   owner: string;
-  target: string;
+  ref: RowRef;
   fields: unknown;
 }): string {
   return stableJsonStringify({
     id: row.id,
     collection: row.collection,
     owner: row.owner,
-    target: row.target,
+    ref: row.ref,
     fields: row.fields,
   });
 }
 
-function snapshotRowRefArray(value: DbRowRef[]): string {
+function snapshotRowRefArray(value: RowRef[]): string {
   return stableJsonStringify(
     value.map((row) => ({
       id: row.id,
       collection: row.collection,
-      owner: row.owner,
-      target: row.target,
+      baseUrl: row.baseUrl,
     })),
   );
 }
@@ -205,7 +197,7 @@ function snapshotQueryRows(value: Array<{
   id: string;
   collection: string;
   owner: string;
-  target: string;
+  ref: RowRef;
   fields: unknown;
 }>): string {
   return stableJsonStringify(
@@ -213,7 +205,7 @@ function snapshotQueryRows(value: Array<{
       id: row.id,
       collection: row.collection,
       owner: row.owner,
-      target: row.target,
+      ref: row.ref,
       fields: row.fields,
     })),
   );
@@ -494,25 +486,21 @@ export function makeQueryKey<Schema extends DbSchema, TCollection extends Collec
 
 export function makeRowKey<TCollection extends string>(
   collection: TCollection,
-  row: DbRowRef<TCollection>,
+  row: RowRef<TCollection>,
 ): string {
   return `row:${collection}:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeRowTargetKey(target: string): string {
-  return `row-target:${target}`;
-}
-
-export function makeParentsKey(row: DbRowLocator): string {
+export function makeParentsKey(row: RowRef): string {
   return `parents:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeMembersKey(kind: "usernames" | "direct" | "effective", row: DbRowLocator): string {
+export function makeMembersKey(kind: "usernames" | "direct" | "effective", row: RowRef): string {
   return `${kind}:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeInviteLinkKey(row: Pick<DbRowLocator, "target">): string {
-  return `invite-link:${row.target}`;
+export function makeInviteLinkKey(row: RowRef): string {
+  return `invite-link:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
 export function makeIncomingInviteKey(inviteInput: string): string {

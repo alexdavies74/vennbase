@@ -1,8 +1,14 @@
 import { encodeCompositeFieldValues, encodeFieldValue } from "./key-encoding";
 
-export type DbFieldValue = string | number | boolean;
+export interface RowRef<TCollection extends string = string> {
+  id: string;
+  collection: TCollection;
+  baseUrl: string;
+}
 
-export type FieldType = "string" | "number" | "boolean" | "date";
+export type DbFieldValue = string | number | boolean | RowRef;
+
+export type FieldType = "string" | "number" | "boolean" | "date" | "ref";
 
 export type DbRowFields = { [key: string]: DbFieldValue | undefined };
 
@@ -22,6 +28,7 @@ export interface DbFieldBuilder<
   readonly isOptional: TOptional;
   readonly hasDefault: THasDefault;
   readonly defaultValue: THasDefault extends true ? TValue : undefined;
+  readonly refCollections?: readonly string[];
   optional(): DbFieldBuilder<TValue, TType, true, THasDefault>;
   default(value: TValue): DbFieldBuilder<TValue, TType, TOptional, true>;
   readonly __value?: TValue;
@@ -39,6 +46,7 @@ function createFieldBuilder<
   isOptional: TOptional;
   hasDefault: THasDefault;
   defaultValue?: TValue;
+  refCollections?: readonly string[];
 }): DbFieldBuilder<TValue, TType, TOptional, THasDefault> {
   return {
     kind: "field",
@@ -46,6 +54,7 @@ function createFieldBuilder<
     isOptional: config.isOptional,
     hasDefault: config.hasDefault,
     defaultValue: config.defaultValue as THasDefault extends true ? TValue : undefined,
+    refCollections: config.refCollections,
     optional() {
       return createFieldBuilder<TValue, TType, true, THasDefault>({
         ...config,
@@ -89,6 +98,20 @@ export const field = {
       type: "date",
       isOptional: false,
       hasDefault: false,
+    });
+  },
+  ref<const TCollections extends string | readonly string[]>(collections: TCollections) {
+    type TCollectionName =
+      TCollections extends string ? TCollections
+        : TCollections extends readonly string[] ? TCollections[number]
+          : never;
+
+    const refCollections = Array.isArray(collections) ? [...collections] : [collections];
+    return createFieldBuilder<RowRef<TCollectionName>, "ref", false, false>({
+      type: "ref",
+      isOptional: false,
+      hasDefault: false,
+      refCollections,
     });
   },
 } as const;
@@ -248,32 +271,22 @@ export type AllowedParentCollections<
   ? NonNullable<Schema[TCollection]["in"]>[number]
   : never;
 
-export interface DbRowLocator {
-  id: string;
-  owner: string;
-  target: string;
-}
-
-export type DbRowRef<TCollection extends string = string> = DbRowLocator & {
-  collection: TCollection;
-};
-
 export type AnyRowRef<Schema extends DbSchema> = {
-  [TCollection in CollectionName<Schema>]: DbRowRef<TCollection>;
+  [TCollection in CollectionName<Schema>]: RowRef<TCollection>;
 }[CollectionName<Schema>];
 
 type ParentInput<TCollection extends string> =
-  [TCollection] extends [never] ? never : DbRowRef<TCollection> | DbRowRef<TCollection>[];
+  [TCollection] extends [never] ? never : RowRef<TCollection> | RowRef<TCollection>[];
 
 export type AllowedParentRef<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-> = DbRowRef<AllowedParentCollections<Schema, TCollection>>;
+> = RowRef<AllowedParentCollections<Schema, TCollection>>;
 
 export interface DbRow<
   TCollection extends string = string,
   TFields extends DbRowFields = DbRowFields,
-> extends DbRowRef<TCollection> {
+> extends RowRef<TCollection> {
   fields: TFields;
 }
 
@@ -457,7 +470,7 @@ export function applyDefaults<
 export function assertPutParents(
   collection: string,
   collectionSpec: AnyDbCollectionDefinition,
-  parents: DbRowRef[],
+  parents: RowRef[],
 ): void {
   const allowedParents = collectionSpec.in ?? [];
   if (allowedParents.length === 0 && parents.length > 0) {
@@ -497,11 +510,30 @@ function describeExpectedFieldType(fieldType: FieldType): string {
       return "a boolean";
     case "date":
       return "an ISO date string";
+    case "ref":
+      return "a row ref";
   }
 }
 
-function isFieldValueType(value: unknown, fieldType: FieldType): value is DbFieldValue {
-  switch (fieldType) {
+function isRowRefValue(value: unknown, allowedCollections?: readonly string[]): value is RowRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string"
+    || typeof record.collection !== "string"
+    || typeof record.baseUrl !== "string"
+  ) {
+    return false;
+  }
+
+  return !allowedCollections || allowedCollections.includes(record.collection);
+}
+
+function isFieldValueType(value: unknown, fieldSpec: AnyDbFieldBuilder): value is DbFieldValue {
+  switch (fieldSpec.type) {
     case "string":
     case "date":
       return typeof value === "string";
@@ -509,6 +541,8 @@ function isFieldValueType(value: unknown, fieldType: FieldType): value is DbFiel
       return typeof value === "number";
     case "boolean":
       return typeof value === "boolean";
+    case "ref":
+      return isRowRefValue(value, fieldSpec.refCollections);
   }
 }
 
@@ -531,7 +565,7 @@ export function assertValidFieldValues(
       throw new Error(`Unknown field ${collection}.${fieldName}`);
     }
 
-    if (!isFieldValueType(value, fieldSpec.type)) {
+    if (!isFieldValueType(value, fieldSpec)) {
       throw new Error(
         `Field ${collection}.${fieldName} must be ${describeExpectedFieldType(fieldSpec.type)}`,
       );

@@ -14,8 +14,8 @@ import {
   type CrdtConnectCallbacks,
   type CrdtConnection,
   type DbMemberInfo,
-  type DbRowRef,
   type PutBase,
+  type RowRef,
 } from "@putbase/core";
 
 import {
@@ -28,7 +28,6 @@ import {
   usePutBase,
   useQuery,
   useRow,
-  useRowTarget,
   useSession,
 } from "../src/index";
 
@@ -68,15 +67,36 @@ const backend = {
   listMembers: async () => [],
 };
 
+function dogRef(id = "dog_1"): RowRef<"dogs"> {
+  return {
+    id,
+    collection: "dogs",
+    baseUrl: "https://worker.example",
+  };
+}
+
+function tagRef(id: string): RowRef<"tags"> {
+  return {
+    id,
+    collection: "tags",
+    baseUrl: "https://worker.example",
+  };
+}
+
+function inviteUrl(row: RowRef, inviteToken = "invite_1"): string {
+  const url = new URL("http://localhost:3000/");
+  url.searchParams.set(PUTBASE_INVITE_TARGET_PARAM, JSON.stringify({
+    ref: row,
+    inviteToken,
+  }));
+  return url.toString();
+}
+
 function makeDogRow(name: string) {
   return new RowHandle(
     backend,
-    {
-      id: "dog_1",
-      collection: "dogs",
-      owner: "alex",
-      target: "https://worker.example/rows/dog_1",
-    },
+    dogRef(),
+    "alex",
     { name },
   );
 }
@@ -84,12 +104,8 @@ function makeDogRow(name: string) {
 function makeTagRow(id: string, label: string) {
   return new RowHandle(
     backend,
-    {
-      id,
-      collection: "tags",
-      owner: "alex",
-      target: `https://worker.example/rows/${id}`,
-    },
+    tagRef(id),
+    "alex",
     { label, createdAt: 1 },
   );
 }
@@ -102,7 +118,6 @@ class FakeDb {
     | null = null;
   queryCalls = 0;
   getRowCalls = 0;
-  openTargetCalls = 0;
   openInviteCalls = 0;
   lastInviteInput: string | null = null;
   ensureReadyCalls = 0;
@@ -115,9 +130,9 @@ class FakeDb {
   nextQueryPromise: Promise<typeof this.queryRows> | null = null;
   activitySubscriber: (() => void) | null = null;
   localMutationListener: (() => void) | null = null;
-  rememberedTargets = new Map<string, string>();
+  rememberedRows = new Map<string, RowRef>();
   failRememberedOpen = false;
-  lastOpenedTarget: string | null = null;
+  lastOpenedRow: RowRef | null = null;
   dogHandle: ReturnType<typeof makeDogRow> | null = null;
   inviteDogHandle: ReturnType<typeof makeDogRow> | null = null;
 
@@ -192,17 +207,9 @@ class FakeDb {
     return this.queryRows;
   }
 
-  async getRow(): Promise<ReturnType<typeof makeDogRow>> {
+  async getRow(row?: RowRef): Promise<ReturnType<typeof makeDogRow>> {
     this.getRowCalls += 1;
-    return this.getStableDogHandle(this.dogName);
-  }
-
-  async openTarget(target?: string): Promise<ReturnType<typeof makeDogRow>> {
-    this.openTargetCalls += 1;
-    if (this.failRememberedOpen) {
-      throw new Error("remembered row failed");
-    }
-    this.lastOpenedTarget = target ?? null;
+    this.lastOpenedRow = row ?? null;
     return this.getStableDogHandle(this.dogName);
   }
 
@@ -212,7 +219,7 @@ class FakeDb {
     return this.getStableInviteDogHandle(this.inviteDogName);
   }
 
-  async listParents(): Promise<DbRowRef[]> {
+  async listParents(): Promise<RowRef[]> {
     return [];
   }
 
@@ -247,25 +254,28 @@ class FakeDb {
     };
   }
 
-  createInviteLink(row: Pick<DbRowRef, "target">, token: string): string {
-    return `${row.target}?token=${token}`;
+  createInviteLink(row: RowRef, token: string): string {
+    return inviteUrl(row, token);
   }
 
-  async rememberPerUserRow(key: string, row: { target: string }): Promise<void> {
-    this.rememberedTargets.set(`${this.username}:${key}`, row.target);
+  async rememberPerUserRow(key: string, row: RowRef): Promise<void> {
+    this.rememberedRows.set(`${this.username}:${key}`, row);
   }
 
   async openRememberedPerUserRow(key: string): Promise<ReturnType<typeof makeDogRow> | null> {
-    const remembered = this.rememberedTargets.get(`${this.username}:${key}`);
+    const remembered = this.rememberedRows.get(`${this.username}:${key}`);
     if (!remembered) {
       return null;
     }
 
-    return this.openTarget(remembered);
+    if (this.failRememberedOpen) {
+      throw new Error("remembered row failed");
+    }
+    return this.getRow(remembered);
   }
 
   async clearRememberedPerUserRow(key: string): Promise<void> {
-    this.rememberedTargets.delete(`${this.username}:${key}`);
+    this.rememberedRows.delete(`${this.username}:${key}`);
   }
 
   subscribeToLocalMutations(listener: () => void): () => void {
@@ -421,7 +431,7 @@ describe("@putbase/react", () => {
       flush: flushSpy,
     }));
     const row = {
-      target: "https://worker.example/rows/dog_1",
+      ref: dogRef(),
       connectCrdt: connectSpy,
     };
     const { binding, setValue } = makeBinding("idle");
@@ -466,11 +476,11 @@ describe("@putbase/react", () => {
       flush: async () => undefined,
     }));
     const firstRow = {
-      target: "https://worker.example/rows/dog_1",
+      ref: dogRef(),
       connectCrdt: firstConnectSpy,
     };
     const secondRow = {
-      target: "https://worker.example/rows/dog_2",
+      ref: dogRef("dog_2"),
       connectCrdt: secondConnectSpy,
     };
     const { binding } = makeBinding("value");
@@ -607,12 +617,7 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     db.signedIn = false;
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -633,12 +638,7 @@ describe("@putbase/react", () => {
 
   it("returns a named inviteLink field for invite URLs", async () => {
     const db = new FakeDb();
-    const rowRef: DbRowRef<"dogs"> = {
-      id: "dog_1",
-      collection: "dogs",
-      owner: "alex",
-      target: "https://worker.example/rows/dog_1",
-    };
+    const rowRef = dogRef();
     let latest: ReturnType<typeof useInviteLink<TestSchema>> | null = null;
 
     function Probe() {
@@ -650,7 +650,7 @@ describe("@putbase/react", () => {
 
     await waitFor(() => {
       expect(latest?.status).toBe("success");
-      expect(latest?.inviteLink).toBe("https://worker.example/rows/dog_1?token=invite_1");
+      expect(latest?.inviteLink).toBe(inviteUrl(rowRef));
     });
 
     expect(latest && "data" in latest).toBe(false);
@@ -661,7 +661,7 @@ describe("@putbase/react", () => {
     window.history.replaceState(
       {},
       "",
-      `/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+      inviteUrl(dogRef()),
     );
 
     const db = new FakeDb();
@@ -692,9 +692,7 @@ describe("@putbase/react", () => {
     });
 
     expect(db.openInviteCalls).toBe(1);
-    expect(db.lastInviteInput).toBe(
-      `http://localhost:3000/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
-    );
+    expect(db.lastInviteInput).toBe(inviteUrl(dogRef()));
     expect(openedDogName).toBe("Buddy");
     await waitFor(() => {
       expect(window.location.search).toBe("");
@@ -706,7 +704,7 @@ describe("@putbase/react", () => {
     window.history.replaceState(
       {},
       "",
-      `/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+      inviteUrl(dogRef()),
     );
 
     const db = new FakeDb();
@@ -891,14 +889,14 @@ describe("@putbase/react", () => {
     const app = await renderApp(<Probe />);
 
     expect(latest?.status).toBe("idle");
-    expect(db.openTargetCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
     expect(db.openInviteCalls).toBe(0);
     await app.unmount();
   });
 
   it("restores a remembered per-user row after session resolution", async () => {
     const db = new FakeDb();
-    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/dog_1");
+    db.rememberedRows.set("alex:myDog", dogRef());
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
     let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
@@ -913,7 +911,7 @@ describe("@putbase/react", () => {
     const app = await renderApp(<Probe />);
 
     expect(latest?.status).toBe("loading");
-    expect(db.openTargetCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
 
     await act(async () => {
       session.resolve({ signedIn: true, user: { username: "alex" } });
@@ -923,8 +921,8 @@ describe("@putbase/react", () => {
 
     expect(latest?.status).toBe("success");
     expect(latest?.data?.fields.name).toBe("Rex");
-    expect(db.openTargetCalls).toBe(1);
-    expect(db.lastOpenedTarget).toBe("https://worker.example/rows/dog_1");
+    expect(db.getRowCalls).toBe(1);
+    expect(db.lastOpenedRow).toEqual(dogRef());
     await app.unmount();
   });
 
@@ -932,11 +930,11 @@ describe("@putbase/react", () => {
     window.history.replaceState(
       {},
       "",
-      `/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_2&token=invite_1`,
+      inviteUrl(dogRef("dog_2")),
     );
 
     const db = new FakeDb();
-    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/old_dog");
+    db.rememberedRows.set("alex:myDog", dogRef("old_dog"));
     let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
 
     function Probe() {
@@ -954,8 +952,8 @@ describe("@putbase/react", () => {
     });
 
     expect(db.openInviteCalls).toBe(1);
-    expect(db.openTargetCalls).toBe(0);
-    expect(db.rememberedTargets.get("alex:myDog")).toBe("https://worker.example/rows/dog_1");
+    expect(db.getRowCalls).toBe(0);
+    expect(db.rememberedRows.get("alex:myDog")).toEqual(dogRef());
     expect(window.location.search).toBe("");
     await app.unmount();
   });
@@ -984,8 +982,8 @@ describe("@putbase/react", () => {
     });
 
     expect(latest?.data?.fields.name).toBe("Buddy");
-    expect(db.rememberedTargets.get("alex:myDog")).toBe("https://worker.example/rows/dog_1");
-    expect(db.openTargetCalls).toBe(0);
+    expect(db.rememberedRows.get("alex:myDog")).toEqual(dogRef());
+    expect(db.getRowCalls).toBe(0);
 
     await act(async () => {
       await latest?.clear();
@@ -993,14 +991,14 @@ describe("@putbase/react", () => {
     });
 
     expect(latest?.data).toBeNull();
-    expect(db.rememberedTargets.get("alex:myDog")).toBeUndefined();
-    expect(db.openTargetCalls).toBe(0);
+    expect(db.rememberedRows.get("alex:myDog")).toBeUndefined();
+    expect(db.getRowCalls).toBe(0);
     await app.unmount();
   });
 
   it("clears invalid remembered targets when reopening fails", async () => {
     const db = new FakeDb();
-    db.rememberedTargets.set("alex:myDog", "https://worker.example/rows/dog_1");
+    db.rememberedRows.set("alex:myDog", dogRef());
     db.failRememberedOpen = true;
     let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
 
@@ -1018,7 +1016,7 @@ describe("@putbase/react", () => {
       expect(latest?.error).toBeInstanceOf(Error);
     });
 
-    expect(db.rememberedTargets.get("alex:myDog")).toBeUndefined();
+    expect(db.rememberedRows.get("alex:myDog")).toBeUndefined();
     await app.unmount();
   });
 
@@ -1026,12 +1024,7 @@ describe("@putbase/react", () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1067,12 +1060,7 @@ describe("@putbase/react", () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1103,12 +1091,7 @@ describe("@putbase/react", () => {
     const initialQuery = deferred<typeof db.queryRows>();
     db.nextQueryPromise = initialQuery.promise;
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1143,12 +1126,7 @@ describe("@putbase/react", () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1193,12 +1171,7 @@ describe("@putbase/react", () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1230,12 +1203,7 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     db.nextQueryError = new Error("query failed");
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,
@@ -1257,14 +1225,14 @@ describe("@putbase/react", () => {
     await app.unmount();
   });
 
-  it("accepts a row handle in live query options", async () => {
+  it("accepts a row ref in live query options", async () => {
     const db = new FakeDb();
     const boardHandle = makeDogRow("Rex");
     let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
 
     function Probe() {
       latest = useQuery(db as unknown as PutBase<TestSchema>, "tags", {
-        in: boardHandle,
+        in: boardHandle.ref,
         index: "byCreatedAt",
         order: "asc",
       });
@@ -1282,12 +1250,7 @@ describe("@putbase/react", () => {
   it("polls row reads reactively", async () => {
     vi.useFakeTimers();
     const db = new FakeDb();
-    const rowRef: DbRowRef<"dogs"> = {
-      id: "dog_1",
-      collection: "dogs",
-      owner: "alex",
-      target: "https://worker.example/rows/dog_1",
-    };
+    const rowRef = dogRef();
     let latest: ReturnType<typeof useRow<TestSchema, "dogs">> | null = null;
 
     function Probe() {
@@ -1309,20 +1272,14 @@ describe("@putbase/react", () => {
     await app.unmount();
   });
 
-  it("shares the same row handle across identical useRowTarget subscriptions", async () => {
+  it("shares the same row handle across identical useRow subscriptions", async () => {
     const db = new FakeDb();
     let first: ReturnType<typeof makeDogRow> | undefined;
     let second: ReturnType<typeof makeDogRow> | undefined;
 
     function Probe() {
-      first = useRowTarget<TestSchema>(
-        db as unknown as PutBase<TestSchema>,
-        "https://worker.example/rows/dog_1",
-      ).data;
-      second = useRowTarget<TestSchema>(
-        db as unknown as PutBase<TestSchema>,
-        "https://worker.example/rows/dog_1",
-      ).data;
+      first = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, dogRef()).data;
+      second = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, dogRef()).data;
       return null;
     }
 
@@ -1336,13 +1293,10 @@ describe("@putbase/react", () => {
   it("keeps a row handle stable across polls, including field updates", async () => {
     vi.useFakeTimers();
     const db = new FakeDb();
-    let latest: ReturnType<typeof useRowTarget<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useRow<TestSchema, "dogs">> | null = null;
 
     function Probe() {
-      latest = useRowTarget<TestSchema>(
-        db as unknown as PutBase<TestSchema>,
-        "https://worker.example/rows/dog_1",
-      );
+      latest = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, dogRef());
       return <div>{latest.data?.fields.name ?? latest.status}</div>;
     }
 
@@ -1374,10 +1328,7 @@ describe("@putbase/react", () => {
     let disconnectCount = 0;
 
     function Probe() {
-      const row = useRowTarget<TestSchema>(
-        db as unknown as PutBase<TestSchema>,
-        "https://worker.example/rows/dog_1",
-      ).data;
+      const row = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, dogRef()).data;
 
       useEffect(() => {
         if (!row) {
@@ -1426,10 +1377,7 @@ describe("@putbase/react", () => {
     let effectRuns = 0;
 
     function Probe() {
-      const row = useRowTarget<TestSchema>(
-        db as unknown as PutBase<TestSchema>,
-        "https://worker.example/rows/dog_1",
-      ).data;
+      const row = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, dogRef()).data;
 
       useEffect(() => {
         if (!row) {
@@ -1470,8 +1418,7 @@ describe("@putbase/react", () => {
       in: {
         id: "dog_1",
         collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
+        baseUrl: "https://worker.example",
       },
       index: "byCreatedAt" as const,
       order: "asc" as const,
@@ -1499,17 +1446,17 @@ describe("@putbase/react", () => {
 
   it("stays idle when a required input is missing", async () => {
     const db = new FakeDb();
-    let latest: ReturnType<typeof useRowTarget<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useRow<TestSchema, "dogs">> | null = null;
 
     function Probe() {
-      latest = useRowTarget<TestSchema>(db as unknown as PutBase<TestSchema>, null);
+      latest = useRow<TestSchema, "dogs">(db as unknown as PutBase<TestSchema>, null);
       return <div>{latest.status}</div>;
     }
 
     const app = await renderApp(<Probe />);
 
     expect(latest?.status).toBe("idle");
-    expect(db.openTargetCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
     await app.unmount();
   });
 
@@ -1520,8 +1467,7 @@ describe("@putbase/react", () => {
       in: {
         id: "dog_1",
         collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
+        baseUrl: "https://worker.example",
       },
       index: "byCreatedAt" as const,
       order: "asc" as const,
@@ -1549,12 +1495,7 @@ describe("@putbase/react", () => {
     vi.useFakeTimers();
     const db = new FakeDb();
     const queryOptions = {
-      in: {
-        id: "dog_1",
-        collection: "dogs",
-        owner: "alex",
-        target: "https://worker.example/rows/dog_1",
-      },
+      in: dogRef(),
       index: "byCreatedAt" as const,
       order: "asc" as const,
       limit: 100,

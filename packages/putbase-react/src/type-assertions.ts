@@ -4,7 +4,7 @@ import {
   field,
   index,
   type AnyRowHandle,
-  type DbRowRef,
+  type RowRef,
 } from "@putbase/core";
 
 import { useQuery, useRow } from "./index";
@@ -34,7 +34,7 @@ type TagRows = ReturnType<typeof useQuery<TestSchema, "tags">>["rows"];
 
 declare const dogResult: DogResult;
 declare const tagRows: TagRows;
-declare const tagRef: DbRowRef<"tags">;
+declare const tagRef: RowRef<"tags">;
 
 const maybeAnyRowHandle: AnyRowHandle<TestSchema> | undefined = dogResult.data;
 void maybeAnyRowHandle;
@@ -48,8 +48,7 @@ if (tagRows[0]) {
   void tagRows[0].in.add({
     id: "dog_1",
     collection: "dogs",
-    owner: "alex",
-    target: "https://worker.example/rows/dog_1",
+    baseUrl: "https://worker.example/rows",
   });
 
   // @ts-expect-error tags can only be parented by dogs

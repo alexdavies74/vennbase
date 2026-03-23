@@ -20,11 +20,10 @@ import type {
   CrdtConnection,
   DbMemberInfo,
   DbQueryOptions,
-  DbRowLocator,
-  DbRowRef,
   DbSchema,
   MemberRole,
   PutBaseUser,
+  RowRef,
   RowFields,
 } from "@putbase/core";
 import type { RowHandle } from "@putbase/core";
@@ -40,7 +39,6 @@ import {
   makeParentsKey,
   makeQueryKey,
   makeRowKey,
-  makeRowTargetKey,
   type LoadStatus,
   type PutBaseReactRuntime,
   type QueryRows,
@@ -105,7 +103,7 @@ export interface UsePerUserRowOptions<
   clearLocation?: boolean | ((url: URL) => string);
   loadRememberedRow?: (row: AnyRowHandle<Schema>, client: PutBase<Schema>) => Promise<TResult> | TResult;
   openInvite?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
-  getRow?: (result: TResult) => Pick<DbRowLocator, "target">;
+  getRow?: (result: TResult) => RowRef;
 }
 
 export interface UsePerUserRowResult<TResult> extends UseResourceResult<TResult | null> {
@@ -128,7 +126,7 @@ const noopRefresh = async () => undefined;
 const noopFlush = async () => undefined;
 
 interface CrdtRowLike {
-  target: string;
+  ref: RowRef;
   connectCrdt(callbacks: CrdtConnectCallbacks): CrdtConnection;
 }
 
@@ -257,28 +255,32 @@ function clearInviteLocation(
   window.history.replaceState({}, "", `${current.pathname}${current.hash}`);
 }
 
-function hasTarget(value: unknown): value is { target: string } {
+function hasRowRef(value: unknown): value is { ref: RowRef } {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  return typeof (value as { target?: unknown }).target === "string";
+  const candidate = value as { ref?: unknown };
+  return !!candidate.ref
+    && typeof candidate.ref === "object"
+    && typeof (candidate.ref as { id?: unknown }).id === "string"
+    && typeof (candidate.ref as { collection?: unknown }).collection === "string"
+    && typeof (candidate.ref as { baseUrl?: unknown }).baseUrl === "string";
 }
 
 function getRowFromResult<TResult>(
   result: TResult,
-  getRow?: (result: TResult) => Pick<DbRowLocator, "target">,
-): Pick<DbRowLocator, "target"> {
+  getRow?: (result: TResult) => RowRef,
+): RowRef {
   const row = getRow
     ? getRow(result)
-    : hasTarget(result)
-      ? result
+    : hasRowRef(result)
+      ? result.ref
       : null;
-  const normalized = row?.target?.trim();
-  if (!normalized) {
+  if (!row) {
     throw new Error("usePerUserRow could not resolve a row. Pass getRow when returning non-row data.");
   }
-  return { target: normalized };
+  return row;
 }
 
 export function PutBaseProvider<Schema extends DbSchema>({
@@ -311,7 +313,7 @@ export function useCrdt<TValue>(
   binding: CrdtBinding<TValue>,
 ): UseCrdtResult<TValue> {
   const connectionRef = useRef<CrdtConnection | null>(null);
-  const rowTargetRef = useRef<string | null>(null);
+  const rowKeyRef = useRef<string | null>(null);
   const snapshotRef = useRef<{ value: TValue; version: number } | null>(null);
   const getSnapshot = () => {
     const nextValue = binding.getValue();
@@ -336,21 +338,22 @@ export function useCrdt<TValue>(
 
   useEffect(() => {
     if (!row) {
-      if (rowTargetRef.current !== null) {
+      if (rowKeyRef.current !== null) {
         binding.reset();
-        rowTargetRef.current = null;
+        rowKeyRef.current = null;
       }
       connectionRef.current = null;
       return;
     }
 
-    if (rowTargetRef.current !== null && rowTargetRef.current !== row.target) {
+    const nextRowKey = `${row.ref.baseUrl}:${row.ref.id}`;
+    if (rowKeyRef.current !== null && rowKeyRef.current !== nextRowKey) {
       binding.reset();
     }
 
     const connection = row.connectCrdt(binding.callbacks);
     connectionRef.current = connection;
-    rowTargetRef.current = row.target;
+    rowKeyRef.current = nextRowKey;
 
     return () => {
       connection.disconnect();
@@ -467,7 +470,7 @@ export function useRow<
   TCollection extends CollectionName<Schema>,
 >(
   client: PutBase<Schema>,
-  row: DbRowRef<TCollection> | null | undefined,
+  row: RowRef<TCollection> | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<
   RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>
@@ -485,8 +488,7 @@ export function useRow<
     () => runtime.getLive(
       resourceKey as string,
       () => runtime.client.getRow(
-        (row as DbRowRef<TCollection>).collection,
-        row as DbRowRef<TCollection>,
+        row as RowRef<TCollection>,
       ) as Promise<
         RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>
       >,
@@ -496,44 +498,22 @@ export function useRow<
   return blocked ?? resource;
 }
 
-export function useRowTarget<Schema extends DbSchema>(
-  client: PutBase<Schema>,
-  target: string | null | undefined,
-  options: UseHookOptions = {},
-): UseResourceResult<AnyRowHandle<Schema>> {
-  const runtime = useRuntime(client);
-  const session = useSessionResource(runtime, options.enabled ?? true);
-  const resourceKey = target ? makeRowTargetKey(target) : null;
-  const blocked = blockedResourceResult<AnyRowHandle<Schema>>(session);
-  const resource = useOptionalResource(
-    (options.enabled ?? true) && !!target && !blocked,
-    resourceKey,
-    runtime,
-    () => runtime.getLive(
-      resourceKey as string,
-      () => runtime.client.openTarget(target as string),
-      snapshots.row,
-    ),
-  );
-  return blocked ?? resource;
-}
-
 export function useParents<Schema extends DbSchema>(
   client: PutBase<Schema>,
-  row: DbRowRef | null | undefined,
+  row: RowRef | null | undefined,
   options: UseHookOptions = {},
-): UseResourceResult<Array<DbRowRef>> {
+): UseResourceResult<Array<RowRef>> {
   const runtime = useRuntime(client);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const resourceKey = row ? makeParentsKey(row) : null;
-  const blocked = blockedResourceResult<Array<DbRowRef>>(session);
+  const blocked = blockedResourceResult<Array<RowRef>>(session);
   const resource = useOptionalResource(
     (options.enabled ?? true) && !!row && !blocked,
     resourceKey,
     runtime,
     () => runtime.getLive(
       resourceKey as string,
-      () => runtime.client.listParents(row as DbRowRef),
+      () => runtime.client.listParents(row as RowRef),
       snapshots.rowRefs,
     ),
   );
@@ -542,7 +522,7 @@ export function useParents<Schema extends DbSchema>(
 
 export function useMemberUsernames<Schema extends DbSchema>(
   client: PutBase<Schema>,
-  row: DbRowLocator | null | undefined,
+  row: RowRef | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<string[]> {
   const runtime = useRuntime(client);
@@ -555,7 +535,7 @@ export function useMemberUsernames<Schema extends DbSchema>(
     runtime,
     () => runtime.getLive(
       resourceKey as string,
-      () => runtime.client.listMembers(row as DbRowLocator),
+      () => runtime.client.listMembers(row as RowRef),
       snapshots.memberUsernames,
     ),
   );
@@ -564,7 +544,7 @@ export function useMemberUsernames<Schema extends DbSchema>(
 
 export function useDirectMembers<Schema extends DbSchema>(
   client: PutBase<Schema>,
-  row: DbRowLocator | null | undefined,
+  row: RowRef | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<{ username: string; role: MemberRole }>> {
   const runtime = useRuntime(client);
@@ -577,7 +557,7 @@ export function useDirectMembers<Schema extends DbSchema>(
     runtime,
     () => runtime.getLive(
       resourceKey as string,
-      () => runtime.client.listDirectMembers(row as DbRowLocator),
+      () => runtime.client.listDirectMembers(row as RowRef),
       snapshots.directMembers,
     ),
   );
@@ -586,7 +566,7 @@ export function useDirectMembers<Schema extends DbSchema>(
 
 export function useEffectiveMembers<Schema extends DbSchema>(
   client: PutBase<Schema>,
-  row: DbRowLocator | null | undefined,
+  row: RowRef | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<DbMemberInfo<Schema>>> {
   const runtime = useRuntime(client);
@@ -599,7 +579,7 @@ export function useEffectiveMembers<Schema extends DbSchema>(
     runtime,
     () => runtime.getLive(
       resourceKey as string,
-      () => runtime.client.listEffectiveMembers(row as DbRowLocator),
+      () => runtime.client.listEffectiveMembers(row as RowRef),
       snapshots.effectiveMembers,
     ),
   );
@@ -608,12 +588,12 @@ export function useEffectiveMembers<Schema extends DbSchema>(
 
 export function useInviteLink<Schema extends DbSchema>(
   client: PutBase<Schema>,
-  row: DbRowRef | null | undefined,
+  row: RowRef | null | undefined,
   options: UseHookOptions = {},
 ): UseInviteLinkResult {
   const runtime = useRuntime(client);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const resourceKey = row ? makeInviteLinkKey(row as DbRowRef) : null;
+  const resourceKey = row ? makeInviteLinkKey(row as RowRef) : null;
   const blocked = blockedResourceResult<string>(session);
   const resource = useOptionalResource(
     (options.enabled ?? true) && !!row && !blocked,
@@ -622,9 +602,9 @@ export function useInviteLink<Schema extends DbSchema>(
     () => runtime.getLoadOnce(
       resourceKey as string,
       async () => {
-        const existing = await runtime.client.getExistingInviteToken(row as DbRowRef);
-        const invite = existing ?? runtime.client.createInviteToken(row as DbRowRef).value;
-        return runtime.client.createInviteLink(row as DbRowRef, invite.token);
+        const existing = await runtime.client.getExistingInviteToken(row as RowRef);
+        const invite = existing ?? runtime.client.createInviteToken(row as RowRef).value;
+        return runtime.client.createInviteLink(row as RowRef, invite.token);
       },
     ),
   );

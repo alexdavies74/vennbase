@@ -98,7 +98,7 @@ describe("PutBase", () => {
     })).toThrow('Collection name "user" is reserved');
   });
 
-  it("opens a row target", async () => {
+  it("reopens a row from a row ref", async () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
       identityProvider: async () => ({ username: "owner" }),
@@ -135,11 +135,19 @@ describe("PutBase", () => {
       },
     });
 
-    const row = await db.openTarget("https://worker.example/rows/row_public");
+    const row = await db.getRow({
+      id: "row_public",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
     expect(row.id).toBe("row_public");
     expect(row.collection).toBe("rows");
     expect(row.owner).toBe("owner");
-    expect(row.target).toBe("https://worker.example/rows/row_public");
+    expect(row.ref).toEqual({
+      id: "row_public",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
     expect(row.fields.name).toBe("Rex");
   });
 
@@ -187,10 +195,14 @@ describe("PutBase", () => {
       },
     });
 
-    const row = await db.openTarget("https://worker.example/rows/row_public");
+    const row = await db.getRow({
+      id: "row_public",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
 
-    await expect(db.listDirectMembers(row)).resolves.toEqual([]);
-    await expect(db.listMembers(row)).resolves.toEqual(["owner", "friend"]);
+    await expect(db.listDirectMembers(row.ref)).resolves.toEqual([]);
+    await expect(db.listMembers(row.ref)).resolves.toEqual(["owner", "friend"]);
   });
 
   it("uses globalThis.puter when no backend option is provided", async () => {
@@ -305,10 +317,18 @@ describe("PutBase", () => {
 
     await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
 
-    await db.rememberPerUserRow("current-row", { target: "https://worker.example/rows/row_1" });
+    await db.rememberPerUserRow("current-row", {
+      id: "row_1",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
     await expect(db.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
       id: "row_1",
-      target: "https://worker.example/rows/row_1",
+      ref: {
+        id: "row_1",
+        collection: "rows",
+        baseUrl: "https://worker.example/rows",
+      },
     });
 
     await db.clearRememberedPerUserRow("current-row");
@@ -361,17 +381,51 @@ describe("PutBase", () => {
       fetchFn,
     });
 
-    await ownerDb.rememberPerUserRow("current-row", { target: "https://worker.example/rows/owner_row" });
-    await friendDb.rememberPerUserRow("current-row", { target: "https://worker.example/rows/friend_row" });
+    await ownerDb.rememberPerUserRow("current-row", {
+      id: "owner_row",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
+    await friendDb.rememberPerUserRow("current-row", {
+      id: "friend_row",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
 
     await expect(ownerDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
       id: "owner_row",
-      target: "https://worker.example/rows/owner_row",
+      ref: {
+        id: "owner_row",
+        collection: "rows",
+        baseUrl: "https://worker.example/rows",
+      },
     });
     await expect(friendDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
       id: "friend_row",
-      target: "https://worker.example/rows/friend_row",
+      ref: {
+        id: "friend_row",
+        collection: "rows",
+        baseUrl: "https://worker.example/rows",
+      },
     });
+  });
+
+  it("drops incompatible legacy remembered row values instead of throwing", async () => {
+    const kv = new MapKv();
+    const entryKey = "putbase:per-user-row:v1:owner:current-row";
+    await kv.set(entryKey, "https://worker.example/rows/row_1");
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      backend: { workers: {}, kv } as BackendClient,
+      fetchFn: (async () => {
+        throw new Error("fetch should not be called for incompatible remembered data");
+      }) as typeof fetch,
+    });
+
+    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
+    await expect(kv.get(entryKey)).resolves.toBeNull();
   });
 
   it("explains how to provide Puter when signIn is called without a backend", async () => {
@@ -450,86 +504,6 @@ describe("PutBase", () => {
     await expect(kv.get(workerMetadataKey("runtime", hostHash))).resolves.toBe(CLASSIC_WORKER_RUNTIME_ID);
   });
 
-  it("fails openTarget when the worker omits collection metadata", async () => {
-    const db = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "owner" }),
-      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
-        const url = asUrl(input);
-
-        if (url.endsWith("/row/get")) {
-          return new Response(
-            JSON.stringify({
-              id: "row_public",
-              name: "Rex",
-              owner: "owner",
-              target: "https://worker.example/rows/row_public",
-              createdAt: 1,
-              collection: null,
-              members: ["owner"],
-              parentRefs: [],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
-          return new Response(
-            JSON.stringify({ fields: { name: "Rex" }, collection: null }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
-      },
-    });
-
-    await expect(db.openTarget("https://worker.example/rows/row_public")).rejects.toThrow("Row collection is missing");
-  });
-
-  it("fails openTarget when the worker collection is off-schema", async () => {
-    const db = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "owner" }),
-      fetchFn: async (input: RequestInfo | URL): Promise<Response> => {
-        const url = asUrl(input);
-
-        if (url.endsWith("/row/get")) {
-          return new Response(
-            JSON.stringify({
-              id: "row_public",
-              name: "Rex",
-              owner: "owner",
-              target: "https://worker.example/rows/row_public",
-              createdAt: 1,
-              collection: "foreign",
-              members: ["owner"],
-              parentRefs: [],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        if ((url.endsWith("/fields/get") || url.endsWith("/fields/set"))) {
-          return new Response(
-            JSON.stringify({ fields: { name: "Rex" }, collection: "foreign" }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
-      },
-    });
-
-    await expect(db.openTarget("https://worker.example/rows/row_public")).rejects.toThrow("Unknown collection: foreign");
-  });
-
   it("throws PutBaseError for API failures", async () => {
     const db = new PutBase({
       schema: MINIMAL_SCHEMA,
@@ -543,7 +517,11 @@ describe("PutBase", () => {
       ),
     });
 
-    await expect(db.openTarget("https://worker.example/rows/row_public")).rejects.toBeInstanceOf(
+    await expect(db.getRow({
+      id: "row_public",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    })).rejects.toBeInstanceOf(
       PutBaseError,
     );
   });
@@ -608,7 +586,11 @@ describe("PutBase", () => {
       fetchFn,
     });
 
-    const row = await db.openInvite("https://workers.puter.site/owner-federation/rows/row_1");
+    const row = await db.openInvite(db.createInviteLink({
+      id: "row_1",
+      collection: "rows",
+      baseUrl: "https://workers.puter.site/owner-federation/rows",
+    }, "invite_1"));
 
     expect(row.id).toBe("row_1");
     expect(contexts.length).toBeGreaterThan(0);
@@ -822,15 +804,17 @@ describe("PutBase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const row = await db.put("rows", { name: "Rex" });
+    await db.ensureReady();
+    const row = db.put("rows", { name: "Rex" });
+    await row.settled;
 
-    expect(row.target.startsWith(`${deployedWorkerBase}/rows/`)).toBe(true);
+    expect(row.ref.baseUrl).toBe(deployedWorkerBase);
     expect(requestedUrls).toContain(`${deployedWorkerBase}/rows`);
     expect(requestedUrls.some((url) => url.endsWith("/row/join"))).toBe(true);
     expect(requestedUrls.some((url) => url.endsWith("/row/get"))).toBe(true);
   });
 
-  it("shares constructor prewarm with put when provisioning the federation worker", async () => {
+  it("shares constructor prewarm with ensureReady before put", async () => {
     const requestedUrls: string[] = [];
     const deployedWorkerBase = "https://workers.example/owner-1234abcd-federation";
     const releaseCreate = deferred<{ url: string }>();
@@ -917,15 +901,17 @@ describe("PutBase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const rowPromise = db.put("rows", { name: "Rex" });
+    const readyPromise = db.ensureReady();
     await createStarted.promise;
     expect(deployCalls).toBe(1);
 
     releaseCreate.resolve({ url: deployedWorkerBase });
-    const row = await rowPromise;
+    await readyPromise;
+    const row = db.put("rows", { name: "Rex" });
+    await row.settled;
 
     expect(deployCalls).toBe(1);
-    expect(row.target.startsWith(`${deployedWorkerBase}/rows/`)).toBe(true);
+    expect(row.ref.baseUrl).toBe(deployedWorkerBase);
     expect(requestedUrls).toContain(`${deployedWorkerBase}/rows`);
   });
 
@@ -972,13 +958,17 @@ describe("PutBase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const firstRow = await firstDb.put("rows", { name: "Rex" });
-    const secondRow = await secondDb.put("rows", { name: "Spot" });
+    await firstDb.ensureReady();
+    await secondDb.ensureReady();
+    const firstRow = firstDb.put("rows", { name: "Rex" });
+    const secondRow = secondDb.put("rows", { name: "Spot" });
+    await firstRow.settled;
+    await secondRow.settled;
 
     expect(deployCalls).toBe(1);
-    expect(firstRow.target).not.toBe(secondRow.target);
-    expect(firstRow.target.startsWith(`${deployedWorkerBase}/rows/`)).toBe(true);
-    expect(secondRow.target.startsWith(`${deployedWorkerBase}/rows/`)).toBe(true);
+    expect(firstRow.id).not.toBe(secondRow.id);
+    expect(firstRow.ref.baseUrl).toBe(deployedWorkerBase);
+    expect(secondRow.ref.baseUrl).toBe(deployedWorkerBase);
   });
 
   it("reuses existing scoped worker via workers.get before creating", async () => {
@@ -1022,11 +1012,13 @@ describe("PutBase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const row = await db.put("rows", { name: "Rex" });
+    await db.ensureReady();
+    const row = db.put("rows", { name: "Rex" });
+    await row.settled;
 
     expect(getCalls).toBeGreaterThan(0);
     expect(deployCalls).toBe(0);
-    expect(row.target.startsWith(`${existingWorkerBase}/rows/`)).toBe(true);
+    expect(row.ref.baseUrl).toBe(existingWorkerBase);
   });
 
   it("logs and redeploys when legacy federation worker url metadata is stale", async () => {
@@ -1145,7 +1137,7 @@ describe("PutBase", () => {
       fetchFn: (() => Promise.reject(new Error("fetch should not be used"))) as typeof fetch,
     });
 
-    await expect(db.put("rows", { name: "Rex" })).rejects.toThrow("Federation worker name collision");
+    await expect(db.ensureReady()).rejects.toThrow("Federation worker name collision");
   });
 
   it("surfaces prewarm failures through ensureReady and retries on a later call", async () => {
@@ -1236,7 +1228,11 @@ describe("PutBase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const row = await db.openTarget("https://worker.example/rows/row_exec");
+    const row = await db.getRow({
+      id: "row_exec",
+      collection: "rows",
+      baseUrl: "https://worker.example/rows",
+    });
     expect(row.id).toBe("row_exec");
     expect(execCalls.some((c) => c.url.endsWith("/row/get"))).toBe(true);
     expect(execCalls.some((c) => c.url.endsWith("/fields/get") || c.url.endsWith("/fields/set"))).toBe(true);

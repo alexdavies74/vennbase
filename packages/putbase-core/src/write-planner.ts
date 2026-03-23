@@ -1,11 +1,11 @@
-import type { DbRowRef } from "./schema";
-import { buildRowTarget } from "./transport";
+import type { RowRef } from "./schema";
+import { normalizeBaseUrl } from "./transport";
 import type { InviteToken, PutBaseUser, Row } from "./types";
 import type { Transport } from "./transport";
 
 export interface PlannedRow {
   readonly row: Row;
-  readonly ref: DbRowRef;
+  readonly ref: RowRef;
 }
 
 export class WritePlanner {
@@ -18,21 +18,20 @@ export class WritePlanner {
     user: PutBaseUser;
   }): PlannedRow {
     const id = this.transport.createId("row");
-    const target = buildRowTarget(args.federationWorkerUrl, id);
+    const baseUrl = normalizeBaseUrl(args.federationWorkerUrl);
 
     return {
       row: {
         id,
         name: args.name,
         owner: args.user.username,
-        target,
+        baseUrl,
         createdAt: Date.now(),
       },
       ref: {
         id,
-        owner: args.user.username,
-        target,
         collection: args.collection,
+        baseUrl,
       },
     };
   }

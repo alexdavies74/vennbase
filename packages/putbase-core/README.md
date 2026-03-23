@@ -13,17 +13,17 @@ This makes PutBase particularly well-suited for:
 ```ts
 // Write
 const board = await db.put("boards", { title: "Launch checklist" });
-await db.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
+await db.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board.ref });
 
 // Read (React)
 const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
-  in: board,
+  in: board.ref,
   index: "byCreatedAt",
   order: "asc",
 });
 
 // Share
-const { inviteLink } = useInviteLink(db, board);
+const { inviteLink } = useInviteLink(db, board.ref);
 ```
 
 ---
@@ -64,11 +64,11 @@ export const schema = defineSchema({
   recentBoards: collection({
     in: ["user"],
     fields: {
-      boardTarget: field.string(),
+      boardRef: field.ref("boards"),
       openedAt: field.number(),
     },
     indexes: {
-      byBoardTarget: index("boardTarget"),
+      byBoardRef: index("boardRef"),
       byOpenedAt: index("openedAt"),
     },
   }),
@@ -89,10 +89,10 @@ export type Schema = typeof schema;
 ```
 
 - `collection({ in: [...] })` — `in` lists the allowed parent collections.
-- `field.string()` / `.number()` / `.boolean()` / `.date()` — typed scalar fields; chain `.optional()` or `.default(value)` as needed
+- `field.string()` / `.number()` / `.boolean()` / `.date()` / `.ref(collection)` — typed fields; chain `.optional()` or `.default(value)` as needed
 - `index(fieldName)` — makes a field queryable with ordering and range filters
 
-Fields are for scalar metadata that you want to query or index. The canonical CRDT pattern is: row fields hold metadata and lookup keys, while the CRDT document holds the collaborative value state for that row target.
+Fields are for metadata that you want to query or index. The canonical CRDT pattern is: row fields hold metadata and row refs, while the CRDT document holds the collaborative value state for that row.
 
 ---
 
@@ -129,8 +129,8 @@ if (!session.signedIn) {
 const board = await db.put("boards", { title: "Launch checklist" });
 
 // Create a child row — pass the parent handle directly
-await db.put("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board });
-await db.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
+await db.put("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board.ref });
+await db.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board.ref });
 ```
 
 `put` returns a `RowHandle` with typed `.fields`, and is usable immediately as a parent for child rows.
@@ -145,7 +145,7 @@ await db.update("cards", card, { done: true });
 
 ## Querying
 
-PutBase queries always run within a known scope. For `cards`, that scope is a `board`, so you pass `in: board`. For collections declared as `in: ["user"]`, omitting `in` means "use the current signed-in user's built-in `user` row."
+PutBase queries always run within a known scope. For `cards`, that scope is a `board`, so you pass `in: board.ref`. For collections declared as `in: ["user"]`, omitting `in` means "use the current signed-in user's built-in `user` row."
 
 Queries never mean "all accessible rows". If a collection is not declared as `in: ["user"]`, omitting `in` is an error.
 
@@ -179,7 +179,7 @@ import { useQuery } from "@putbase/react";
 
 function CardList({ board }: { board: BoardHandle }) {
   const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
-    in: board,
+    in: board.ref,
     index: "byCreatedAt",
     order: "asc",
   });
@@ -227,17 +227,17 @@ Sharing is a three-step flow:
 
 ```ts
 // 1. Generate a token for the row you want to share
-const token = await db.createInviteToken(board);
+const token = await db.createInviteToken(board.ref);
 
 // 2. Build a link the recipient can open in their browser
-const link = db.createInviteLink(board, token.token);
-// → "https://yourapp.com/?pb=...&token=..."
+const link = db.createInviteLink(board.ref, token.token);
+// → "https://yourapp.com/?pb=..."
 
 // 3. Recipient opens the link; your app calls openInvite
 const board = await db.openInvite(link);
 ```
 
-`openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ target, inviteToken? }` object from `db.parseInvite(input)`.
+`openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`.
 
 In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
 
@@ -251,15 +251,15 @@ Once users have joined a row you can inspect and manage the member list:
 
 ```ts
 // Flat list of usernames
-const members = await db.listMembers(board);
+const members = await db.listMembers(board.ref);
 
 // With roles
-const detailed = await db.listDirectMembers(board);
+const detailed = await db.listDirectMembers(board.ref);
 // → [{ username: "alice", role: "writer" }, ...]
 
 // Add or remove manually
-await db.addMember(board, "bob", "writer");
-await db.removeMember(board, "eve");
+await db.addMember(board.ref, "bob", "writer");
+await db.removeMember(board.ref, "eve");
 ```
 
 Membership inherited through a parent row is visible via `listEffectiveMembers`.
@@ -313,17 +313,17 @@ pnpm --filter woof-app dev
 | Method | Description |
 |--------|-------------|
 | `new PutBase({ schema, appBaseUrl? })` | Create a client. Pass `appBaseUrl` so invite links point back to your app. |
-| `ensureReady()` | Explicitly await authentication and provisioning. Optional — all operations wait for readiness automatically. |
+| `ensureReady()` | Explicitly await authentication and provisioning before mutations. Recommended during app startup. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
-| `put(collection, fields, options?)` | Create a row. Pass `{ in: parentHandle }` for child rows; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a `RowHandle`. |
+| `put(collection, fields, options?)` | Create a row. Pass `{ in: parentRef }` for child rows; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a `RowHandle`. |
 | `update(collection, row, fields)` | Merge field updates onto a row. Returns a refreshed `RowHandle`. |
-| `getRow(collection, row)` | Fetch a row by typed reference. |
+| `getRow(row)` | Fetch a row by typed reference. |
 | `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. |
 | `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a handle with `.disconnect()`. |
 | `createInviteToken(row)` | Generate a new invite token for a row. |
 | `getExistingInviteToken(row)` | Return the existing token if one exists, or `null`. |
-| `createInviteLink(row, token)` | Build a shareable URL containing the row target and token. |
-| `parseInvite(input)` | Parse an invite URL or worker URL into `{ target, inviteToken? }`. |
+| `createInviteLink(row, token)` | Build a shareable URL containing a serialized row ref and token. |
+| `parseInvite(input)` | Parse an invite URL into `{ ref, inviteToken? }`. |
 | `openInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. Invite joins become direct `"writer"` members by default. |
 | `rememberPerUserRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
 | `openRememberedPerUserRow(key)` | Re-open the remembered row for the signed-in user, or `null`. |
@@ -344,10 +344,9 @@ pnpm --filter woof-app dev
 |--------|-------------|
 | `.fields` | Current field snapshot, typed from your schema. Treat it as read-only; the object is replaced when fields change. |
 | `.collection` | The collection this row belongs to. |
-| `.target` | Stable URL for this row — safe to persist and restore across sessions. |
-| `.id` / `.owner` | Row identity components. |
+| `.ref` | Portable `RowRef` object for persistence, invites, and reopening the row later. |
+| `.id` / `.owner` | Row identity metadata. |
 | `.refresh()` | Re-fetch fields from the server. Resolves to the latest field snapshot. |
-| `.toRef()` | Plain `{ id, owner, target, collection }` reference, useful for serialisation. |
 | `.connectCrdt(callbacks)` | Shorthand for `db.connectCrdt(row, callbacks)`. |
 | `.in.add(parent)` / `.in.remove(parent)` / `.in.list()` | Manage parent links. |
 | `.members.add(username, { role })` / `.members.remove(username)` / `.members.list()` | Manage membership. |

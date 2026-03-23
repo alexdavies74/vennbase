@@ -17,11 +17,11 @@ export const woofSchema = defineSchema({
   dogHistory: collection({
     in: ["user"],
     fields: {
-      dogTarget: field.string(),
+      dogRef: field.ref("dogs"),
       status: field.string(),
     },
     indexes: {
-      byDogTarget: index("dogTarget"),
+      byDogRef: index("dogRef"),
       byStatus: index("status"),
     },
   }),

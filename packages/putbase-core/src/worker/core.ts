@@ -2,7 +2,7 @@ import { encodeCompositeFieldValues } from "../key-encoding";
 import { parseProtectedRequest, verifyPrincipalProof, verifyRequestProof } from "../auth";
 import { canonicalize } from "../crypto";
 import type { WorkersHandler } from "@heyputer/puter.js";
-import type { DbFieldValue, DbRowRef, MemberRole } from "../schema";
+import type { DbFieldValue, MemberRole, RowRef } from "../schema";
 import type {
   ApiError,
   InviteToken,
@@ -73,32 +73,28 @@ interface ChildSchemaPayload {
 }
 
 interface RegisterChildRequest {
-  childRowId: string;
+  childRef: RowRef;
   childOwner: string;
-  childTarget?: string;
-  childWorkerUrl?: string;
   collection: string;
   fields?: Record<string, DbFieldValue>;
   schema?: ChildSchemaPayload;
 }
 
 interface UnregisterChildRequest {
-  childRowId: string;
+  childRef: RowRef;
   childOwner: string;
   collection: string;
 }
 
 interface UpdateIndexRequest {
-  childRowId: string;
+  childRef: RowRef;
   childOwner: string;
-  childTarget?: string;
-  childWorkerUrl?: string;
   collection: string;
   fields: Record<string, DbFieldValue>;
 }
 
 interface ParentLinkRequest {
-  parentRef: DbRowRef;
+  parentRef: RowRef;
 }
 
 interface MemberMutationRequest {
@@ -122,7 +118,7 @@ interface ChildCollectionSchema {
 interface ChildEntry {
   rowId: string;
   owner: string;
-  target: string;
+  baseUrl: string;
   collection: string;
   fields: Record<string, JsonValue>;
   addedAt: number;
@@ -133,7 +129,7 @@ interface ChildEntry {
 interface IndexEntry {
   rowId: string;
   owner: string;
-  target: string;
+  baseUrl: string;
   collection: string;
   fields: Record<string, JsonValue>;
   updatedAt: number;
@@ -143,7 +139,7 @@ interface IndexEntry {
 interface EffectiveMember {
   username: string;
   role: MemberRole;
-  via: "direct" | DbRowRef;
+  via: "direct" | RowRef;
 }
 
 export interface RowWorkerDeps {
@@ -291,6 +287,10 @@ function buildRowWorkerUrl(workerBaseUrl: string, rowId: string): string {
   return `${stripTrailingSlash(workerBaseUrl)}/rows/${encodeURIComponent(rowId)}`;
 }
 
+function rowUrlFromRef(row: Pick<RowRef, "id" | "baseUrl">): string {
+  return buildRowWorkerUrl(row.baseUrl, row.id);
+}
+
 function parseOptionalNonNegativeInteger(value: string | null, fallback: number): number {
   if (value === null) {
     return fallback;
@@ -379,43 +379,50 @@ function toFieldRecord(value: unknown, fieldName: string): Record<string, DbFiel
       continue;
     }
 
-    error(400, "BAD_REQUEST", `${fieldName}.${key} must be a string, number, or boolean`);
+    if (isRowRefLike(candidate)) {
+      output[key] = normalizeRowRef(candidate, `${fieldName}.${key}`);
+      continue;
+    }
+
+    error(400, "BAD_REQUEST", `${fieldName}.${key} must be a string, number, boolean, or row ref`);
   }
 
   return output;
 }
 
-function normalizeRowRef(value: unknown, fieldName: string): DbRowRef {
+function isRowRefLike(value: unknown): value is RowRef {
+  return !!value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof (value as { id?: unknown }).id === "string"
+    && typeof (value as { collection?: unknown }).collection === "string"
+    && typeof (value as { baseUrl?: unknown }).baseUrl === "string";
+}
+
+function normalizeRowRef(value: unknown, fieldName: string): RowRef {
   if (!isRecord(value)) {
     error(400, "BAD_REQUEST", `${fieldName} must be an object`);
   }
 
   const id = typeof value.id === "string" ? value.id.trim() : "";
   const collection = typeof value.collection === "string" ? value.collection.trim() : "";
-  const owner = typeof value.owner === "string" ? value.owner.trim() : "";
-  const target = typeof value.target === "string"
-    ? stripTrailingSlash(value.target)
-    : typeof value.workerUrl === "string"
-      ? stripTrailingSlash(value.workerUrl)
-      : "";
+  const baseUrl = typeof value.baseUrl === "string" ? stripTrailingSlash(value.baseUrl) : "";
 
-  if (!id || !collection || !owner || !target) {
-    error(400, "BAD_REQUEST", `${fieldName} must include id, collection, owner, and target`);
+  if (!id || !collection || !baseUrl) {
+    error(400, "BAD_REQUEST", `${fieldName} must include id, collection, and baseUrl`);
   }
 
   return {
     id,
     collection,
-    owner,
-    target,
+    baseUrl,
   };
 }
 
-function sameRowRef(left: DbRowRef, right: DbRowRef): boolean {
+function sameRowRef(left: RowRef, right: RowRef): boolean {
   return left.id === right.id
     && left.collection === right.collection
-    && left.owner === right.owner
-    && stripTrailingSlash(left.target) === stripTrailingSlash(right.target);
+    && stripTrailingSlash(left.baseUrl) === stripTrailingSlash(right.baseUrl);
 }
 
 function roleRank(role: MemberRole | null): number {
@@ -1047,20 +1054,20 @@ export class RowWorker {
       rowId: parentRowId,
     });
 
-    const childTarget = stripTrailingSlash(body.childTarget ?? body.childWorkerUrl ?? "");
-    const parentTarget = inferRowWorkerUrlFromRequest(request.url, parentRowId, this.config.workerUrl);
+    const childRef = normalizeRowRef(body.childRef, "childRef");
+    const parentBaseUrl = inferFederationWorkerBaseUrlFromRequest(request.url, this.config.workerUrl);
 
-    if (!body.childRowId || !body.childOwner || !childTarget || !body.collection) {
-      error(400, "BAD_REQUEST", "childRowId, childOwner, childTarget, and collection are required");
+    if (!body.childOwner || !body.collection) {
+      error(400, "BAD_REQUEST", "childRef, childOwner, and collection are required");
     }
 
     await this.assertCanMaintainParentIndex({
       auth,
       childOwner: body.childOwner,
-      childTarget,
+      childRef,
       ctx,
       parentRowId,
-      parentTarget,
+      parentBaseUrl,
       principal,
     });
 
@@ -1070,9 +1077,9 @@ export class RowWorker {
     }
 
     const childEntry: ChildEntry = {
-      rowId: body.childRowId,
+      rowId: childRef.id,
       owner: body.childOwner,
-      target: childTarget,
+      baseUrl: childRef.baseUrl,
       collection: body.collection,
       fields: body.fields ? toFieldRecord(body.fields, "fields") : {},
       addedAt: this.now(),
@@ -1081,7 +1088,7 @@ export class RowWorker {
     };
 
     await this.kv.set(
-      rowChildKey(parentRowId, body.collection, body.childOwner, body.childRowId),
+      rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id),
       childEntry,
     );
 
@@ -1106,8 +1113,9 @@ export class RowWorker {
       rowId: parentRowId,
     });
 
-    if (!body.childRowId || !body.childOwner || !body.collection) {
-      error(400, "BAD_REQUEST", "childRowId, childOwner, and collection are required");
+    const childRef = normalizeRowRef(body.childRef, "childRef");
+    if (!body.childOwner || !body.collection) {
+      error(400, "BAD_REQUEST", "childRef, childOwner, and collection are required");
     }
 
     const requesterCanManageParent = await this.hasRole(parentRowId, principal, ctx, ["writer"]);
@@ -1115,7 +1123,7 @@ export class RowWorker {
       error(401, "UNAUTHORIZED", "Only child owner or parent writer can unregister child");
     }
 
-    const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, body.childRowId);
+    const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
     const existing = await this.kv.get<ChildEntry>(childKey);
     if (existing) {
       await this.kv.set(childKey, {
@@ -1125,7 +1133,7 @@ export class RowWorker {
       } satisfies ChildEntry);
     }
 
-    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, body.childRowId);
+    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, childRef.id);
 
     return jsonResponse(200, { ok: true });
   }
@@ -1141,29 +1149,29 @@ export class RowWorker {
       requireRequestProof: false,
     });
 
-    if (!body.childRowId || !body.childOwner || !body.collection) {
-      error(400, "BAD_REQUEST", "childRowId, childOwner, collection, and fields are required");
+    const childRef = normalizeRowRef(body.childRef, "childRef");
+    if (!body.childOwner || !body.collection) {
+      error(400, "BAD_REQUEST", "childRef, childOwner, collection, and fields are required");
     }
 
-    const childTarget = stripTrailingSlash(body.childTarget ?? body.childWorkerUrl ?? "");
-    const parentTarget = inferRowWorkerUrlFromRequest(request.url, parentRowId, this.config.workerUrl);
+    const parentBaseUrl = inferFederationWorkerBaseUrlFromRequest(request.url, this.config.workerUrl);
     await this.assertCanMaintainParentIndex({
       auth,
       childOwner: body.childOwner,
-      childTarget,
+      childRef,
       ctx,
       parentRowId,
-      parentTarget,
+      parentBaseUrl,
       principal,
     });
 
     const schema = await this.getChildSchema(parentRowId, body.collection);
-    const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, body.childRowId);
+    const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
     const existing = await this.kv.get<ChildEntry>(childKey);
     const nextEntry: ChildEntry = {
-      rowId: body.childRowId,
+      rowId: childRef.id,
       owner: body.childOwner,
-      target: childTarget || stripTrailingSlash(existing?.target ?? ""),
+      baseUrl: childRef.baseUrl || stripTrailingSlash(existing?.baseUrl ?? ""),
       collection: body.collection,
       fields: toFieldRecord(body.fields, "fields"),
       addedAt: existing?.addedAt ?? this.now(),
@@ -1172,7 +1180,7 @@ export class RowWorker {
     };
 
     await this.kv.set(childKey, nextEntry);
-    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, body.childRowId);
+    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, childRef.id);
 
     if (!schema) {
       return jsonResponse(200, {
@@ -1240,7 +1248,7 @@ export class RowWorker {
       rows: rows.map((row) => ({
         rowId: row.rowId,
         owner: row.owner,
-        target: row.target,
+        baseUrl: row.baseUrl,
         collection: row.collection,
         fields: row.fields,
       })),
@@ -1415,7 +1423,7 @@ export class RowWorker {
             },
           };
           const response = await ctx.workersExec!(
-            `${stripTrailingSlash(parentRef.target)}/members/effective`,
+            `${rowUrlFromRef(parentRef)}/members/effective`,
             {
               method: "POST",
               headers: {
@@ -1454,10 +1462,10 @@ export class RowWorker {
   private async assertCanMaintainParentIndex(args: {
     auth: ProtectedRequest<unknown>["auth"];
     childOwner: string;
-    childTarget: string;
+    childRef: RowRef;
     ctx: WorkerRequestContext;
     parentRowId: string;
-    parentTarget: string;
+    parentBaseUrl: string;
     principal: VerifiedPrincipal;
   }): Promise<void> {
     const isParentMember = await this.hasRole(args.parentRowId, args.principal, args.ctx, ["writer", "reader"]);
@@ -1469,7 +1477,10 @@ export class RowWorker {
 
     if (
       canWriteChild
-      && await this.remoteRowHasParent(args.childTarget, args.parentTarget, args.auth.principal, args.ctx)
+      && await this.remoteRowHasParent(args.childRef, {
+        id: args.parentRowId,
+        baseUrl: args.parentBaseUrl,
+      }, args.auth.principal, args.ctx)
     ) {
       return;
     }
@@ -1480,7 +1491,7 @@ export class RowWorker {
   private async canWriteChildRow(args: {
     auth: ProtectedRequest<unknown>["auth"];
     childOwner: string;
-    childTarget: string;
+    childRef: RowRef;
     ctx: WorkerRequestContext;
     principal: VerifiedPrincipal;
   }): Promise<boolean> {
@@ -1488,16 +1499,12 @@ export class RowWorker {
       return true;
     }
 
-    if (!args.childTarget) {
-      return false;
-    }
-
-    const role = await this.resolveRemoteRowRole(args.childTarget, args.auth.principal, args.ctx, 1);
+    const role = await this.resolveRemoteRowRole(args.childRef, args.auth.principal, args.ctx, 1);
     return role === "writer";
   }
 
   private async resolveRemoteRowRole(
-    target: string,
+    rowRef: RowRef,
     principal: PrincipalProof,
     ctx: WorkerRequestContext,
     ttl: number,
@@ -1516,7 +1523,7 @@ export class RowWorker {
         },
       };
       const response = await ctx.workersExec(
-        `${stripTrailingSlash(target)}/members/role`,
+        `${rowUrlFromRef(rowRef)}/members/role`,
         {
           method: "POST",
           headers: {
@@ -1543,8 +1550,8 @@ export class RowWorker {
   }
 
   private async remoteRowHasParent(
-    target: string,
-    parentTarget: string,
+    rowRef: RowRef,
+    parentRef: Pick<RowRef, "id" | "baseUrl">,
     principal: PrincipalProof,
     ctx: WorkerRequestContext,
   ): Promise<boolean> {
@@ -1560,7 +1567,7 @@ export class RowWorker {
         payload: {},
       };
       const response = await ctx.workersExec(
-        `${stripTrailingSlash(target)}/parents/list`,
+        `${rowUrlFromRef(rowRef)}/parents/list`,
         {
           method: "POST",
           headers: {
@@ -1570,12 +1577,14 @@ export class RowWorker {
           body: JSON.stringify(forwarded),
         },
       );
-      const payload = await response.json().catch(() => null) as { parentRefs?: Array<{ target?: string }> } | null;
+      const payload = await response.json().catch(() => null) as { parentRefs?: Array<{ id?: string; baseUrl?: string }> } | null;
       if (!response.ok) {
         return false;
       }
 
-      return (payload?.parentRefs ?? []).some((parentRef) => stripTrailingSlash(parentRef.target ?? "") === parentTarget);
+      return (payload?.parentRefs ?? []).some((candidate) =>
+        candidate.id === parentRef.id && stripTrailingSlash(candidate.baseUrl ?? "") === stripTrailingSlash(parentRef.baseUrl),
+      );
     } catch {
       return false;
     }
@@ -1606,7 +1615,7 @@ export class RowWorker {
       const child: ChildEntry = {
         rowId: value.rowId,
         owner: value.owner,
-        target: value.target,
+        baseUrl: value.baseUrl,
         collection: value.collection,
         fields: value.fields,
         addedAt: value.updatedAt,
@@ -1683,7 +1692,7 @@ export class RowWorker {
         const payload: IndexEntry = {
           rowId: child.rowId,
           owner: child.owner,
-          target: child.target,
+          baseUrl: child.baseUrl,
           collection: child.collection,
           fields: indexedFields,
           updatedAt: this.now(),
@@ -1758,8 +1767,8 @@ export class RowWorker {
     return stored;
   }
 
-  private async getParentRefs(rowId: string): Promise<DbRowRef[]> {
-    return (await this.kv.get<DbRowRef[]>(rowParentRefsKey(rowId))) ?? [];
+  private async getParentRefs(rowId: string): Promise<RowRef[]> {
+    return (await this.kv.get<RowRef[]>(rowParentRefsKey(rowId))) ?? [];
   }
 
   private async assertMember(
@@ -1824,7 +1833,7 @@ export class RowWorker {
             },
           };
           const response = await ctx.workersExec!(
-            `${stripTrailingSlash(parentRef.target)}/members/role`,
+            `${rowUrlFromRef(parentRef)}/members/role`,
             {
               method: "POST",
               headers: {
@@ -1952,18 +1961,18 @@ export class RowWorker {
     requestUrl?: string;
   }): Promise<void> {
     const key = rowMetaKey(args.rowId);
-    const inferredTarget = args.requestUrl
-      ? inferRowWorkerUrlFromRequest(args.requestUrl, args.rowId, this.config.workerUrl)
+    const inferredBaseUrl = args.requestUrl
+      ? inferFederationWorkerBaseUrlFromRequest(args.requestUrl, this.config.workerUrl)
       : this.config.workerUrl
-        ? buildRowWorkerUrl(this.config.workerUrl, args.rowId)
-      : undefined;
+        ? stripTrailingSlash(this.config.workerUrl)
+        : undefined;
     const existing = await this.kv.get<Row>(key);
 
     if (existing) {
-      if (inferredTarget && existing.target !== inferredTarget) {
+      if (inferredBaseUrl && existing.baseUrl !== inferredBaseUrl) {
         await this.kv.set(key, {
           ...existing,
-          target: inferredTarget,
+          baseUrl: inferredBaseUrl,
         });
       }
       return;
@@ -1972,15 +1981,15 @@ export class RowWorker {
     if (!args.rowName) {
       error(404, "BAD_REQUEST", `Row ${args.rowId} does not exist`);
     }
-    if (!inferredTarget) {
-      error(500, "BAD_REQUEST", `Unable to infer target for row ${args.rowId}`);
+    if (!inferredBaseUrl) {
+      error(500, "BAD_REQUEST", `Unable to infer baseUrl for row ${args.rowId}`);
     }
 
     const row: Row = {
       id: args.rowId,
       name: args.rowName,
       owner: this.config.owner,
-      target: inferredTarget,
+      baseUrl: inferredBaseUrl,
       createdAt: this.now(),
     };
 
