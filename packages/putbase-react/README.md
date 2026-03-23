@@ -109,6 +109,26 @@ function RecentBoards() {
 }
 ```
 
+## Single-row reads
+
+`useRow` is the single-row equivalent of `useQuery`: it polls for changes and re-renders automatically.
+
+If you need one row in React, prefer `useRow(db, rowRef)` over calling `db.getRow(...)` in an effect and wiring your own polling loop.
+
+```tsx
+import { useRow } from "@putbase/react";
+import { db } from "./db";
+
+function BoardTitle({ boardRef }: { boardRef: DbRowRef<"boards"> }) {
+  const { data: board, status } = useRow<Schema, "boards">(db, boardRef);
+
+  if (status !== "success" || !board) return <p>Loading…</p>;
+  return <h1>{board.fields.title}</h1>;
+}
+```
+
+If all you have is a target string, use `useRowTarget`. It has the same live polling behavior, but returns `AnyRowHandle<Schema>` because the collection is not known from the string alone.
+
 ## Row Handle Identity
 
 `useRow`, `useRowTarget`, and `useQuery` keep `RowHandle` identity stable for the life of a row within a `PutBase` client. When the row fields change, the same handle object is reused and `row.fields` is replaced with a fresh snapshot object.
@@ -275,6 +295,7 @@ function useRow<
 ```
 
 - `row: null | undefined` keeps the hook idle.
+- `useRow` polls for changes and re-renders automatically. In React, prefer it over manual polling around `client.getRow(...)`.
 - The returned handle matches `client.getRow(...)`, including parent collection constraints.
 
 ### `useRowTarget`
@@ -288,6 +309,7 @@ function useRowTarget<Schema extends DbSchema>(
 ```
 
 - `target: null | undefined` keeps the hook idle.
+- `useRowTarget` has the same live polling behavior as `useRow`.
 - The return type is `AnyRowHandle<Schema>` because the target string does not carry a collection literal.
 
 ### `useInviteLink`
