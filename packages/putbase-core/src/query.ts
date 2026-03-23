@@ -1,6 +1,7 @@
 import { createAdaptivePoller } from "./polling";
+import { OptimisticStore } from "./optimistic-store";
 import { RowHandle } from "./row-handle";
-import type { Rows } from "./rows";
+import { normalizeParentRefs } from "./row-reference";
 import type {
   AllowedParentCollections,
   CollectionName,
@@ -13,7 +14,7 @@ import type {
   RowFields,
 } from "./schema";
 import { getCollectionSpec, pickIndex } from "./schema";
-import { toRowRef } from "./row-reference";
+import { stableJsonStringify } from "./stable-json";
 import type { Transport } from "./transport";
 import { normalizeTarget } from "./transport";
 import type { JsonValue } from "./types";
@@ -107,22 +108,6 @@ function compareIndexedRows(
   return order === "desc" ? -rowIdComparison : rowIdComparison;
 }
 
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`;
-  }
-
-  const record = value as Record<string, unknown>;
-  const entries = Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key])}`);
-  return `{${entries.join(",")}}`;
-}
-
 function snapshotRows(rows: Array<RowHandle<string, DbRowFields>>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
@@ -134,17 +119,18 @@ function snapshotRows(rows: Array<RowHandle<string, DbRowFields>>): string {
   return stableJsonStringify(snapshot);
 }
 
-function normalizeParents(input: DbRowRef | DbRowRef[] | undefined): DbRowRef[] {
-  if (!input) {
-    return [];
-  }
-  return (Array.isArray(input) ? input : [input]).map((row) => toRowRef(row));
+interface QueryRowLoader<Schema extends DbSchema> {
+  getRow<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    row: DbRowRef<TCollection>,
+  ): Promise<RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema>>;
 }
 
 export class Query<Schema extends DbSchema> {
   constructor(
     private readonly transport: Transport,
-    private readonly rows: Rows<Schema>,
+    private readonly rowLoader: QueryRowLoader<Schema>,
+    private readonly optimisticStore: OptimisticStore,
     private readonly schema: Schema,
     private readonly resolveOptions?: <TCollection extends CollectionName<Schema>>(
       collection: TCollection,
@@ -159,7 +145,7 @@ export class Query<Schema extends DbSchema> {
     const resolvedOptions = this.resolveOptions
       ? await this.resolveOptions(collection, options)
       : options;
-    const parentRefs = normalizeParents(resolvedOptions.in);
+    const parentRefs = normalizeParentRefs(resolvedOptions.in);
     if (parentRefs.length === 0) {
       throw new Error("query requires at least one parent in scope");
     }
@@ -170,7 +156,7 @@ export class Query<Schema extends DbSchema> {
 
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
-        if (typeof this.rows.hasPendingCreate === "function" && this.rows.hasPendingCreate(parent)) {
+        if (this.optimisticStore.hasPendingCreate(parent)) {
           return [];
         }
 
@@ -191,11 +177,7 @@ export class Query<Schema extends DbSchema> {
         });
 
         return response.rows.filter((row) => {
-          if (typeof this.rows.shouldExcludeFromParent !== "function") {
-            return true;
-          }
-
-          return !this.rows.shouldExcludeFromParent({
+          return !this.optimisticStore.shouldExcludeFromParent({
             id: row.rowId,
             owner: row.owner,
             target: normalizeTarget(row.target),
@@ -215,16 +197,13 @@ export class Query<Schema extends DbSchema> {
       }
     }
 
-    const queryRows = Array.from(deduped.values());
-    const optimisticRows = (typeof this.rows.getOptimisticQueryRows === "function"
-      ? this.rows.getOptimisticQueryRows(collection, parentRefs)
-      : [])
-      .map(({ row, fields }) => ({
-        rowId: row.id,
-        owner: row.owner,
-        target: row.target,
+    const optimisticRows = this.optimisticStore.getOptimisticQueryRows(collection, parentRefs)
+      .map((record) => ({
+        rowId: record.row.id,
+        owner: record.row.owner,
+        target: record.row.target,
         collection,
-        fields,
+        fields: this.optimisticStore.getLogicalFields(record.row) ?? {},
       }))
       .filter((row) => {
         if (selectedIndex) {
@@ -248,11 +227,10 @@ export class Query<Schema extends DbSchema> {
     }
 
     const mergedRows = Array.from(deduped.values()).filter((row) => {
-      const localFields = this.rows.getLogicalFields?.({
+      const localFields = this.optimisticStore.getLogicalFields({
         id: row.rowId,
         owner: row.owner,
         target: normalizeTarget(row.target),
-        collection,
       }) ?? row.fields;
 
       if (selectedIndex) {
@@ -291,7 +269,7 @@ export class Query<Schema extends DbSchema> {
           target: normalizeTarget(row.target),
         };
 
-        return this.rows.getRow(collection, rowRef);
+        return this.rowLoader.getRow(collection, rowRef);
       }),
     );
 

@@ -362,15 +362,7 @@ export class OptimisticStore {
     record.pendingInviteToken = inviteToken;
   }
 
-  confirmInviteToken(row: DbRowRef): void {
-    const record = this.rows.get(rowKey(row));
-    if (!record) {
-      return;
-    }
-    record.pendingInviteToken = null;
-  }
-
-  rollbackInviteToken(row: DbRowRef): void {
+  clearInviteToken(row: DbRowRef): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;

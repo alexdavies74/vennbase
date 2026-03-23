@@ -19,3 +19,13 @@ export function toRowRef<TCollection extends string>(
     collection: row.collection,
   };
 }
+
+export function normalizeParentRefs<TCollection extends string>(
+  input: DbRowRef<TCollection> | DbRowRef<TCollection>[] | undefined,
+): DbRowRef<TCollection>[] {
+  if (!input) {
+    return [];
+  }
+
+  return (Array.isArray(input) ? input : [input]).map((row) => toRowRef(row));
+}

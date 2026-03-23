@@ -2,7 +2,7 @@ import { AuthManager } from "./auth";
 import { Identity } from "./identity";
 import { Invites } from "./invites";
 import { Members } from "./members";
-import { createMutationReceipt, type MutationReceipt } from "./mutation-receipt";
+import { createMutationReceipt, type MutableMutationReceipt, type MutationReceipt } from "./mutation-receipt";
 import { OptimisticStore } from "./optimistic-store";
 import { Parents } from "./parents";
 import {
@@ -36,6 +36,7 @@ import type {
 import { resolveBackend } from "./backend";
 import { missingPuterProvisioningMessage } from "./errors";
 import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, getCollectionSpec, hasImplicitUserScope, resolveCollectionName } from "./schema";
+import { stableJsonStringify } from "./stable-json";
 import { normalizeTarget } from "./transport";
 import { Transport } from "./transport";
 import type {
@@ -73,22 +74,6 @@ interface ReadyMutationState {
 
 const INTERNAL_USER_SCOPE_ROW_KEY = "__putbase_user_scope_v1__";
 type LocalMutationListener = () => void;
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`;
-  }
-
-  const record = value as Record<string, unknown>;
-  const entries = Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key])}`);
-  return `{${entries.join(",")}}`;
-}
 
 export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBackend<Schema> {
   private readonly auth: AuthManager;
@@ -148,7 +133,8 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     );
     this.queryModule = new Query(
       this.transport,
-      this.rowsModule,
+      { getRow: (collection, row) => this.rowsModule.getRow(collection, row) },
+      this.optimisticStore,
       options.schema,
       (collection, queryOptions) => this.resolveImplicitQueryOptions(collection, queryOptions),
     );
@@ -276,24 +262,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.optimisticStore.setInviteToken(row, inviteToken);
     this.notifyLocalMutation();
 
-    this.writeSettler.schedule(
-      `invite:${row.owner}:${row.id}`,
-      async () => {
-        try {
-          await this.invitesModule.createInviteTokenRemote(row, inviteToken);
-          this.optimisticStore.confirmInviteToken(row);
-          receipt.resolve(inviteToken);
-        } catch (error) {
-          this.optimisticStore.rollbackInviteToken(row);
-          receipt.reject(error);
-          this.notifyLocalMutation();
-          throw error;
-        }
-        this.notifyLocalMutation();
-        return inviteToken;
-      },
-      [this.optimisticStore.getPendingCreateDependency(row)].filter((value): value is Promise<unknown> => value !== null),
-    ).catch(() => undefined);
+    this.scheduleConfirmableWrite({
+      key: `invite:${row.owner}:${row.id}`,
+      operation: () => this.invitesModule.createInviteTokenRemote(row, inviteToken),
+      confirm: () => this.optimisticStore.clearInviteToken(row),
+      rollback: () => this.optimisticStore.clearInviteToken(row),
+      dependencies: [this.optimisticStore.getPendingCreateDependency(row)].filter((value): value is Promise<unknown> => value !== null),
+      receipt,
+    });
 
     return receipt;
   }
@@ -339,23 +315,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       this.optimisticStore.getPendingCreateDependency(parent),
     ].filter((dependency): dependency is Promise<unknown> => dependency !== null);
 
-    this.writeSettler.schedule(
-      `parent-add:${child.owner}:${child.id}`,
-      async () => {
-        try {
-          await this.parentsModule.addRemote(child, parent);
-          this.optimisticStore.confirmParentAdd(child, parent);
-          receipt.resolve(undefined);
-        } catch (error) {
-          this.optimisticStore.rollbackParentAdd(child, parent);
-          receipt.reject(error);
-          this.notifyLocalMutation();
-          throw error;
-        }
-        this.notifyLocalMutation();
-      },
+    this.scheduleConfirmableWrite({
+      key: `parent-add:${child.owner}:${child.id}`,
+      operation: () => this.parentsModule.addRemote(child, parent),
+      confirm: () => this.optimisticStore.confirmParentAdd(child, parent),
+      rollback: () => this.optimisticStore.rollbackParentAdd(child, parent),
       dependencies,
-    ).catch(() => undefined);
+      receipt,
+    });
 
     return receipt;
   }
@@ -365,23 +332,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.optimisticStore.removeParent(child, parent);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
-    this.writeSettler.schedule(
-      `parent-remove:${child.owner}:${child.id}`,
-      async () => {
-        try {
-          await this.parentsModule.removeRemote(child, parent);
-          this.optimisticStore.confirmParentRemove(child, parent);
-          receipt.resolve(undefined);
-        } catch (error) {
-          this.optimisticStore.rollbackParentRemove(child, parent);
-          receipt.reject(error);
-          this.notifyLocalMutation();
-          throw error;
-        }
-        this.notifyLocalMutation();
-      },
-      [this.optimisticStore.getPendingCreateDependency(child)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
-    ).catch(() => undefined);
+    this.scheduleConfirmableWrite({
+      key: `parent-remove:${child.owner}:${child.id}`,
+      operation: () => this.parentsModule.removeRemote(child, parent),
+      confirm: () => this.optimisticStore.confirmParentRemove(child, parent),
+      rollback: () => this.optimisticStore.rollbackParentRemove(child, parent),
+      dependencies: [this.optimisticStore.getPendingCreateDependency(child)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
+      receipt,
+    });
 
     return receipt;
   }
@@ -401,23 +359,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.optimisticStore.addMember(rowRef, username, role);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
-    this.writeSettler.schedule(
-      `member-add:${row.owner}:${row.id}:${username}`,
-      async () => {
-        try {
-          await this.membersModule.addRemote(row, username, role);
-          this.optimisticStore.confirmMemberMutation(rowRef);
-          receipt.resolve(undefined);
-        } catch (error) {
-          this.optimisticStore.rollbackMemberMutation(rowRef);
-          receipt.reject(error);
-          this.notifyLocalMutation();
-          throw error;
-        }
-        this.notifyLocalMutation();
-      },
-      [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
-    ).catch(() => undefined);
+    this.scheduleConfirmableWrite({
+      key: `member-add:${row.owner}:${row.id}:${username}`,
+      operation: () => this.membersModule.addRemote(row, username, role),
+      confirm: () => this.optimisticStore.confirmMemberMutation(rowRef),
+      rollback: () => this.optimisticStore.rollbackMemberMutation(rowRef),
+      dependencies: [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
+      receipt,
+    });
 
     return receipt;
   }
@@ -428,23 +377,14 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
     this.optimisticStore.removeMember(rowRef, username);
     const receipt = createMutationReceipt(undefined);
     this.notifyLocalMutation();
-    this.writeSettler.schedule(
-      `member-remove:${row.owner}:${row.id}:${username}`,
-      async () => {
-        try {
-          await this.membersModule.removeRemote(row, username);
-          this.optimisticStore.confirmMemberMutation(rowRef);
-          receipt.resolve(undefined);
-        } catch (error) {
-          this.optimisticStore.rollbackMemberMutation(rowRef);
-          receipt.reject(error);
-          this.notifyLocalMutation();
-          throw error;
-        }
-        this.notifyLocalMutation();
-      },
-      [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
-    ).catch(() => undefined);
+    this.scheduleConfirmableWrite({
+      key: `member-remove:${row.owner}:${row.id}:${username}`,
+      operation: () => this.membersModule.removeRemote(row, username),
+      confirm: () => this.optimisticStore.confirmMemberMutation(rowRef),
+      rollback: () => this.optimisticStore.rollbackMemberMutation(rowRef),
+      dependencies: [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((dependency): dependency is Promise<unknown> => dependency !== null),
+      receipt,
+    });
 
     return receipt;
   }
@@ -666,6 +606,34 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
         // Ignore subscriber failures so local writes still succeed.
       }
     }
+  }
+
+  private scheduleConfirmableWrite<TValue>(args: {
+    key: string;
+    operation: () => Promise<unknown>;
+    confirm: () => void;
+    rollback: () => void;
+    dependencies: Promise<unknown>[];
+    receipt: MutableMutationReceipt<TValue>;
+  }): void {
+    this.writeSettler.schedule(
+      args.key,
+      async () => {
+        try {
+          await args.operation();
+          args.confirm();
+          args.receipt.resolve();
+        } catch (error) {
+          args.rollback();
+          args.receipt.reject(error);
+          this.notifyLocalMutation();
+          throw error;
+        }
+
+        this.notifyLocalMutation();
+      },
+      args.dependencies,
+    ).catch(() => undefined);
   }
 
   private resolveImplicitPutOptionsSync<TCollection extends CollectionName<Schema>>(

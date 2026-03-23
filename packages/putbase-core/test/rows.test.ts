@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createMutationReceipt } from "../src/mutation-receipt";
+import { OptimisticStore } from "../src/optimistic-store";
 import { loadRememberedPerUserRow, rememberPerUserRow } from "../src/per-user-rows";
 import { PutBase } from "../src/putbase";
 import { Query } from "../src/query";
@@ -138,9 +140,11 @@ async function buildReadyDb(args: {
 }
 
 function buildQueryForWatchTests(): Query<typeof schema> {
+  const optimisticStore = new OptimisticStore();
   return new Query(
     { row: vi.fn() } as never,
     { getRow: vi.fn() } as never,
+    optimisticStore,
     schema,
   );
 }
@@ -463,9 +467,11 @@ describe("PutBase rows", () => {
       }),
     };
     const getRow = vi.fn().mockRejectedValue(new Error("canonical fetch failed"));
+    const optimisticStore = new OptimisticStore();
     const query = new Query(
       transport as never,
       { getRow } as never,
+      optimisticStore,
       schema,
     );
 
@@ -556,9 +562,11 @@ describe("PutBase rows", () => {
       target: row.target,
       fields: {},
     }));
+    const optimisticStore = new OptimisticStore();
     const query = new Query(
       transport as never,
       { getRow } as never,
+      optimisticStore,
       multiParentSchema,
     );
 
@@ -584,6 +592,41 @@ describe("PutBase rows", () => {
 
     expect(rows.map((row) => row.id)).toEqual(["card_1", "card_2"]);
     expect(getRow.mock.calls.map(([, row]) => row.id)).toEqual(["card_1", "card_2"]);
+  });
+
+  it("skips remote querying when the parent exists only as a pending optimistic create", async () => {
+    const transport = {
+      row: vi.fn(() => ({
+        request: vi.fn(),
+      })),
+    };
+    const optimisticStore = new OptimisticStore();
+    const parent = {
+      id: "project_1",
+      collection: "projects",
+      owner: "alice",
+      target: "https://worker.example/rows/project_1",
+    } as const;
+    optimisticStore.beginCreate({
+      row: parent,
+      collection: "projects",
+      fields: { name: "Website" },
+      parents: [],
+      receipt: createMutationReceipt(parent),
+    });
+    const getRow = vi.fn();
+    const query = new Query(
+      transport as never,
+      { getRow } as never,
+      optimisticStore,
+      schema,
+    );
+
+    const rows = await query.query("tasks", { in: parent });
+
+    expect(rows).toEqual([]);
+    expect(transport.row).not.toHaveBeenCalled();
+    expect(getRow).not.toHaveBeenCalled();
   });
 
   it("watchQuery emits rows end-to-end through PutBase", async () => {

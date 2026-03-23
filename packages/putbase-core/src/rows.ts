@@ -17,7 +17,7 @@ import type {
 import { applyDefaults, assertPutParents, assertValidFieldValues, getCollectionSpec } from "./schema";
 import type { Transport } from "./transport";
 import { normalizeTarget } from "./transport";
-import { toRowLocator, toRowRef } from "./row-reference";
+import { normalizeParentRefs, toRowLocator, toRowRef } from "./row-reference";
 import type { JsonValue } from "./types";
 
 interface GetFieldsResponse {
@@ -49,7 +49,7 @@ export class Rows<Schema extends DbSchema> {
     options?: DbPutOptions<Schema, TCollection>,
   ): RowHandle<TCollection, RowFields<Schema, TCollection>, AllowedParentCollections<Schema, TCollection>, Schema> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
-    const parentRefs = normalizeParents(options?.in);
+    const parentRefs = normalizeParentRefs(options?.in);
     assertPutParents(collection, collectionSpec, parentRefs);
     assertValidFieldValues(collection, collectionSpec, fields as Record<string, unknown>);
 
@@ -99,7 +99,6 @@ export class Rows<Schema extends DbSchema> {
 
           for (const parent of parentRefs) {
             await this.addParentRemote(rowRef, parent);
-            this.optimisticStore.confirmParentAdd(rowRef, parent);
           }
 
           this.optimisticStore.confirmCreate(rowRef);
@@ -246,31 +245,8 @@ export class Rows<Schema extends DbSchema> {
     };
   }
 
-  getLogicalFields(row: DbRowRef): Record<string, JsonValue> | null {
-    return this.optimisticStore.getLogicalFields(row);
-  }
-
-  getOptimisticQueryRows(collection: string, parents: DbRowRef[]): Array<{
-    row: DbRowRef;
-    fields: Record<string, JsonValue>;
-  }> {
-    return this.optimisticStore.getOptimisticQueryRows(collection, parents)
-      .map((record) => ({
-        row: record.row,
-        fields: this.optimisticStore.getLogicalFields(record.row) ?? {},
-      }));
-  }
-
-  shouldExcludeFromParent(row: DbRowRef, parent: DbRowRef): boolean {
-    return this.optimisticStore.shouldExcludeFromParent(row, parent);
-  }
-
   getCurrentParents(row: DbRowRef, serverParents: DbRowRef[] = []): DbRowRef[] {
     return this.optimisticStore.getCurrentParents(row, serverParents);
-  }
-
-  hasPendingCreate(row: DbRowRef): boolean {
-    return this.optimisticStore.hasPendingCreate(row);
   }
 
   private async syncParentIndexes(row: DbRowRef, fields: Record<string, JsonValue>): Promise<void> {
@@ -288,9 +264,4 @@ export class Rows<Schema extends DbSchema> {
       ),
     );
   }
-}
-
-function normalizeParents(input: DbRowRef | DbRowRef[] | undefined): DbRowRef[] {
-  if (!input) return [];
-  return (Array.isArray(input) ? input : [input]).map((row) => toRowRef(row));
 }
