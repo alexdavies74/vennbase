@@ -147,6 +147,8 @@ await db.update("cards", card, { done: true });
 
 PutBase queries always run within a known scope. For `cards`, that scope is a `board`, so you pass `in: board`. For collections declared as `in: ["user"]`, omitting `in` means "use the current signed-in user's built-in `user` row."
 
+Queries never mean "all accessible rows". If a collection is not declared as `in: ["user"]`, omitting `in` is an error.
+
 ### Imperative
 
 ```ts

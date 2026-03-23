@@ -66,6 +66,8 @@ function AppShell() {
 
 `useQuery` polls for changes and re-renders automatically. `rows` is always a typed array — never `undefined`.
 
+`useQuery(db, "games", ...)` never means "all accessible games". If a collection is not declared as `in: ["user"]`, omitting `in` is an error.
+
 ```tsx
 import { useQuery } from "@putbase/react";
 import { db } from "./db";
