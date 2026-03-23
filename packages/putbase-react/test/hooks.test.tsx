@@ -124,7 +124,7 @@ class FakeDb {
   private getStableDogHandle(name: string): ReturnType<typeof makeDogRow> {
     if (!this.dogHandle) {
       this.dogHandle = makeDogRow(name);
-    } else {
+    } else if (this.dogHandle.fields.name !== name) {
       this.dogHandle.fields = { name };
     }
 
@@ -134,7 +134,7 @@ class FakeDb {
   private getStableInviteDogHandle(name: string): ReturnType<typeof makeDogRow> {
     if (!this.inviteDogHandle) {
       this.inviteDogHandle = makeDogRow(name);
-    } else {
+    } else if (this.inviteDogHandle.fields.name !== name) {
       this.inviteDogHandle.fields = { name };
     }
 
@@ -1317,6 +1317,49 @@ describe("@putbase/react", () => {
     await app.unmount();
 
     expect(disconnectCount).toBe(1);
+  });
+
+  it("reruns field-keyed effects when polls replace the field snapshot", async () => {
+    vi.useFakeTimers();
+    const db = new FakeDb();
+    let effectRuns = 0;
+
+    function Probe() {
+      const row = useRowTarget<TestSchema>(
+        db as unknown as PutBase<TestSchema>,
+        "https://worker.example/rows/dog_1",
+      ).data;
+
+      useEffect(() => {
+        if (!row) {
+          return;
+        }
+
+        effectRuns += 1;
+      }, [row?.fields]);
+
+      return <div>{row?.fields.name ?? "loading"}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(effectRuns).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flushMicrotasks();
+    });
+
+    expect(effectRuns).toBe(1);
+
+    db.dogName = "Max";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flushMicrotasks();
+    });
+
+    expect(effectRuns).toBe(2);
+    await app.unmount();
   });
 
   it("rerenders only for refresh-state transitions when a live query snapshot is unchanged", async () => {

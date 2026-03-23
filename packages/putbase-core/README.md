@@ -342,11 +342,11 @@ pnpm --filter woof-app dev
 
 | Member | Description |
 |--------|-------------|
-| `.fields` | Current field values, typed from your schema. |
+| `.fields` | Current field snapshot, typed from your schema. Treat it as read-only; the object is replaced when fields change. |
 | `.collection` | The collection this row belongs to. |
 | `.target` | Stable URL for this row — safe to persist and restore across sessions. |
 | `.id` / `.owner` | Row identity components. |
-| `.refresh()` | Re-fetch fields from the server. Returns `this`. |
+| `.refresh()` | Re-fetch fields from the server. Resolves to the latest field snapshot. |
 | `.toRef()` | Plain `{ id, owner, target, collection }` reference, useful for serialisation. |
 | `.connectCrdt(callbacks)` | Shorthand for `db.connectCrdt(row, callbacks)`. |
 | `.in.add(parent)` / `.in.remove(parent)` / `.in.list()` | Manage parent links. |

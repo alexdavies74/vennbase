@@ -111,7 +111,7 @@ function RecentBoards() {
 
 ## Row Handle Identity
 
-`useRow`, `useRowTarget`, and `useQuery` keep `RowHandle` identity stable for the life of a row within a `PutBase` client. When the row fields change, the same handle object is reused and `row.fields` is updated in place.
+`useRow`, `useRowTarget`, and `useQuery` keep `RowHandle` identity stable for the life of a row within a `PutBase` client. When the row fields change, the same handle object is reused and `row.fields` is replaced with a fresh snapshot object.
 
 That means using `[row]` as an effect dependency is safe for subscriptions keyed to the logical row. If your effect depends on row contents, depend on `row.fields` or specific field values instead.
 
@@ -121,6 +121,13 @@ useEffect(() => {
   const connection = row.connectCrdt(callbacks);
   return () => connection.disconnect();
 }, [row]);
+```
+
+```tsx
+useEffect(() => {
+  if (!row) return;
+  syncForm(row.fields);
+}, [row?.fields]);
 ```
 
 ## CRDT bindings

@@ -96,9 +96,9 @@ export class RowHandle<
     return this.backend.connectCrdt(this.toRef(), callbacks);
   }
 
-  async refresh(): Promise<this> {
+  async refresh(): Promise<TFields> {
     this.fields = await this.backend.refreshFields(this.toRef()) as TFields;
-    return this;
+    return this.fields;
   }
 
   attachSettlement(receipt: Pick<MutationReceipt<unknown>, "settled">): this {
