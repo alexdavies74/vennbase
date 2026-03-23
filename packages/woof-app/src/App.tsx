@@ -12,8 +12,6 @@ import { getErrorMessage } from "./utils";
 import { service } from "./services";
 
 function SetupPanel(props: {
-  busyMessage?: string;
-  disabled: boolean;
   initialError: string;
   onEnter(row: DogRowHandle): Promise<void>;
 }) {
@@ -23,9 +21,7 @@ function SetupPanel(props: {
 
   const errorMessage = enterChat.error
     ? getErrorMessage(enterChat.error, "Failed to enter chat.")
-    : props.disabled
-      ? props.busyMessage ?? "Initializing app…"
-      : props.initialError;
+    : props.initialError;
 
   return (
     <section className="panel">
@@ -59,11 +55,24 @@ function SetupPanel(props: {
           value={dogName}
           onChange={(event) => setDogName(event.target.value)}
         />
-        <button className="primary" type="submit" disabled={props.disabled || isSubmitting}>
+        <button className="primary" type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Loading…" : "Enter chat"}
         </button>
       </form>
       <p className="muted">{errorMessage}</p>
+    </section>
+  );
+}
+
+function LoadingPanel(props: {
+  message: string;
+}) {
+  return (
+    <section className="panel panel-loading" aria-busy="true" aria-live="polite">
+      <div className="loading-badge">Loading</div>
+      <h1>Getting things ready</h1>
+      <p className="muted loading-copy">{props.message}</p>
+      <div className="loading-pulse" aria-hidden="true" />
     </section>
   );
 }
@@ -356,14 +365,8 @@ export function App() {
 
   if (bootLoading) {
     return (
-      <SetupPanel
-        busyMessage={invitePending ? "Opening shared dog room…" : "Initializing app…"}
-        disabled
-        initialError=""
-        onEnter={async (nextRow) => {
-          setDismissedDogTarget(null);
-          void nextRow;
-        }}
+      <LoadingPanel
+        message="Loading app data…"
       />
     );
   }
@@ -371,7 +374,6 @@ export function App() {
   if (!row) {
     return (
       <SetupPanel
-        disabled={false}
         initialError={bootError}
         onEnter={async (nextRow) => {
           setDismissedDogTarget(null);

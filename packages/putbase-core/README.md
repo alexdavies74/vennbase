@@ -239,7 +239,7 @@ const board = await db.openInvite(link);
 
 `openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ target, inviteToken? }` object from `db.parseInvite(input)`.
 
-In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally run `onOpen`, and optionally clear the invite params from the address bar after success.
+In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
 
 Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
 

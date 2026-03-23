@@ -87,7 +87,7 @@ export interface UseInviteFromLocationOptions<
 > extends UseHookOptions {
   href?: string | null;
   clearLocation?: boolean | ((url: URL) => string);
-  onOpen?: (result: TResult) => void;
+  onOpen?: (result: TResult) => void | Promise<void>;
   open?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
 }
 
@@ -648,17 +648,48 @@ export function useInviteFromLocation<
   options: UseInviteFromLocationOptions<Schema, TResult> = {},
 ): UseInviteFromLocationResult<TResult> {
   const runtime = useRuntime(client);
+  const enabled = options.enabled ?? true;
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const inviteInput = options.href ?? getInviteHrefFromLocation();
+  const detectedInviteInput = options.href ?? getInviteHrefFromLocation();
+  const [latchedInviteInput, setLatchedInviteInput] = useState<string | null>(detectedInviteInput);
+  const inviteInput = enabled
+    ? detectedInviteInput ?? latchedInviteInput
+    : null;
   const resourceKey = inviteInput ? makeIncomingInviteKey(inviteInput) : null;
   const clearLocationOption = options.clearLocation ?? true;
-  const deliveredInviteRef = useRef<string | null>(null);
-  const clearedInviteRef = useRef<string | null>(null);
+  const deliveryKey = inviteInput ?? null;
   const onOpenRef = useRef(options.onOpen);
   const openRef = useRef(options.open);
+  const clearLocationRef = useRef(clearLocationOption);
+  const [deliveryEpoch, setDeliveryEpoch] = useState(0);
+  const currentDeliveryKey = deliveryKey ? `${deliveryKey}:${deliveryEpoch}` : null;
+  const deliveryStateRef = useRef<{
+    key: string | null;
+    status: LoadStatus;
+    error: unknown;
+  }>({
+    key: null,
+    status: "idle",
+    error: undefined,
+  });
+  const [deliveryState, setDeliveryState] = useState(deliveryStateRef.current);
 
   onOpenRef.current = options.onOpen;
   openRef.current = options.open;
+  clearLocationRef.current = clearLocationOption;
+
+  useEffect(() => {
+    if (!enabled) {
+      if (latchedInviteInput !== null) {
+        setLatchedInviteInput(null);
+      }
+      return;
+    }
+
+    if (detectedInviteInput && detectedInviteInput !== latchedInviteInput) {
+      setLatchedInviteInput(detectedInviteInput);
+    }
+  }, [detectedInviteInput, enabled, latchedInviteInput]);
 
   const resource = useOptionalResource(
     (options.enabled ?? true)
@@ -681,22 +712,110 @@ export function useInviteFromLocation<
   );
 
   useEffect(() => {
-    if (!inviteInput || resource.status !== "success" || resource.data === undefined) {
+    if (!currentDeliveryKey) {
+      const nextState = {
+        key: null,
+        status: "idle" as const,
+        error: undefined,
+      };
+      if (
+        deliveryStateRef.current.key !== nextState.key
+        || deliveryStateRef.current.status !== nextState.status
+        || deliveryStateRef.current.error !== nextState.error
+      ) {
+        deliveryStateRef.current = nextState;
+        setDeliveryState(nextState);
+      }
       return;
     }
 
-    if (onOpenRef.current && deliveredInviteRef.current !== inviteInput) {
-      deliveredInviteRef.current = inviteInput;
-      onOpenRef.current(resource.data);
+    if (resource.status !== "success" || resource.data === undefined) {
+      const nextState = {
+        key: currentDeliveryKey,
+        status: "idle" as const,
+        error: undefined,
+      };
+      if (
+        deliveryStateRef.current.key !== nextState.key
+        || deliveryStateRef.current.status !== nextState.status
+        || deliveryStateRef.current.error !== nextState.error
+      ) {
+        deliveryStateRef.current = nextState;
+        setDeliveryState(nextState);
+      }
+      return;
     }
 
-    if (clearLocationOption && clearedInviteRef.current !== inviteInput) {
-      clearedInviteRef.current = inviteInput;
-      clearInviteLocation(clearLocationOption, inviteInput);
+    if (
+      deliveryStateRef.current.key === currentDeliveryKey
+      && (
+        deliveryStateRef.current.status === "loading"
+        || deliveryStateRef.current.status === "success"
+        || deliveryStateRef.current.status === "error"
+      )
+    ) {
+      return;
     }
-  }, [clearLocationOption, inviteInput, resource.data, resource.status]);
 
-  if (!(options.enabled ?? true) || !inviteInput) {
+    let cancelled = false;
+    const openedResult = resource.data;
+    const nextLoadingState = {
+      key: currentDeliveryKey,
+      status: "loading" as const,
+      error: undefined,
+    };
+    deliveryStateRef.current = nextLoadingState;
+    setDeliveryState(nextLoadingState);
+
+    void (async () => {
+      try {
+        await onOpenRef.current?.(openedResult);
+        if (cancelled) {
+          return;
+        }
+
+        const nextSuccessState = {
+          key: currentDeliveryKey,
+          status: "success" as const,
+          error: undefined,
+        };
+        deliveryStateRef.current = nextSuccessState;
+        setDeliveryState(nextSuccessState);
+
+        if (clearLocationRef.current) {
+          clearInviteLocation(clearLocationRef.current, inviteInput as string);
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const nextErrorState = {
+          key: currentDeliveryKey,
+          status: "error" as const,
+          error,
+        };
+        deliveryStateRef.current = nextErrorState;
+        setDeliveryState(nextErrorState);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDeliveryKey, inviteInput, resource.data, resource.status]);
+
+  const refresh = async (): Promise<void> => {
+    if (session.status !== "success" || !session.data?.signedIn) {
+      await session.refresh();
+      return;
+    }
+
+    await resource.refresh();
+    setDeliveryEpoch((epoch) => epoch + 1);
+  };
+
+  if (!enabled || !inviteInput) {
     return {
       hasInvite: false,
       inviteInput: null,
@@ -713,7 +832,7 @@ export function useInviteFromLocation<
       ...makeResourceResult({
         error: session.error,
         status: "error",
-      }, session.refresh),
+      }, refresh),
     };
   }
 
@@ -723,7 +842,7 @@ export function useInviteFromLocation<
       inviteInput,
       ...makeResourceResult({
         status: "loading",
-      }, session.refresh),
+      }, refresh),
     };
   }
 
@@ -733,7 +852,45 @@ export function useInviteFromLocation<
       inviteInput,
       ...makeResourceResult({
         status: "idle",
-      }, session.refresh),
+      }, refresh),
+    };
+  }
+
+  if (resource.status !== "success" || resource.data === undefined) {
+    return {
+      ...resource,
+      hasInvite: true,
+      inviteInput,
+      refresh,
+    };
+  }
+
+  if (
+    deliveryState.key !== currentDeliveryKey
+    || deliveryState.status === "idle"
+    || deliveryState.status === "loading"
+  ) {
+    return {
+      hasInvite: true,
+      inviteInput,
+      ...makeResourceResult({
+        isRefreshing: resource.isRefreshing,
+        refreshError: resource.refreshError,
+        status: "loading",
+      }, refresh),
+    };
+  }
+
+  if (deliveryState.status === "error") {
+    return {
+      hasInvite: true,
+      inviteInput,
+      ...makeResourceResult({
+        error: deliveryState.error,
+        isRefreshing: resource.isRefreshing,
+        refreshError: resource.refreshError,
+        status: "error",
+      }, refresh),
     };
   }
 
@@ -741,6 +898,7 @@ export function useInviteFromLocation<
     ...resource,
     hasInvite: true,
     inviteInput,
+    refresh,
   };
 }
 

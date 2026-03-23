@@ -153,7 +153,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useInviteLink` lazily generates (or reuses) an invite link for a row. `useInviteFromLocation` handles the recipient side: it detects PutBase invite URLs in the current location, waits for the session, calls `openInvite`, and clears the invite params.
+`useInviteLink` lazily generates (or reuses) an invite link for a row. `useInviteFromLocation` handles the recipient side: it detects PutBase invite URLs in the current location, waits for the session, calls `openInvite`, waits for `onOpen`, and then clears the invite params.
 
 ```tsx
 import { useInviteLink, useInviteFromLocation } from "@putbase/react";
@@ -315,7 +315,7 @@ interface UseInviteFromLocationOptions<
 > extends UseHookOptions {
   href?: string | null;
   clearLocation?: boolean | ((url: URL) => string);
-  onOpen?: (result: TResult) => void;
+  onOpen?: (result: TResult) => void | Promise<void>;
   open?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
 }
 
@@ -335,7 +335,8 @@ function useInviteFromLocation<
 
 - `href` defaults to `window.location.href`.
 - `clearLocation` defaults to `true`.
-- `onOpen` runs after invite acceptance succeeds.
+- `onOpen` runs after invite acceptance succeeds and may be async.
+- The hook stays in `loading` until `onOpen` finishes and the invite URL is cleared.
 - Override `open` when invite acceptance should return something other than `db.openInvite(...)`.
 
 ### `useMutation`

@@ -382,6 +382,7 @@ async function renderApp(element: ReactElement) {
 
 afterEach(() => {
   vi.useRealTimers();
+  window.history.replaceState({}, "", "/");
   document.body.innerHTML = "";
 });
 
@@ -695,7 +696,104 @@ describe("@putbase/react", () => {
       `http://localhost:3000/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
     );
     expect(openedDogName).toBe("Buddy");
-    expect(window.location.search).toBe("");
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    await app.unmount();
+  });
+
+  it("keeps invite hooks loading until async onOpen completes", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      `/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+    );
+
+    const db = new FakeDb();
+    const session = deferred<{ signedIn: true; user: { username: string } }>();
+    const onOpen = deferred<void>();
+    db.sessionPromise = session.promise;
+    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let openedDogName = "";
+
+    function Probe() {
+      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
+        onOpen: async (row) => {
+          openedDogName = row.fields.name;
+          await onOpen.promise;
+        },
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await act(async () => {
+      session.resolve({ signedIn: true, user: { username: "alex" } });
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    await waitFor(() => {
+      expect(db.openInviteCalls).toBe(1);
+    });
+    expect(openedDogName).toBe("Buddy");
+    expect(latest?.status).toBe("loading");
+    expect(latest?.data).toBeUndefined();
+    expect(window.location.search).toContain(PUTBASE_INVITE_TARGET_PARAM);
+
+    await act(async () => {
+      onOpen.resolve();
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("success");
+      expect(latest?.data?.fields.name).toBe("Buddy");
+    });
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    await app.unmount();
+  });
+
+  it("reports onOpen failures without clearing the invite URL", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      `/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+    );
+
+    const db = new FakeDb();
+    const session = deferred<{ signedIn: true; user: { username: string } }>();
+    db.sessionPromise = session.promise;
+    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+
+    function Probe() {
+      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
+        onOpen: async () => {
+          throw new Error("activate failed");
+        },
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await act(async () => {
+      session.resolve({ signedIn: true, user: { username: "alex" } });
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("error");
+      expect(latest?.error).toBeInstanceOf(Error);
+      expect((latest?.error as Error | undefined)?.message).toBe("activate failed");
+    });
+    expect(latest?.data).toBeUndefined();
+    expect(window.location.search).toContain(PUTBASE_INVITE_TARGET_PARAM);
     await app.unmount();
   });
 
@@ -772,6 +870,9 @@ describe("@putbase/react", () => {
     });
 
     expect(db.openInviteCalls).toBe(0);
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
     await app.unmount();
   });
 
