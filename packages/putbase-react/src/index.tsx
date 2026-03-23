@@ -85,7 +85,7 @@ export interface UseInviteFromLocationOptions<
   TResult = AnyRowHandle<Schema>,
 > extends UseHookOptions {
   href?: string | null;
-  clearLocation?: boolean | ((url: URL) => string);
+  clearInviteParams?: boolean | ((url: URL) => string);
   onOpen?: (result: TResult) => void | Promise<void>;
   open?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
 }
@@ -101,7 +101,7 @@ export interface UsePerUserRowOptions<
 > extends UseHookOptions {
   key: string;
   href?: string | null;
-  clearLocation?: boolean | ((url: URL) => string);
+  clearInviteParams?: boolean | ((url: URL) => string);
   loadRememberedRow?: (row: AnyRowHandle<Schema>, client: PutBase<Schema>) => Promise<TResult> | TResult;
   openInvite?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
   getRow?: (result: TResult) => RowRef;
@@ -235,7 +235,7 @@ function getInviteHrefFromLocation(): string | null {
 }
 
 function clearInviteLocation(
-  clearLocation: boolean | ((url: URL) => string),
+  clearInviteParams: boolean | ((url: URL) => string),
   inviteInput: string,
 ): void {
   if (typeof window === "undefined") {
@@ -247,8 +247,8 @@ function clearInviteLocation(
     return;
   }
 
-  if (typeof clearLocation === "function") {
-    window.history.replaceState({}, "", clearLocation(current));
+  if (typeof clearInviteParams === "function") {
+    window.history.replaceState({}, "", clearInviteParams(current));
     return;
   }
 
@@ -647,11 +647,11 @@ export function useInviteFromLocation<
     ? detectedInviteInput ?? latchedInviteInput
     : null;
   const resourceKey = inviteInput ? makeIncomingInviteKey(inviteInput) : null;
-  const clearLocationOption = options.clearLocation ?? true;
+  const clearInviteParamsOption = options.clearInviteParams ?? true;
   const deliveryKey = inviteInput ?? null;
   const onOpenRef = useRef(options.onOpen);
   const openRef = useRef(options.open);
-  const clearLocationRef = useRef(clearLocationOption);
+  const clearInviteParamsRef = useRef(clearInviteParamsOption);
   const [deliveryEpoch, setDeliveryEpoch] = useState(0);
   const currentDeliveryKey = deliveryKey ? `${deliveryKey}:${deliveryEpoch}` : null;
   const deliveryStateRef = useRef<{
@@ -667,7 +667,7 @@ export function useInviteFromLocation<
 
   onOpenRef.current = options.onOpen;
   openRef.current = options.open;
-  clearLocationRef.current = clearLocationOption;
+  clearInviteParamsRef.current = clearInviteParamsOption;
 
   useEffect(() => {
     if (!enabled) {
@@ -773,8 +773,8 @@ export function useInviteFromLocation<
         deliveryStateRef.current = nextSuccessState;
         setDeliveryState(nextSuccessState);
 
-        if (clearLocationRef.current) {
-          clearInviteLocation(clearLocationRef.current, inviteInput as string);
+        if (clearInviteParamsRef.current) {
+          clearInviteLocation(clearInviteParamsRef.current, inviteInput as string);
         }
       } catch (error) {
         if (cancelled) {
@@ -903,7 +903,7 @@ export function usePerUserRow<
   const runtime = useRuntime(client);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const inviteInput = options.href ?? getInviteHrefFromLocation();
-  const clearLocationOption = options.clearLocation ?? true;
+  const clearInviteParamsOption = options.clearInviteParams ?? true;
   const sessionUser =
     session.status === "success" && session.data?.signedIn
       ? session.data.user
@@ -958,11 +958,11 @@ export function usePerUserRow<
       return;
     }
 
-    if (clearLocationOption && clearedInviteRef.current !== inviteInput) {
+    if (clearInviteParamsOption && clearedInviteRef.current !== inviteInput) {
       clearedInviteRef.current = inviteInput;
-      clearInviteLocation(clearLocationOption, inviteInput);
+      clearInviteLocation(clearInviteParamsOption, inviteInput);
     }
-  }, [clearLocationOption, inviteInput, resource.status]);
+  }, [clearInviteParamsOption, inviteInput, resource.status]);
 
   const localOverride = localData && localData.scopeKey === scopeKey
     ? localData

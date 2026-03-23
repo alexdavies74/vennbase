@@ -247,7 +247,7 @@ export function App() {
   const [readyError, setReadyError] = useState("");
   const [dismissedDogRef, setDismissedDogRef] = useState<RowRef<"dogs"> | null>(null);
   const invite = useInviteFromLocation<WoofSchema, DogRowHandle>(db, {
-    clearLocation: (url) => {
+    clearInviteParams: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";
       url.hash = "";
