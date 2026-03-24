@@ -8,7 +8,7 @@ import {
   type RowRef,
 } from "@putbase/core";
 
-import { useInviteLink, useQuery, useRow } from "./index";
+import { useShareLink, useQuery, useRow } from "./index";
 
 const schema = defineSchema({
   dogs: collection({
@@ -75,7 +75,7 @@ if (tagRows[0]) {
   void tagRows[0].in.add(tagRef);
 
   void useRow(anyClient, tagRows[0]);
-  void useInviteLink(anyClient, tagRows[0]);
+  void useShareLink(anyClient, tagRows[0]);
 }
 
 export {};

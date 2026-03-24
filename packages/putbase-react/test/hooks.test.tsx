@@ -10,7 +10,7 @@ import {
   defineSchema,
   field,
   index,
-  type CrdtBinding,
+  type CrdtAdapter,
   type CrdtConnectCallbacks,
   type CrdtConnection,
   type DbMemberInfo,
@@ -22,9 +22,9 @@ import {
   PutBaseProvider,
   useCrdt,
   useCurrentUser,
-  useInviteLink,
-  useInviteFromLocation,
-  usePerUserRow,
+  useShareLink,
+  useAcceptInviteFromUrl,
+  useSavedRow,
   usePutBase,
   useQuery,
   useRow,
@@ -118,7 +118,7 @@ class FakeDb {
     | null = null;
   queryCalls = 0;
   getRowCalls = 0;
-  openInviteCalls = 0;
+  acceptInviteCalls = 0;
   lastInviteInput: string | null = null;
   ensureReadyCalls = 0;
   signInCalls = 0;
@@ -213,8 +213,8 @@ class FakeDb {
     return this.getStableDogHandle(this.dogName);
   }
 
-  async openInvite(inviteInput: string): Promise<ReturnType<typeof makeDogRow>> {
-    this.openInviteCalls += 1;
+  async acceptInvite(inviteInput: string): Promise<ReturnType<typeof makeDogRow>> {
+    this.acceptInviteCalls += 1;
     this.lastInviteInput = inviteInput;
     return this.getStableInviteDogHandle(this.inviteDogName);
   }
@@ -227,12 +227,12 @@ class FakeDb {
     return ["alex"];
   }
 
-  async listDirectMembers(): Promise<Array<{ username: string; role: "writer" }>> {
-    return [{ username: "alex", role: "writer" }];
+  async listDirectMembers(): Promise<Array<{ username: string; role: "editor" }>> {
+    return [{ username: "alex", role: "editor" }];
   }
 
   async listEffectiveMembers(): Promise<Array<DbMemberInfo<TestSchema>>> {
-    return [{ username: "alex", role: "writer", via: "direct" }];
+    return [{ username: "alex", role: "editor", via: "direct" }];
   }
 
   async getExistingInviteToken(): Promise<null> {
@@ -248,21 +248,21 @@ class FakeDb {
     };
     return {
       value,
-      settled: Promise.resolve(value),
-      status: "settled" as const,
+      committed: Promise.resolve(value),
+      status: "committed" as const,
       error: undefined,
     };
   }
 
-  createInviteLink(row: RowRef, token: string): string {
+  createShareLink(row: RowRef, token: string): string {
     return inviteUrl(row, token);
   }
 
-  async rememberPerUserRow(key: string, row: RowRef): Promise<void> {
+  async saveRow(key: string, row: RowRef): Promise<void> {
     this.rememberedRows.set(`${this.username}:${key}`, row);
   }
 
-  async openRememberedPerUserRow(key: string): Promise<ReturnType<typeof makeDogRow> | null> {
+  async openSavedRow(key: string): Promise<ReturnType<typeof makeDogRow> | null> {
     const remembered = this.rememberedRows.get(`${this.username}:${key}`);
     if (!remembered) {
       return null;
@@ -274,7 +274,7 @@ class FakeDb {
     return this.getRow(remembered);
   }
 
-  async clearRememberedPerUserRow(key: string): Promise<void> {
+  async clearSavedRow(key: string): Promise<void> {
     this.rememberedRows.delete(`${this.username}:${key}`);
   }
 
@@ -321,7 +321,7 @@ function makeBinding<TValue>(initialValue: TValue) {
         version += 1;
         notify();
       },
-    } satisfies CrdtBinding<TValue>,
+    } satisfies CrdtAdapter<TValue>,
     setValue(nextValue: TValue) {
       value = nextValue;
       version += 1;
@@ -636,21 +636,21 @@ describe("@putbase/react", () => {
     await app.unmount();
   });
 
-  it("returns a named inviteLink field for invite URLs", async () => {
+  it("returns a named shareLink field for invite URLs", async () => {
     const db = new FakeDb();
     const rowRef = dogRef();
-    let latest: ReturnType<typeof useInviteLink<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useInviteLink<TestSchema>(db as unknown as PutBase<TestSchema>, rowRef);
-      return <div>{latest.inviteLink ?? latest.status}</div>;
+      latest = useShareLink<TestSchema>(db as unknown as PutBase<TestSchema>, rowRef);
+      return <div>{latest.shareLink ?? latest.status}</div>;
     }
 
     const app = await renderApp(<Probe />);
 
     await waitFor(() => {
       expect(latest?.status).toBe("success");
-      expect(latest?.inviteLink).toBe(inviteUrl(rowRef));
+      expect(latest?.shareLink).toBe(inviteUrl(rowRef));
     });
 
     expect(latest && "data" in latest).toBe(false);
@@ -667,11 +667,11 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
     let openedDogName = "";
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
         onOpen: (row) => {
           openedDogName = row.fields.name;
         },
@@ -683,7 +683,7 @@ describe("@putbase/react", () => {
 
     expect(latest?.hasInvite).toBe(true);
     expect(latest?.status).toBe("loading");
-    expect(db.openInviteCalls).toBe(0);
+    expect(db.acceptInviteCalls).toBe(0);
 
     await act(async () => {
       session.resolve({ signedIn: true, user: { username: "alex" } });
@@ -691,7 +691,7 @@ describe("@putbase/react", () => {
       await flushMicrotasks();
     });
 
-    expect(db.openInviteCalls).toBe(1);
+    expect(db.acceptInviteCalls).toBe(1);
     expect(db.lastInviteInput).toBe(inviteUrl(dogRef()));
     expect(openedDogName).toBe("Buddy");
     await waitFor(() => {
@@ -716,11 +716,11 @@ describe("@putbase/react", () => {
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     const onOpen = deferred<void>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
     let openedDogName = "";
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
         onOpen: async (row) => {
           openedDogName = row.fields.name;
           await onOpen.promise;
@@ -738,7 +738,7 @@ describe("@putbase/react", () => {
     });
 
     await waitFor(() => {
-      expect(db.openInviteCalls).toBe(1);
+      expect(db.acceptInviteCalls).toBe(1);
     });
     expect(openedDogName).toBe("Buddy");
     expect(latest?.status).toBe("loading");
@@ -770,10 +770,10 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>);
+      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>);
       return <div>{latest.hasInvite ? latest.status : "no-invite"}</div>;
     }
 
@@ -791,7 +791,7 @@ describe("@putbase/react", () => {
       expect(latest?.status).toBe("idle");
       expect(latest?.data).toBeUndefined();
     });
-    expect(db.openInviteCalls).toBe(1);
+    expect(db.acceptInviteCalls).toBe(1);
     await app.unmount();
   });
 
@@ -805,10 +805,10 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as PutBase<TestSchema>, {
         onOpen: async () => {
           throw new Error("activate failed");
         },
@@ -842,10 +842,10 @@ describe("@putbase/react", () => {
     );
 
     const db = new FakeDb();
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema>(db as unknown as PutBase<TestSchema>);
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as PutBase<TestSchema>);
       return <div>{latest.status}</div>;
     }
 
@@ -854,7 +854,7 @@ describe("@putbase/react", () => {
     expect(latest?.hasInvite).toBe(false);
     expect(latest?.inviteInput).toBeNull();
     expect(latest?.status).toBe("idle");
-    expect(db.openInviteCalls).toBe(0);
+    expect(db.acceptInviteCalls).toBe(0);
     await app.unmount();
   });
 
@@ -866,7 +866,7 @@ describe("@putbase/react", () => {
     );
 
     const db = new FakeDb();
-    const openInvite = vi.fn(async (inviteInput: string) => {
+    const acceptInvite = vi.fn(async (inviteInput: string) => {
       const result = {
         inviteInput,
         kind: "profile" as const,
@@ -874,7 +874,7 @@ describe("@putbase/react", () => {
       };
       return Object.assign(result, { self: result });
     });
-    let latest: ReturnType<typeof useInviteFromLocation<TestSchema, {
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, {
       inviteInput: string;
       kind: "profile";
       row: ReturnType<typeof makeDogRow>;
@@ -882,14 +882,14 @@ describe("@putbase/react", () => {
     }>> | null = null;
 
     function Probe() {
-      latest = useInviteFromLocation<TestSchema, {
+      latest = useAcceptInviteFromUrl<TestSchema, {
         inviteInput: string;
         kind: "profile";
         row: ReturnType<typeof makeDogRow>;
         self?: unknown;
       }>(db as unknown as PutBase<TestSchema>, {
         clearInviteParams: false,
-        open: async (inviteInput) => openInvite(inviteInput),
+        accept: async (inviteInput) => acceptInvite(inviteInput),
       });
       return <div>{latest.status}</div>;
     }
@@ -897,7 +897,7 @@ describe("@putbase/react", () => {
     const app = await renderApp(<Probe />);
 
     await waitFor(() => {
-      expect(openInvite).toHaveBeenCalledWith(
+      expect(acceptInvite).toHaveBeenCalledWith(
         `http://localhost:3000/?${PUTBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
       );
       expect(latest?.status).toBe("success");
@@ -907,7 +907,7 @@ describe("@putbase/react", () => {
       expect(latest?.data?.row.fields.name).toBe("Buddy");
     });
 
-    expect(db.openInviteCalls).toBe(0);
+    expect(db.acceptInviteCalls).toBe(0);
     expect(window.location.search).toContain(PUTBASE_INVITE_TARGET_PARAM);
     await app.unmount();
   });
@@ -915,10 +915,10 @@ describe("@putbase/react", () => {
   it("keeps per-user rows idle while signed out", async () => {
     const db = new FakeDb();
     db.signedIn = false;
-    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useSavedRow<TestSchema>> | null = null;
 
     function Probe() {
-      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+      latest = useSavedRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
         key: "myDog",
       });
       return <div>{latest.status}</div>;
@@ -928,7 +928,7 @@ describe("@putbase/react", () => {
 
     expect(latest?.status).toBe("idle");
     expect(db.getRowCalls).toBe(0);
-    expect(db.openInviteCalls).toBe(0);
+    expect(db.acceptInviteCalls).toBe(0);
     await app.unmount();
   });
 
@@ -937,10 +937,10 @@ describe("@putbase/react", () => {
     db.rememberedRows.set("alex:myDog", dogRef());
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useSavedRow<TestSchema>> | null = null;
 
     function Probe() {
-      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+      latest = useSavedRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
         key: "myDog",
       });
       return <div>{latest.data?.fields.name ?? latest.status}</div>;
@@ -973,10 +973,10 @@ describe("@putbase/react", () => {
 
     const db = new FakeDb();
     db.rememberedRows.set("alex:myDog", dogRef("old_dog"));
-    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useSavedRow<TestSchema>> | null = null;
 
     function Probe() {
-      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+      latest = useSavedRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
         key: "myDog",
       });
       return <div>{latest.data?.fields.name ?? latest.status}</div>;
@@ -989,7 +989,7 @@ describe("@putbase/react", () => {
       expect(latest?.data?.fields.name).toBe("Buddy");
     });
 
-    expect(db.openInviteCalls).toBe(1);
+    expect(db.acceptInviteCalls).toBe(1);
     expect(db.getRowCalls).toBe(0);
     expect(db.rememberedRows.get("alex:myDog")).toEqual(dogRef());
     expect(window.location.search).toBe("");
@@ -998,10 +998,10 @@ describe("@putbase/react", () => {
 
   it("remembers and clears per-user rows locally without reopening", async () => {
     const db = new FakeDb();
-    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useSavedRow<TestSchema>> | null = null;
 
     function Probe() {
-      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+      latest = useSavedRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
         key: "myDog",
       });
       return <div>{latest.data?.fields.name ?? "empty"}</div>;
@@ -1015,7 +1015,7 @@ describe("@putbase/react", () => {
     });
 
     await act(async () => {
-      await latest?.remember(makeDogRow("Buddy"));
+      await latest?.save(makeDogRow("Buddy"));
       await flushMicrotasks();
     });
 
@@ -1038,10 +1038,10 @@ describe("@putbase/react", () => {
     const db = new FakeDb();
     db.rememberedRows.set("alex:myDog", dogRef());
     db.failRememberedOpen = true;
-    let latest: ReturnType<typeof usePerUserRow<TestSchema>> | null = null;
+    let latest: ReturnType<typeof useSavedRow<TestSchema>> | null = null;
 
     function Probe() {
-      latest = usePerUserRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
+      latest = useSavedRow<TestSchema>(db as unknown as PutBase<TestSchema>, {
         key: "myDog",
       });
       return <div>{latest.status}</div>;

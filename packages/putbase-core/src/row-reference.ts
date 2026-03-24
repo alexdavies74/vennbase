@@ -1,14 +1,14 @@
-import type { RowRef, RowTarget } from "./schema";
+import type { RowInput, RowRef } from "./schema";
 import { normalizeBaseUrl } from "./transport";
 
 function hasEmbeddedRowRef<TCollection extends string>(
-  row: RowTarget<TCollection>,
+  row: RowInput<TCollection>,
 ): row is { ref: RowRef<TCollection> } {
   return "ref" in row;
 }
 
 export function normalizeRowRef<TCollection extends string>(
-  row: RowTarget<TCollection>,
+  row: RowInput<TCollection>,
 ): RowRef<TCollection> {
   const resolved = hasEmbeddedRowRef(row) ? row.ref : row;
   return {
@@ -19,7 +19,7 @@ export function normalizeRowRef<TCollection extends string>(
 }
 
 export function normalizeParentRefs<TCollection extends string>(
-  input: RowTarget<TCollection> | RowTarget<TCollection>[] | undefined,
+  input: RowInput<TCollection> | RowInput<TCollection>[] | undefined,
 ): RowRef<TCollection>[] {
   if (!input) {
     return [];

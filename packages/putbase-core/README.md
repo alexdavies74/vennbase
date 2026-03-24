@@ -2,7 +2,7 @@
 
 **A multi-user database for apps that have no backend.**
 
-PutBase is a TypeScript SDK that gives your web app collaborative, multi-user data storage — without you ever running a server. Users sign in with their [Puter](https://puter.com) accounts. Their data lives in their Puter storage. You write a schema, call `put` and `query`, share invite links, and you're done.
+PutBase is a TypeScript SDK that gives your web app collaborative, multi-user data storage — without you ever running a server. Users sign in with their [Puter](https://puter.com) accounts. Their data lives in their Puter storage. You write a schema, call `create` and `query`, share links, and you're done.
 
 This makes PutBase particularly well-suited for:
 
@@ -12,8 +12,8 @@ This makes PutBase particularly well-suited for:
 
 ```ts
 // Write
-const board = pb.put("boards", { title: "Launch checklist" }).value;
-pb.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
+const board = pb.create("boards", { title: "Launch checklist" }).value;
+pb.create("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
 
 // Read (React)
 const { rows: cards } = useQuery<Schema, "cards">(pb, "cards", {
@@ -23,7 +23,7 @@ const { rows: cards } = useQuery<Schema, "cards">(pb, "cards", {
 });
 
 // Share
-const { inviteLink } = useInviteLink(pb, board);
+const { shareLink } = useShareLink(pb, board);
 ```
 
 ---
@@ -34,7 +34,7 @@ Every piece of data in PutBase is a **row**. A row belongs to a **collection** d
 
 Rows can be nested. A collection can declare that its rows live **inside** a parent collection: a `card` lives inside a `board`, and a `recentBoard` row lives inside the built-in `user` collection. The parent relationship constrains who can see child rows — gaining access to a parent automatically makes the children visible too.
 
-Access control is **explicit-grant only**. There are no complex rule expressions to misconfigure. To let another user into a row, you generate an invite link and send it to them. They accept it, they're in. That's the whole model.
+Access control is **explicit-grant only**. There are no complex rule expressions to misconfigure. To let another user into a row, you generate a share link and send it to them. They accept it, they're in. That's the whole model.
 
 ---
 
@@ -98,7 +98,7 @@ Fields are for metadata that you want to query or index. The canonical CRDT patt
 
 ## Setup
 
-Create one `PutBase` instance for your app and pass it an `appBaseUrl` so that invite links point back to your app:
+Create one `PutBase` instance for your app and pass it an `appBaseUrl` so that share links point back to your app:
 
 ```ts
 import { PutBase } from "@putbase/core";
@@ -128,14 +128,14 @@ await pb.ensureReady();
 
 ```ts
 // Create a top-level row
-const board = pb.put("boards", { title: "Launch checklist" }).value;
+const board = pb.create("boards", { title: "Launch checklist" }).value;
 
 // Create a child row — pass the parent row or row ref
-pb.put("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board });
-pb.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
+pb.create("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board });
+pb.create("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
 ```
 
-`put` and `update` are synchronous optimistic writes. Use `.value` on the returned receipt when you want the row handle immediately.
+`create` and `update` are synchronous optimistic writes. Use `.value` on the returned receipt when you want the row handle immediately.
 
 To update fields on an existing row:
 
@@ -196,7 +196,7 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
-`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `useMemberUsernames`, `useDirectMembers`, and `useMutation`.
+`rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useShareLink`, `useAcceptInviteFromUrl`, `useMemberUsernames`, `useDirectMembers`, and `useMutation`.
 
 
 For app boot, prefer `useSession(pb)`:
@@ -221,7 +221,7 @@ function AppShell() {
 
 ---
 
-## Sharing rows with invite links
+## Sharing rows with share links
 
 Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
 
@@ -232,18 +232,18 @@ Sharing is a three-step flow:
 const token = pb.createInviteToken(board).value;
 
 // 2. Build a link the recipient can open in their browser
-const link = pb.createInviteLink(board, token.token);
+const link = pb.createShareLink(board, token.token);
 // → "https://yourapp.com/?pb=..."
 
-// 3. Recipient opens the link; your app calls openInvite
-const board = await pb.openInvite(link);
+// 3. Recipient opens the link; your app calls acceptInvite
+const board = await pb.acceptInvite(link);
 ```
 
-`openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `pb.parseInvite(input)`.
+`acceptInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `pb.parseInvite(input)`.
 
-In React apps, `useInviteFromLocation(pb, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
+In React apps, `useAcceptInviteFromUrl(pb, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `acceptInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
 
-Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
+Users who join through an invite token are added as direct `"editor"` members by default. `"viewer"` members can view rows but cannot call `update()` or send CRDT messages.
 
 ---
 
@@ -257,11 +257,11 @@ const members = await pb.listMembers(board);
 
 // With roles
 const detailed = await pb.listDirectMembers(board);
-// → [{ username: "alice", role: "writer" }, ...]
+// → [{ username: "alice", role: "editor" }, ...]
 
 // Add or remove manually
-await pb.addMember(board, "bob", "writer").settled;
-await pb.removeMember(board, "eve").settled;
+await pb.addMember(board, "bob", "editor").committed;
+await pb.removeMember(board, "eve").committed;
 ```
 
 Membership inherited through a parent row is visible via `listEffectiveMembers`.
@@ -272,17 +272,17 @@ Membership inherited through a parent row is visible via `listEffectiveMembers`.
 
 PutBase includes a CRDT message bridge. Connect any CRDT library to a row and all members receive each other's updates in real time.
 
-Sending CRDT updates requires `"writer"` access, but all members can poll and receive them.
+Sending CRDT updates requires `"editor"` access, but all members can poll and receive them.
 
 Here is the recommended [Yjs](https://yjs.dev) integration:
 
 ```ts
 import * as Y from "yjs";
-import { createYjsBinding } from "@putbase/yjs";
+import { createYjsAdapter } from "@putbase/yjs";
 import { useCrdt } from "@putbase/react";
 
-const binding = createYjsBinding(Y);
-const { value: doc, flush } = useCrdt(board, binding);
+const adapter = createYjsAdapter(Y);
+const { value: doc, flush } = useCrdt(board, adapter);
 
 // Write to doc normally, then push immediately when needed
 await flush();
@@ -294,7 +294,7 @@ await flush();
 
 ## Example apps
 
-`packages/todo-app` is the code from this README assembled into a working app — boards, recent boards, cards, and invite links. Run it with:
+`packages/todo-app` is the code from this README assembled into a working app — boards, recent boards, cards, and share links. Run it with:
 
 ```bash
 pnpm --filter todo-app dev
@@ -314,26 +314,26 @@ pnpm --filter woof-app dev
 
 | Method | Description |
 |--------|-------------|
-| `new PutBase({ schema, appBaseUrl? })` | Create a PutBase instance. Pass `appBaseUrl` so invite links point back to your app. |
+| `new PutBase({ schema, appBaseUrl? })` | Create a PutBase instance. Pass `appBaseUrl` so share links point back to your app. |
 | `ensureReady()` | Explicitly await authentication and provisioning before mutations. Recommended during app startup. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
-| `put(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Most apps use `.value`; await `.settled` when you need remote confirmation. |
+| `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Most apps use `.value`; await `.committed` when you need remote confirmation. |
 | `update(collection, row, fields)` | Merge field updates onto a row optimistically and return a `MutationReceipt<RowHandle>` immediately. `row` can be a `RowHandle` or `RowRef`. |
 | `getRow(row)` | Fetch a row by typed reference. |
 | `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. |
 | `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a handle with `.disconnect()`. |
 | `createInviteToken(row)` | Generate a new invite token for a row and return a `MutationReceipt<InviteToken>`. Most apps can use `.value` immediately. |
 | `getExistingInviteToken(row)` | Return the existing token if one exists, or `null`. |
-| `createInviteLink(row, token)` | Build a shareable URL containing a serialized row ref and token. |
+| `createShareLink(row, token)` | Build a shareable URL containing a serialized row ref and token. |
 | `parseInvite(input)` | Parse an invite URL into `{ ref, inviteToken? }`. |
-| `openInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. Invite joins become direct `"writer"` members by default. |
-| `rememberPerUserRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
-| `openRememberedPerUserRow(key)` | Re-open the remembered row for the signed-in user, or `null`. |
-| `clearRememberedPerUserRow(key)` | Remove the remembered row for the signed-in user. |
+| `acceptInvite(input)` | Join a row via invite URL or parsed invite object, and return its handle. Invite joins become direct `"editor"` members by default. |
+| `saveRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
+| `openSavedRow(key)` | Re-open the saved row for the signed-in user, or `null`. |
+| `clearSavedRow(key)` | Remove the saved row for the signed-in user. |
 | `listMembers(row)` | Returns `string[]` of all member usernames. |
 | `listDirectMembers(row)` | Returns `{ username, role }[]` for direct members. |
 | `listEffectiveMembers(row)` | Returns resolved membership including grants inherited from parents. |
-| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `"writer"` and `"reader"`. `"writer"` can update fields, manage members, manage parents, and send CRDT messages; `"reader"` is read-only. |
+| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `"editor"` and `"viewer"`. `"editor"` can update fields, manage members, manage parents, and send CRDT messages; `"viewer"` is read-only. |
 | `removeMember(row, username)` | Revoke a user's access and return a `MutationReceipt<void>`. |
 | `addParent(child, parent)` | Link a row to an additional parent after creation and return a `MutationReceipt<void>`. |
 | `removeParent(child, parent)` | Unlink a row from a parent and return a `MutationReceipt<void>`. |
@@ -357,7 +357,7 @@ pnpm --filter woof-app dev
 
 | Member | Description |
 |--------|-------------|
-| `.value` | The optimistic value available immediately. For `put` and `update`, this is the `RowHandle`. |
-| `.settled` | Promise that resolves to the final value once the write is confirmed remotely. Rejects if the write fails. |
-| `.status` | Current write status: `"pending"`, `"settled"`, or `"failed"`. |
+| `.value` | The optimistic value available immediately. For `create` and `update`, this is the `RowHandle`. |
+| `.committed` | Promise that resolves to the final value once the write is confirmed remotely. Rejects if the write fails. |
+| `.status` | Current write status: `"pending"`, `"committed"`, or `"failed"`. |
 | `.error` | The rejection reason after a failed write. Otherwise `undefined`. |

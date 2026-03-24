@@ -14,7 +14,7 @@ import type {
   AuthSession,
   AnyRowHandle,
   CollectionName,
-  CrdtBinding,
+  CrdtAdapter,
   CrdtConnectCallbacks,
   CrdtConnection,
   DbMemberInfo,
@@ -23,7 +23,7 @@ import type {
   MemberRole,
   PutBaseUser,
   RowRef,
-  RowTarget,
+  RowInput,
 } from "@putbase/core";
 import type { RowHandle } from "@putbase/core";
 
@@ -31,10 +31,10 @@ import type { ActivitySubscriber } from "./polling";
 import {
   getDefaultRuntime,
   getIdleSnapshot,
-  makeInviteLinkKey,
+  makeShareLinkKey,
   makeIncomingInviteKey,
   makeMembersKey,
-  makePerUserRowKey,
+  makeSavedRowKey,
   makeParentsKey,
   makeQueryKey,
   makeRowKey,
@@ -58,8 +58,8 @@ export interface UseQueryResult<TRow> extends UseResourceResult<TRow[]> {
   rows: TRow[];
 }
 
-export type UseInviteLinkResult = Omit<UseResourceResult<string>, "data"> & {
-  inviteLink: string | undefined;
+export type UseShareLinkResult = Omit<UseResourceResult<string>, "data"> & {
+  shareLink: string | undefined;
 };
 
 export interface UseSessionResult extends UseResourceResult<AuthSession> {
@@ -78,37 +78,37 @@ export interface UseHookOptions {
   enabled?: boolean;
 }
 
-export interface UseInviteFromLocationOptions<
+export interface UseAcceptInviteFromUrlOptions<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 > extends UseHookOptions {
-  href?: string | null;
+  url?: string | null;
   clearInviteParams?: boolean | ((url: URL) => string);
   onOpen?: (result: TResult) => void | Promise<void>;
-  open?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
+  accept?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
 }
 
-export interface UseInviteFromLocationResult<TResult> extends UseResourceResult<TResult> {
+export interface UseAcceptInviteFromUrlResult<TResult> extends UseResourceResult<TResult> {
   hasInvite: boolean;
   inviteInput: string | null;
 }
 
-export interface UsePerUserRowOptions<
+export interface UseSavedRowOptions<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 > extends UseHookOptions {
   key: string;
-  href?: string | null;
+  url?: string | null;
   clearInviteParams?: boolean | ((url: URL) => string);
-  loadRememberedRow?: (row: AnyRowHandle<Schema>, pb: PutBase<Schema>) => Promise<TResult> | TResult;
-  openInvite?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
+  loadSavedRow?: (row: AnyRowHandle<Schema>, pb: PutBase<Schema>) => Promise<TResult> | TResult;
+  acceptInvite?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
   getRow?: (result: TResult) => RowRef;
 }
 
-export interface UsePerUserRowResult<TResult> extends UseResourceResult<TResult | null> {
+export interface UseSavedRowResult<TResult> extends UseResourceResult<TResult | null> {
   hasInvite: boolean;
   inviteInput: string | null;
-  remember(result: TResult): Promise<void>;
+  save(result: TResult): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -221,7 +221,7 @@ function blockedResourceResult<TData>(
   return null;
 }
 
-function getInviteHrefFromLocation(): string | null {
+function getInviteInputFromUrl(): string | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -234,7 +234,7 @@ function getInviteHrefFromLocation(): string | null {
   return null;
 }
 
-function clearInviteLocation(
+function clearInviteUrl(
   clearInviteParams: boolean | ((url: URL) => string),
   inviteInput: string,
 ): void {
@@ -269,7 +269,7 @@ function hasRowRef(value: unknown): value is { ref: RowRef } {
     && typeof (candidate.ref as { baseUrl?: unknown }).baseUrl === "string";
 }
 
-function resolveRowTarget<TCollection extends string>(row: RowTarget<TCollection>): RowRef<TCollection> {
+function resolveRowInput<TCollection extends string>(row: RowInput<TCollection>): RowRef<TCollection> {
   return hasRowRef(row) ? row.ref as RowRef<TCollection> : row;
 }
 
@@ -283,7 +283,7 @@ function getRowFromResult<TResult>(
       ? result.ref
       : null;
   if (!row) {
-    throw new Error("usePerUserRow could not resolve a row. Pass getRow when returning non-row data.");
+    throw new Error("useSavedRow could not resolve a row. Pass getRow when returning non-row data.");
   }
   return row;
 }
@@ -292,18 +292,7 @@ export function PutBaseProvider<Schema extends DbSchema>({
   children,
   pb,
   subscribeToActivity,
-  ...legacyProps
-}: PutBaseProviderProps<Schema> & {
-  client?: PutBase<Schema>;
-  db?: PutBase<Schema>;
-}) {
-  if (legacyProps.client) {
-    throw new Error("PutBaseProvider now expects `pb`, not `client`.");
-  }
-
-  if (legacyProps.db) {
-    throw new Error("PutBaseProvider expects `pb`, not `db`.");
-  }
+}: PutBaseProviderProps<Schema>) {
 
   const runtimeRef = useRef<PutBaseReactRuntime<Schema> | null>(null);
   if (
@@ -327,14 +316,14 @@ export function usePutBase<Schema extends DbSchema>(): PutBase<Schema> {
 
 export function useCrdt<TValue>(
   row: CrdtRowLike | null | undefined,
-  binding: CrdtBinding<TValue>,
+  adapter: CrdtAdapter<TValue>,
 ): UseCrdtResult<TValue> {
   const connectionRef = useRef<CrdtConnection | null>(null);
   const rowKeyRef = useRef<string | null>(null);
   const snapshotRef = useRef<{ value: TValue; version: number } | null>(null);
   const getSnapshot = () => {
-    const nextValue = binding.getValue();
-    const nextVersion = binding.getVersion();
+    const nextValue = adapter.getValue();
+    const nextVersion = adapter.getVersion();
     const cached = snapshotRef.current;
     if (cached && cached.version === nextVersion && cached.value === nextValue) {
       return cached;
@@ -348,7 +337,7 @@ export function useCrdt<TValue>(
     return nextSnapshot;
   };
   const snapshot = useSyncExternalStore(
-    binding.subscribe,
+    adapter.subscribe,
     getSnapshot,
     getSnapshot,
   );
@@ -356,7 +345,7 @@ export function useCrdt<TValue>(
   useEffect(() => {
     if (!row) {
       if (rowKeyRef.current !== null) {
-        binding.reset();
+        adapter.reset();
         rowKeyRef.current = null;
       }
       connectionRef.current = null;
@@ -365,10 +354,10 @@ export function useCrdt<TValue>(
 
     const nextRowKey = `${row.ref.baseUrl}:${row.ref.id}`;
     if (rowKeyRef.current !== null && rowKeyRef.current !== nextRowKey) {
-      binding.reset();
+      adapter.reset();
     }
 
-    const connection = row.connectCrdt(binding.callbacks);
+    const connection = row.connectCrdt(adapter.callbacks);
     connectionRef.current = connection;
     rowKeyRef.current = nextRowKey;
 
@@ -378,7 +367,7 @@ export function useCrdt<TValue>(
         connectionRef.current = null;
       }
     };
-  }, [binding, row]);
+  }, [adapter, row]);
 
   return {
     ...snapshot,
@@ -485,14 +474,14 @@ export function useRow<
   TCollection extends CollectionName<Schema>,
 >(
   pb: PutBase<Schema>,
-  row: RowTarget<TCollection> | null | undefined,
+  row: RowInput<TCollection> | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<
   RowHandle<Schema, TCollection>
 > {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
   const resourceKey = rowRef ? makeRowKey(rowRef.collection, rowRef) : null;
   const blocked = blockedResourceResult<RowHandle<Schema, TCollection>>(session);
   const resource = useOptionalResource(
@@ -512,12 +501,12 @@ export function useRow<
 
 export function useParents<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<RowRef>> {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
   const resourceKey = rowRef ? makeParentsKey(rowRef) : null;
   const blocked = blockedResourceResult<Array<RowRef>>(session);
   const resource = useOptionalResource(
@@ -535,12 +524,12 @@ export function useParents<Schema extends DbSchema>(
 
 export function useMemberUsernames<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<string[]> {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
   const resourceKey = rowRef ? makeMembersKey("usernames", rowRef) : null;
   const blocked = blockedResourceResult<string[]>(session);
   const resource = useOptionalResource(
@@ -558,12 +547,12 @@ export function useMemberUsernames<Schema extends DbSchema>(
 
 export function useDirectMembers<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<{ username: string; role: MemberRole }>> {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
   const resourceKey = rowRef ? makeMembersKey("direct", rowRef) : null;
   const blocked = blockedResourceResult<Array<{ username: string; role: MemberRole }>>(session);
   const resource = useOptionalResource(
@@ -581,12 +570,12 @@ export function useDirectMembers<Schema extends DbSchema>(
 
 export function useEffectiveMembers<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<DbMemberInfo<Schema>>> {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
   const resourceKey = rowRef ? makeMembersKey("effective", rowRef) : null;
   const blocked = blockedResourceResult<Array<DbMemberInfo<Schema>>>(session);
   const resource = useOptionalResource(
@@ -602,15 +591,15 @@ export function useEffectiveMembers<Schema extends DbSchema>(
   return blocked ?? resource;
 }
 
-export function useInviteLink<Schema extends DbSchema>(
+export function useShareLink<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options: UseHookOptions = {},
-): UseInviteLinkResult {
+): UseShareLinkResult {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowTarget(row) : null;
-  const resourceKey = rowRef ? makeInviteLinkKey(rowRef) : null;
+  const rowRef = row ? resolveRowInput(row) : null;
+  const resourceKey = rowRef ? makeShareLinkKey(rowRef) : null;
   const blocked = blockedResourceResult<string>(session);
   const resource = useOptionalResource(
     (options.enabled ?? true) && !!rowRef && !blocked,
@@ -621,14 +610,14 @@ export function useInviteLink<Schema extends DbSchema>(
       async () => {
         const existing = await runtime.client.getExistingInviteToken(rowRef as RowRef);
         const invite = existing ?? runtime.client.createInviteToken(rowRef as RowRef).value;
-        return runtime.client.createInviteLink(rowRef as RowRef, invite.token);
+        return runtime.client.createShareLink(rowRef as RowRef, invite.token);
       },
     ),
   );
   const result = blocked ?? resource;
 
   return {
-    inviteLink: result.data,
+    shareLink: result.data,
     error: result.error,
     refreshError: result.refreshError,
     isRefreshing: result.isRefreshing,
@@ -637,17 +626,17 @@ export function useInviteLink<Schema extends DbSchema>(
   };
 }
 
-export function useInviteFromLocation<
+export function useAcceptInviteFromUrl<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 >(
   pb: PutBase<Schema>,
-  options: UseInviteFromLocationOptions<Schema, TResult> = {},
-): UseInviteFromLocationResult<TResult> {
+  options: UseAcceptInviteFromUrlOptions<Schema, TResult> = {},
+): UseAcceptInviteFromUrlResult<TResult> {
   const runtime = useRuntime(pb);
   const enabled = options.enabled ?? true;
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const detectedInviteInput = options.href ?? getInviteHrefFromLocation();
+  const detectedInviteInput = options.url ?? getInviteInputFromUrl();
   const [latchedInviteInput, setLatchedInviteInput] = useState<string | null>(detectedInviteInput);
   const inviteInput = enabled
     ? detectedInviteInput ?? latchedInviteInput
@@ -656,7 +645,7 @@ export function useInviteFromLocation<
   const clearInviteParamsOption = options.clearInviteParams ?? true;
   const deliveryKey = inviteInput ?? null;
   const onOpenRef = useRef(options.onOpen);
-  const openRef = useRef(options.open);
+  const acceptRef = useRef(options.accept);
   const clearInviteParamsRef = useRef(clearInviteParamsOption);
   const [deliveryEpoch, setDeliveryEpoch] = useState(0);
   const currentDeliveryKey = deliveryKey ? `${deliveryKey}:${deliveryEpoch}` : null;
@@ -672,7 +661,7 @@ export function useInviteFromLocation<
   const [deliveryState, setDeliveryState] = useState(deliveryStateRef.current);
 
   onOpenRef.current = options.onOpen;
-  openRef.current = options.open;
+  acceptRef.current = options.accept;
   clearInviteParamsRef.current = clearInviteParamsOption;
 
   useEffect(() => {
@@ -707,12 +696,12 @@ export function useInviteFromLocation<
     () => runtime.getLoadOnce(
       resourceKey as string,
       () => {
-        const openInvite = openRef.current;
-        if (openInvite) {
-          return openInvite(inviteInput as string, runtime.client);
+        const acceptInvite = acceptRef.current;
+        if (acceptInvite) {
+          return acceptInvite(inviteInput as string, runtime.client);
         }
 
-        return runtime.client.openInvite(inviteInput as string) as Promise<TResult>;
+        return runtime.client.acceptInvite(inviteInput as string) as Promise<TResult>;
       },
     ),
   );
@@ -789,7 +778,7 @@ export function useInviteFromLocation<
         setDeliveryState(nextSuccessState);
 
         if (clearInviteParamsRef.current) {
-          clearInviteLocation(clearInviteParamsRef.current, inviteInput as string);
+          clearInviteUrl(clearInviteParamsRef.current, inviteInput as string);
         }
       } catch (error) {
         if (cancelled) {
@@ -908,16 +897,16 @@ export function useInviteFromLocation<
   };
 }
 
-export function usePerUserRow<
+export function useSavedRow<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 >(
   pb: PutBase<Schema>,
-  options: UsePerUserRowOptions<Schema, TResult>,
-): UsePerUserRowResult<TResult> {
+  options: UseSavedRowOptions<Schema, TResult>,
+): UseSavedRowResult<TResult> {
   const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const inviteInput = options.href ?? getInviteHrefFromLocation();
+  const inviteInput = options.url ?? getInviteInputFromUrl();
   const clearInviteParamsOption = options.clearInviteParams ?? true;
   const sessionUser =
     session.status === "success" && session.data?.signedIn
@@ -925,7 +914,7 @@ export function usePerUserRow<
       : null;
   const scopeKey = sessionUser ? `${sessionUser.username}:${options.key}` : null;
   const resourceKey = sessionUser
-    ? makePerUserRowKey(sessionUser.username, options.key, inviteInput)
+    ? makeSavedRowKey(sessionUser.username, options.key, inviteInput)
     : null;
   const [localData, setLocalData] = useState<{ scopeKey: string; data: TResult | null } | null>(null);
   const clearedInviteRef = useRef<string | null>(null);
@@ -941,10 +930,10 @@ export function usePerUserRow<
       resourceKey as string,
       async () => {
         if (inviteInput) {
-          const opened = options.openInvite
-            ? await options.openInvite(inviteInput, runtime.client)
-            : await runtime.client.openInvite(inviteInput) as TResult;
-          await runtime.client.rememberPerUserRow(
+          const opened = options.acceptInvite
+            ? await options.acceptInvite(inviteInput, runtime.client)
+            : await runtime.client.acceptInvite(inviteInput) as TResult;
+          await runtime.client.saveRow(
             options.key,
             getRowFromResult(opened, options.getRow),
           );
@@ -952,16 +941,16 @@ export function usePerUserRow<
         }
 
         try {
-          const rememberedRow = await runtime.client.openRememberedPerUserRow(options.key);
-          if (!rememberedRow) {
+          const savedRow = await runtime.client.openSavedRow(options.key);
+          if (!savedRow) {
             return null;
           }
 
-          return options.loadRememberedRow
-            ? await options.loadRememberedRow(rememberedRow, runtime.client)
-            : rememberedRow as TResult;
+          return options.loadSavedRow
+            ? await options.loadSavedRow(savedRow, runtime.client)
+            : savedRow as TResult;
         } catch (error) {
-          await runtime.client.clearRememberedPerUserRow(options.key);
+          await runtime.client.clearSavedRow(options.key);
           throw error;
         }
       },
@@ -975,7 +964,7 @@ export function usePerUserRow<
 
     if (clearInviteParamsOption && clearedInviteRef.current !== inviteInput) {
       clearedInviteRef.current = inviteInput;
-      clearInviteLocation(clearInviteParamsOption, inviteInput);
+      clearInviteUrl(clearInviteParamsOption, inviteInput);
     }
   }, [clearInviteParamsOption, inviteInput, resource.status]);
 
@@ -1006,8 +995,8 @@ export function usePerUserRow<
     await resource.refresh();
   };
 
-  const remember = async (result: TResult): Promise<void> => {
-    await runtime.client.rememberPerUserRow(
+  const save = async (result: TResult): Promise<void> => {
+    await runtime.client.saveRow(
       options.key,
       getRowFromResult(result, options.getRow),
     );
@@ -1017,7 +1006,7 @@ export function usePerUserRow<
   };
 
   const clear = async (): Promise<void> => {
-    await runtime.client.clearRememberedPerUserRow(options.key);
+    await runtime.client.clearSavedRow(options.key);
     if (scopeKey) {
       setLocalData({ scopeKey, data: null });
       return;
@@ -1034,7 +1023,7 @@ export function usePerUserRow<
       clear,
       hasInvite: !!inviteInput,
       inviteInput,
-      remember,
+      save,
       refresh,
     };
   }
@@ -1048,7 +1037,7 @@ export function usePerUserRow<
       clear,
       hasInvite: !!inviteInput,
       inviteInput,
-      remember,
+      save,
       refresh,
     };
   }
@@ -1061,7 +1050,7 @@ export function usePerUserRow<
       clear,
       hasInvite: !!inviteInput,
       inviteInput,
-      remember,
+      save,
       refresh,
     };
   }
@@ -1074,7 +1063,7 @@ export function usePerUserRow<
       clear,
       hasInvite: !!inviteInput,
       inviteInput,
-      remember,
+      save,
       refresh,
     };
   }
@@ -1084,7 +1073,7 @@ export function usePerUserRow<
     clear,
     hasInvite: !!inviteInput,
     inviteInput,
-    remember,
+    save,
     refresh,
   };
 }

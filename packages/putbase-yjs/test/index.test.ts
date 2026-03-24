@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
-import { createYjsBinding, type YjsModule } from "../src/index";
+import { createYjsAdapter, type YjsModule } from "../src/index";
 
 function decodeBody(body: unknown): Uint8Array | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -33,7 +33,7 @@ function createRuntime() {
 describe("@putbase/yjs", () => {
   it("buffers and encodes merged local updates", () => {
     const { runtime, mergeUpdates } = createRuntime();
-    const binding = createYjsBinding(runtime);
+    const binding = createYjsAdapter(runtime);
     const doc = binding.getValue();
     const text = doc.getText("messages");
 
@@ -52,7 +52,7 @@ describe("@putbase/yjs", () => {
 
   it("applies remote updates without re-queueing them locally", () => {
     const { runtime } = createRuntime();
-    const binding = createYjsBinding(runtime);
+    const binding = createYjsAdapter(runtime);
     const notifications = vi.fn();
     const unsubscribe = binding.subscribe(notifications);
     const remoteDoc = new Y.Doc();
@@ -80,7 +80,7 @@ describe("@putbase/yjs", () => {
 
   it("ignores malformed messages and resets to a fresh doc", () => {
     const { runtime } = createRuntime();
-    const binding = createYjsBinding(runtime);
+    const binding = createYjsAdapter(runtime);
     const originalDoc = binding.getValue();
 
     binding.getValue().getText("messages").insert(0, "hello");

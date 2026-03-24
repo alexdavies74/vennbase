@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createYjsBinding } from "@putbase/yjs";
+import { createYjsAdapter } from "@putbase/yjs";
 
 import {
   RowHandle,
@@ -28,11 +28,11 @@ import type {
 } from "../src/schema";
 import { WoofService, type ChatEntry, type WoofDbPort } from "../src/service";
 
-function settledReceipt<TValue>(value: TValue): MutationReceipt<TValue> {
+function committedReceipt<TValue>(value: TValue): MutationReceipt<TValue> {
   return {
     value,
-    settled: Promise.resolve(value),
-    status: "settled",
+    committed: Promise.resolve(value),
+    status: "committed",
     error: undefined,
   };
 }
@@ -90,7 +90,7 @@ function dogHistoryRef(id: string): RowRef<"dogHistory"> {
   };
 }
 
-function inviteLink(rowId: string): string {
+function shareLink(rowId: string): string {
   return `https://woof.example/?${PUTBASE_INVITE_TARGET_PARAM}=${encodeURIComponent(JSON.stringify({
     ref: dogRef(rowId),
     inviteToken: "invite_1",
@@ -101,7 +101,7 @@ class MockDb implements WoofDbPort {
   public readonly memberList = ["alex", "friend"];
   public crdtCallbacks: CrdtConnectCallbacks | null = null;
 
-  public putCalls: Array<{
+  public createCalls: Array<{
     collection: string;
     fields: Record<string, unknown>;
     options?: { in?: RowRef<"dogs"> };
@@ -113,11 +113,11 @@ class MockDb implements WoofDbPort {
   private createdDogCount = 0;
 
   private readonly backend: RowHandleBackend<WoofSchema> = {
-    addParent: () => settledReceipt(undefined),
-    removeParent: () => settledReceipt(undefined),
+    addParent: () => committedReceipt(undefined),
+    removeParent: () => committedReceipt(undefined),
     listParents: async <TParentCollection extends string>() => [] as Array<RowRef<TParentCollection>>,
-    addMember: () => settledReceipt(undefined),
-    removeMember: () => settledReceipt(undefined),
+    addMember: () => committedReceipt(undefined),
+    removeMember: () => committedReceipt(undefined),
     listDirectMembers: async () => this.memberList.map((username) => ({
       username,
       role: this.roleFor(username),
@@ -160,7 +160,7 @@ class MockDb implements WoofDbPort {
   };
 
   private roleFor(username: string): MemberRole {
-    return username === "alex" ? "writer" : "reader";
+    return username === "alex" ? "editor" : "viewer";
   }
 
   private readFields(id: string): Record<string, unknown> {
@@ -214,30 +214,30 @@ class MockDb implements WoofDbPort {
     return { username: "alex" };
   }
 
-  put(collection: "dogs", fields: DogRowHandle["fields"]): MutationReceipt<DogRowHandle>;
-  put(collection: "dogHistory", fields: DogHistoryRowHandle["fields"]): MutationReceipt<DogHistoryRowHandle>;
-  put(
+  create(collection: "dogs", fields: DogRowHandle["fields"]): MutationReceipt<DogRowHandle>;
+  create(collection: "dogHistory", fields: DogHistoryRowHandle["fields"]): MutationReceipt<DogHistoryRowHandle>;
+  create(
     collection: "tags",
     fields: TagRowHandle["fields"],
     options: { in: RowRef<"dogs"> },
   ): MutationReceipt<TagRowHandle>;
-  put(
+  create(
     collection: "dogs" | "dogHistory" | "tags",
     fields: Record<string, unknown>,
     options?: { in?: RowRef<"dogs"> },
   ): MutationReceipt<DogRowHandle> | MutationReceipt<DogHistoryRowHandle> | MutationReceipt<TagRowHandle> {
-    this.putCalls.push({ collection, fields, options });
+    this.createCalls.push({ collection, fields, options });
     if (collection === "dogs") {
       this.createdDogCount += 1;
       const id = this.createdDogCount === 1 ? "row_created" : `row_created_${this.createdDogCount}`;
-      return settledReceipt(this.makeDogRow(id, fields));
+      return committedReceipt(this.makeDogRow(id, fields));
     }
 
     if (collection === "dogHistory") {
-      return settledReceipt(this.makeDogHistoryRow(`history_${this.putCalls.length}`, fields));
+      return committedReceipt(this.makeDogHistoryRow(`history_${this.createCalls.length}`, fields));
     }
 
-    return settledReceipt(this.makeTagRow(`tag_${this.putCalls.length}`, fields));
+    return committedReceipt(this.makeTagRow(`tag_${this.createCalls.length}`, fields));
   }
 
   async query(
@@ -270,10 +270,10 @@ class MockDb implements WoofDbPort {
       ...fields,
     };
     this.rowFields.set(row.id, existing.fields);
-    return settledReceipt(existing);
+    return committedReceipt(existing);
   }
 
-  async openInvite(_input: string): Promise<DogRowHandle> {
+  async acceptInvite(_input: string): Promise<DogRowHandle> {
     return this.makeDogRow("row_joined", { name: "Joined" });
   }
 
@@ -287,7 +287,7 @@ function chatEntries(doc: Y.Doc): ChatEntry[] {
 }
 
 function connectDoc(row: DogRowHandle) {
-  const binding = createYjsBinding(Y);
+  const binding = createYjsAdapter(Y);
   const connection = row.connectCrdt(binding.callbacks);
   return {
     binding,
@@ -311,8 +311,8 @@ describe("WoofService", () => {
   it("narrows app rows to dogs rows", async () => {
     const db = new MockDb();
     const service = new WoofService(db);
-    const row = await db.openInvite(
-      inviteLink("row_joined"),
+    const row = await db.acceptInvite(
+      shareLink("row_joined"),
     );
 
     expect(service.expectDogRow(row).id).toBe("row_joined");
@@ -326,7 +326,7 @@ describe("WoofService", () => {
 
     await service.createTag(row, "friendly");
 
-    const tagCall = db.putCalls.find((c) => c.collection === "tags");
+    const tagCall = db.createCalls.find((c) => c.collection === "tags");
     expect(tagCall).toBeDefined();
     expect(tagCall!.fields.label).toBe("friendly");
     expect(tagCall!.options?.in).toMatchObject({
@@ -382,8 +382,8 @@ describe("WoofService", () => {
     const service = new WoofService(db);
     let chatInput: ChatMessage[] | undefined;
 
-    const row = await db.openInvite(
-      inviteLink("row_joined"),
+    const row = await db.acceptInvite(
+      shareLink("row_joined"),
     );
     const connected = connectDoc(row);
 

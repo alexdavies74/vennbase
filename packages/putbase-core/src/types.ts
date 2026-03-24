@@ -100,7 +100,7 @@ export interface CrdtConnectCallbacks {
   produceLocalUpdate: () => JsonValue | null;
 }
 
-export interface CrdtBinding<TValue> {
+export interface CrdtAdapter<TValue> {
   callbacks: CrdtConnectCallbacks;
   getValue(): TValue;
   getVersion(): number;

@@ -5,15 +5,15 @@ import type { RowRuntime } from "./row-runtime";
 import type { WriteSettler } from "./write-settler";
 import type {
   CollectionName,
-  DbPutOptions,
+  DbCreateOptions,
   DbRowFields,
   DbSchema,
   InsertFields,
   RowRef,
-  RowTarget,
+  RowInput,
   RowFields,
 } from "./schema";
-import { applyDefaults, assertPutParents, assertValidFieldValues, getCollectionSpec } from "./schema";
+import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec } from "./schema";
 import type { Transport } from "./transport";
 import { normalizeParentRefs, normalizeRowRef, rowRefKey } from "./row-reference";
 import type { JsonValue } from "./types";
@@ -38,18 +38,18 @@ export class Rows<Schema extends DbSchema> {
       owner: string,
       fields: RowFields<Schema, TCollection>,
     ) => RowHandle<Schema, TCollection>,
-    private readonly addParentRemote: (child: RowTarget, parent: RowTarget) => Promise<void>,
+    private readonly addParentRemote: (child: RowInput, parent: RowInput) => Promise<void>,
     private readonly notifyLocalMutation: () => void,
   ) {}
 
-  put<TCollection extends CollectionName<Schema>>(
+  create<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     fields: InsertFields<Schema, TCollection>,
-    options?: DbPutOptions<Schema, TCollection>,
+    options?: DbCreateOptions<Schema, TCollection>,
   ): MutationReceipt<RowHandle<Schema, TCollection>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const parentRefs = normalizeParentRefs(options?.in);
-    assertPutParents(collection, collectionSpec, parentRefs);
+    assertCreateParents(collection, collectionSpec, parentRefs);
     assertValidFieldValues(collection, collectionSpec, fields as Record<string, unknown>);
 
     const plan = this.rowRuntime.planRow(options?.name ?? `${collection}-${crypto.randomUUID().slice(0, 8)}`);
@@ -120,7 +120,7 @@ export class Rows<Schema extends DbSchema> {
 
   update<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    row: RowTarget<TCollection>,
+    row: RowInput<TCollection>,
     fields: Partial<RowFields<Schema, TCollection>>,
   ): MutationReceipt<RowHandle<Schema, TCollection>> {
     const rowRef = normalizeRowRef(row);
@@ -174,7 +174,7 @@ export class Rows<Schema extends DbSchema> {
   }
 
   async getRow<TCollection extends CollectionName<Schema>>(
-    row: RowTarget<TCollection>,
+    row: RowInput<TCollection>,
   ): Promise<RowHandle<Schema, TCollection>> {
     const rowRef = normalizeRowRef(row);
     const fields = await this.refreshFields(rowRef);
@@ -183,7 +183,7 @@ export class Rows<Schema extends DbSchema> {
     return this.createRowHandle(rowRef.collection as TCollection, rowRef, owner, fields as RowFields<Schema, TCollection>);
   }
 
-  async refreshFields(row: RowTarget): Promise<Record<string, JsonValue>> {
+  async refreshFields(row: RowInput): Promise<Record<string, JsonValue>> {
     const rowRef = normalizeRowRef(row);
     const localFields = this.optimisticStore.getLogicalFields(rowRef);
     const localCollection = this.optimisticStore.getCollection(rowRef);
@@ -211,7 +211,7 @@ export class Rows<Schema extends DbSchema> {
   }
 
   async fetchWithCollection(
-    row: RowTarget,
+    row: RowInput,
   ): Promise<{ fields: Record<string, JsonValue>; collection: string | null }> {
     const rowRef = normalizeRowRef(row);
     const localRecord = this.optimisticStore.getRowByRef(rowRef);
@@ -241,11 +241,11 @@ export class Rows<Schema extends DbSchema> {
     };
   }
 
-  getCurrentParents(row: RowTarget, serverParents: RowRef[] = []): RowRef[] {
+  getCurrentParents(row: RowInput, serverParents: RowRef[] = []): RowRef[] {
     return this.optimisticStore.getCurrentParents(normalizeRowRef(row), serverParents);
   }
 
-  private async syncParentIndexes(row: RowTarget, fields: Record<string, JsonValue>): Promise<void> {
+  private async syncParentIndexes(row: RowInput, fields: Record<string, JsonValue>): Promise<void> {
     const rowRef = normalizeRowRef(row);
     const snapshot = await this.rowRuntime.getRow(rowRef);
     this.optimisticStore.recordParents(rowRef, snapshot.parentRefs);

@@ -125,7 +125,7 @@ export class OptimisticStore {
     });
     record.owner = args.owner;
     record.pendingCreate = true;
-    record.pendingCreateReceipt = args.receipt.settled;
+    record.pendingCreateReceipt = args.receipt.committed;
     record.knownParents = [...args.parents];
     record.baseFields = { ...args.fields };
     record.overlayFields = {};

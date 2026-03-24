@@ -9,7 +9,7 @@ import type {
   MemberRole,
   PutBaseUser,
   RowRef,
-  RowTarget,
+  RowInput,
 } from "@putbase/core";
 import type { RowHandle } from "@putbase/core";
 
@@ -105,7 +105,7 @@ function isRowRefLike(value: unknown): value is RowRef {
   );
 }
 
-function isRowTargetLike(value: unknown): value is RowTarget {
+function isRowInputLike(value: unknown): value is RowInput {
   if (isRowRefLike(value)) {
     return true;
   }
@@ -118,7 +118,7 @@ function isRowTargetLike(value: unknown): value is RowTarget {
   return isRowRefLike(record.ref);
 }
 
-function resolveRowTarget(value: RowTarget): RowRef {
+function resolveRowInput(value: RowInput): RowRef {
   return isRowRefLike(value) ? value : value.ref;
 }
 
@@ -135,8 +135,8 @@ function canonicalizeKeyPart(value: unknown, seen = new WeakSet<object>()): unkn
     return value;
   }
 
-  if (isRowTargetLike(value)) {
-    return canonicalizeRowRef(resolveRowTarget(value));
+  if (isRowInputLike(value)) {
+    return canonicalizeRowRef(resolveRowInput(value));
   }
 
   if (seen.has(value)) {
@@ -502,29 +502,29 @@ export function makeQueryKey<Schema extends DbSchema, TCollection extends Collec
 
 export function makeRowKey<TCollection extends string>(
   collection: TCollection,
-  row: RowTarget<TCollection>,
+  row: RowInput<TCollection>,
 ): string {
   return `row:${collection}:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeParentsKey(row: RowTarget): string {
+export function makeParentsKey(row: RowInput): string {
   return `parents:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeMembersKey(kind: "usernames" | "direct" | "effective", row: RowTarget): string {
+export function makeMembersKey(kind: "usernames" | "direct" | "effective", row: RowInput): string {
   return `${kind}:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
-export function makeInviteLinkKey(row: RowTarget): string {
-  return `invite-link:${stableJsonStringify(canonicalizeKeyPart(row))}`;
+export function makeShareLinkKey(row: RowInput): string {
+  return `share-link:${stableJsonStringify(canonicalizeKeyPart(row))}`;
 }
 
 export function makeIncomingInviteKey(inviteInput: string): string {
   return `incoming-invite:${inviteInput}`;
 }
 
-export function makePerUserRowKey(username: string, rowKey: string, inviteInput: string | null): string {
-  return `per-user-row:${username}:${rowKey}:${inviteInput ?? ""}`;
+export function makeSavedRowKey(username: string, rowKey: string, inviteInput: string | null): string {
+  return `saved-row:${username}:${rowKey}:${inviteInput ?? ""}`;
 }
 
 export const snapshots = {

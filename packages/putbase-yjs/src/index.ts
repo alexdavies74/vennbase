@@ -1,4 +1,4 @@
-import type { CrdtBinding, JsonValue } from "@putbase/core";
+import type { CrdtAdapter, JsonValue } from "@putbase/core";
 
 export interface YjsDocLike {
   on(eventName: "update", listener: (update: Uint8Array, origin: unknown) => void): void;
@@ -12,7 +12,7 @@ export interface YjsModule<TDoc extends YjsDocLike> {
   mergeUpdates(updates: Uint8Array[]): Uint8Array;
 }
 
-export interface YjsBindingOptions {
+export interface YjsAdapterOptions {
   messageType?: string;
   remoteOrigin?: unknown;
 }
@@ -45,10 +45,10 @@ function decodeUpdate(messageType: string, body: unknown): Uint8Array | null {
   }
 }
 
-export function createYjsBinding<TDoc extends YjsDocLike>(
+export function createYjsAdapter<TDoc extends YjsDocLike>(
   yjs: YjsModule<TDoc>,
-  options: YjsBindingOptions = {},
-): CrdtBinding<TDoc> {
+  options: YjsAdapterOptions = {},
+): CrdtAdapter<TDoc> {
   const messageType = options.messageType ?? DEFAULT_MESSAGE_TYPE;
   const remoteOrigin = options.remoteOrigin ?? DEFAULT_REMOTE_ORIGIN;
   const listeners = new Set<() => void>();

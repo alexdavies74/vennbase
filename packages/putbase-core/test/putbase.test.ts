@@ -32,11 +32,6 @@ function workerMetadataKey(kind: "runtime" | "url", hostHash: string): string {
   return `putbase:federation-worker-${kind}:v2:owner:${hostHash}`;
 }
 
-function legacyWorkerMetadataKey(kind: "url", hostHash: string): string {
-  const legacyNamespace = `${"puter"}-${"fed"}`;
-  return `${legacyNamespace}:federation-worker-${kind}:v2:owner:${hostHash}`;
-}
-
 function scopedWorkerName(hostHash: string): string {
   return `owner-${hostHash}-${CLASSIC_WORKER_RUNTIME_ID}-federation`;
 }
@@ -76,8 +71,8 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-async function settle<T>(receipt: { settled: Promise<T> }): Promise<T> {
-  return receipt.settled;
+async function settle<T>(receipt: { committed: Promise<T> }): Promise<T> {
+  return receipt.committed;
 }
 
 const MINIMAL_SCHEMA = defineSchema({
@@ -319,14 +314,14 @@ describe("PutBase", () => {
       },
     });
 
-    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
+    await expect(db.openSavedRow("current-row")).resolves.toBeNull();
 
-    await db.rememberPerUserRow("current-row", {
+    await db.saveRow("current-row", {
       id: "row_1",
       collection: "rows",
       baseUrl: "https://worker.example",
     });
-    await expect(db.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+    await expect(db.openSavedRow("current-row")).resolves.toMatchObject({
       id: "row_1",
       ref: {
         id: "row_1",
@@ -335,8 +330,8 @@ describe("PutBase", () => {
       },
     });
 
-    await db.clearRememberedPerUserRow("current-row");
-    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
+    await db.clearSavedRow("current-row");
+    await expect(db.openSavedRow("current-row")).resolves.toBeNull();
   });
 
   it("isolates remembered rows by username", async () => {
@@ -385,18 +380,18 @@ describe("PutBase", () => {
       fetchFn,
     });
 
-    await ownerDb.rememberPerUserRow("current-row", {
+    await ownerDb.saveRow("current-row", {
       id: "owner_row",
       collection: "rows",
       baseUrl: "https://worker.example",
     });
-    await friendDb.rememberPerUserRow("current-row", {
+    await friendDb.saveRow("current-row", {
       id: "friend_row",
       collection: "rows",
       baseUrl: "https://worker.example",
     });
 
-    await expect(ownerDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+    await expect(ownerDb.openSavedRow("current-row")).resolves.toMatchObject({
       id: "owner_row",
       ref: {
         id: "owner_row",
@@ -404,7 +399,7 @@ describe("PutBase", () => {
         baseUrl: "https://worker.example",
       },
     });
-    await expect(friendDb.openRememberedPerUserRow("current-row")).resolves.toMatchObject({
+    await expect(friendDb.openSavedRow("current-row")).resolves.toMatchObject({
       id: "friend_row",
       ref: {
         id: "friend_row",
@@ -412,24 +407,6 @@ describe("PutBase", () => {
         baseUrl: "https://worker.example",
       },
     });
-  });
-
-  it("drops incompatible legacy remembered row values instead of throwing", async () => {
-    const kv = new MapKv();
-    const entryKey = "putbase:per-user-row:v1:owner:current-row";
-    await kv.set(entryKey, "https://worker.example/rows/row_1");
-
-    const db = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "owner" }),
-      backend: { workers: {}, kv } as BackendClient,
-      fetchFn: (async () => {
-        throw new Error("fetch should not be called for incompatible remembered data");
-      }) as typeof fetch,
-    });
-
-    await expect(db.openRememberedPerUserRow("current-row")).resolves.toBeNull();
-    await expect(kv.get(entryKey)).resolves.toBeNull();
   });
 
   it("explains how to provide Puter when signIn is called without a backend", async () => {
@@ -590,7 +567,7 @@ describe("PutBase", () => {
       fetchFn,
     });
 
-    const row = await db.openInvite(db.createInviteLink({
+    const row = await db.acceptInvite(db.createShareLink({
       id: "row_1",
       collection: "rows",
       baseUrl: "https://workers.puter.site/owner-federation",
@@ -809,7 +786,7 @@ describe("PutBase", () => {
     });
 
     await db.ensureReady();
-    const row = await settle(db.put("rows", { name: "Rex" }));
+    const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(row.ref.baseUrl).toBe(deployedWorkerBase);
     expect(requestedUrls).toContain(`${deployedWorkerBase}/rows`);
@@ -910,7 +887,7 @@ describe("PutBase", () => {
 
     releaseCreate.resolve({ url: deployedWorkerBase });
     await readyPromise;
-    const row = await settle(db.put("rows", { name: "Rex" }));
+    const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(deployCalls).toBe(1);
     expect(row.ref.baseUrl).toBe(deployedWorkerBase);
@@ -961,8 +938,8 @@ describe("PutBase", () => {
     });
 
     await Promise.all([firstDb.ensureReady(), secondDb.ensureReady()]);
-    const firstRow = await settle(firstDb.put("rows", { name: "Rex" }));
-    const secondRow = await settle(secondDb.put("rows", { name: "Spot" }));
+    const firstRow = await settle(firstDb.create("rows", { name: "Rex" }));
+    const secondRow = await settle(secondDb.create("rows", { name: "Spot" }));
 
     expect(deployCalls).toBe(1);
     expect(firstRow.id).not.toBe(secondRow.id);
@@ -1012,59 +989,11 @@ describe("PutBase", () => {
     });
 
     await db.ensureReady();
-    const row = await settle(db.put("rows", { name: "Rex" }));
+    const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(getCalls).toBeGreaterThan(0);
     expect(deployCalls).toBe(0);
     expect(row.ref.baseUrl).toBe(existingWorkerBase);
-  });
-
-  it("logs and redeploys when legacy federation worker url metadata is stale", async () => {
-    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
-    const kv = new MapKv();
-    const appHost = "upgrade.example";
-    const hostHash = hashHostname(appHost);
-    const workerName = scopedWorkerName(hostHash);
-    const staleWorkerBase = `https://workers.example/${workerName}-stale`;
-    const upgradedWorkerBase = scopedWorkerBase(hostHash);
-    let getCalls = 0;
-    let createCalls = 0;
-
-    await kv.set(legacyWorkerMetadataKey("url", hostHash), staleWorkerBase);
-
-    const db = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "owner" }),
-      appBaseUrl: `https://${appHost}`,
-      backend: {
-        fs: { mkdir: async () => undefined, write: async () => undefined },
-        workers: {
-          get: async () => {
-            getCalls += 1;
-            return null;
-          },
-          create: async () => {
-            createCalls += 1;
-            return { url: upgradedWorkerBase };
-          },
-        },
-        kv,
-      },
-    });
-
-    await db.ensureReady();
-
-    expect(getCalls).toBe(1);
-    expect(createCalls).toBe(1);
-    await expect(kv.get(workerMetadataKey("url", hostHash))).resolves.toBe(upgradedWorkerBase);
-    await expect(kv.get(workerMetadataKey("runtime", hostHash))).resolves.toBe(CLASSIC_WORKER_RUNTIME_ID);
-    expect(consoleInfo).toHaveBeenCalledWith(
-      `[putbase] upgrading federation worker ${workerName} for owner on ${appHost} from runtime missing-runtime-id to ${CLASSIC_WORKER_RUNTIME_ID}`,
-    );
-    expect(consoleInfo).toHaveBeenCalledWith(
-      `[putbase] federation worker ready ${workerName} runtime ${CLASSIC_WORKER_RUNTIME_ID} ${upgradedWorkerBase}`,
-    );
-    consoleInfo.mockRestore();
   });
 
   it("redeploys when stored metadata has no current runtime id", async () => {

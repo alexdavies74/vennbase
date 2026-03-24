@@ -149,21 +149,21 @@ useEffect(() => {
 }, [row?.fields]);
 ```
 
-## CRDT bindings
+## CRDT adapters
 
 Use row fields for queryable metadata and the CRDT document for collaborative value state.
 
-`useCrdt` wires any `CrdtBinding` to a row. For Yjs, inject the app's own `Y` instance so `@putbase/yjs` never loads a second runtime:
+`useCrdt` wires any `CrdtAdapter` to a row. For Yjs, inject the app's own `Y` instance so `@putbase/yjs` never loads a second runtime:
 
 ```tsx
 import * as Y from "yjs";
 import { useRef } from "react";
 import { useCrdt } from "@putbase/react";
-import { createYjsBinding } from "@putbase/yjs";
+import { createYjsAdapter } from "@putbase/yjs";
 
 function Room({ row }: { row: BoardHandle | null }) {
-  const bindingRef = useRef(createYjsBinding(Y));
-  const { value: doc, version } = useCrdt(row, bindingRef.current);
+  const adapterRef = useRef(createYjsAdapter(Y));
+  const { value: doc, version } = useCrdt(row, adapterRef.current);
 
   const entries = doc.getArray<string>("messages").toArray();
   return <pre data-version={version}>{JSON.stringify(entries)}</pre>;
@@ -172,21 +172,21 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useInviteLink` lazily generates (or reuses) an invite link for a row. `useInviteFromLocation` handles the recipient side: it detects PutBase invite URLs in the current location, waits for the session, calls `openInvite`, waits for `onOpen`, and then clears the invite params.
+`useShareLink` lazily generates (or reuses) a share link for a row. `useAcceptInviteFromUrl` handles the recipient side: it detects PutBase invite URLs in the current URL, waits for the session, calls `acceptInvite`, waits for `onOpen`, and then clears the invite params.
 
 ```tsx
-import { useInviteLink, useInviteFromLocation } from "@putbase/react";
+import { useShareLink, useAcceptInviteFromUrl } from "@putbase/react";
 import { pb } from "./pb";
 
 // Sharer side
 function ShareButton({ board }: { board: BoardHandle }) {
-  const { inviteLink } = useInviteLink(pb, board);
-  return <button onClick={() => navigator.clipboard.writeText(inviteLink ?? "")}>Copy invite link</button>;
+  const { shareLink } = useShareLink(pb, board);
+  return <button onClick={() => navigator.clipboard.writeText(shareLink ?? "")}>Copy share link</button>;
 }
 
 // Recipient side — call once near the app root
 function InviteHandler() {
-  useInviteFromLocation(pb, {
+  useAcceptInviteFromUrl(pb, {
     onOpen: (board) => {
       // navigate to the shared board
     },
@@ -204,8 +204,8 @@ import { useMutation } from "@putbase/react";
 
 function AddCard({ board }: { board: BoardHandle }) {
   const { mutate: addCard, status } = useMutation(async (text: string) => {
-    const write = pb.put("cards", { text, done: false, createdAt: Date.now() }, { in: board });
-    await write.settled;
+    const write = pb.create("cards", { text, done: false, createdAt: Date.now() }, { in: board });
+    await write.committed;
     return write.value;
   });
 
@@ -231,9 +231,9 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useMemberUsernames(pb, row)` | pb, row handle or row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |
 | `useDirectMembers(pb, row)` | pb, row handle or row ref | `{ data: { username, role }[], status, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(pb, row)` | pb, row handle or row ref | `{ data: DbMemberInfo[], status, isRefreshing, error, refreshError, refresh }` |
-| `useInviteLink(pb, row)` | pb, row handle or row ref | `{ inviteLink: string, status, isRefreshing, error, refreshError, refresh }` |
-| `useInviteFromLocation(pb, options?)` | pb, `{ href?, clearInviteParams?, onOpen?, open? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
-| `usePerUserRow(pb, options)` | pb, `{ key, href?, clearInviteParams?, loadRememberedRow?, openInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh, remember, clear }` |
+| `useShareLink(pb, row)` | pb, row handle or row ref | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
+| `useAcceptInviteFromUrl(pb, options?)` | pb, `{ url?, clearInviteParams?, onOpen?, accept? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
+| `useSavedRow(pb, options)` | pb, `{ key, url?, clearInviteParams?, loadSavedRow?, acceptInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
 All data-fetching hooks return `status: "idle" | "loading" | "success" | "error"`. `loading` means there is no usable data yet. Once a hook has usable data, it stays `success` during background reloads and exposes that work through `isRefreshing` / `refreshError`.
@@ -287,7 +287,7 @@ function useRow<
   TCollection extends CollectionName<Schema>,
 >(
   pb: PutBase<Schema>,
-  row: RowTarget<TCollection> | null | undefined,
+  row: RowInput<TCollection> | null | undefined,
   hookOptions?: UseHookOptions,
 ): UseResourceResult<
   RowHandle<Schema, TCollection>
@@ -299,55 +299,55 @@ function useRow<
 - `useRow` polls for changes and re-renders automatically. In React, prefer it over manual polling around `pb.getRow(...)`.
 - The returned handle matches `pb.getRow(...)`, including parent collection constraints.
 
-### `useInviteLink`
+### `useShareLink`
 
 ```ts
-function useInviteLink<Schema extends DbSchema>(
+function useShareLink<Schema extends DbSchema>(
   pb: PutBase<Schema>,
-  row: RowTarget | null | undefined,
+  row: RowInput | null | undefined,
   options?: UseHookOptions,
 ): {
-  inviteLink: string | undefined;
+  shareLink: string | undefined;
   ...
 }
 ```
 
 - `row: null | undefined` keeps the hook idle.
 - `row` can be either a `RowHandle` or `RowRef`.
-- `inviteLink` is the generated or reused invite URL for the row.
+- `shareLink` is the generated or reused invite URL for the row.
 
-### `useInviteFromLocation`
+### `useAcceptInviteFromUrl`
 
 ```ts
-interface UseInviteFromLocationOptions<
+interface UseAcceptInviteFromUrlOptions<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 > extends UseHookOptions {
-  href?: string | null;
+  url?: string | null;
   clearInviteParams?: boolean | ((url: URL) => string);
   onOpen?: (result: TResult) => void | Promise<void>;
-  open?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
+  accept?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
 }
 
-interface UseInviteFromLocationResult<TResult> extends UseResourceResult<TResult> {
+interface UseAcceptInviteFromUrlResult<TResult> extends UseResourceResult<TResult> {
   hasInvite: boolean;
   inviteInput: string | null;
 }
 
-function useInviteFromLocation<
+function useAcceptInviteFromUrl<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 >(
   pb: PutBase<Schema>,
-  options?: UseInviteFromLocationOptions<Schema, TResult>,
-): UseInviteFromLocationResult<TResult>
+  options?: UseAcceptInviteFromUrlOptions<Schema, TResult>,
+): UseAcceptInviteFromUrlResult<TResult>
 ```
 
-- `href` defaults to `window.location.href`.
+- `url` defaults to `window.location.href`.
 - `clearInviteParams` defaults to `true`.
 - `onOpen` runs after invite acceptance succeeds and may be async.
 - The hook stays in `loading` until `onOpen` finishes and the invite params are removed from the current URL.
-- Override `open` when invite acceptance should return something other than `pb.openInvite(...)`.
+- Override `accept` when invite acceptance should return something other than `pb.acceptInvite(...)`.
 
 ### `useMutation`
 
@@ -362,4 +362,4 @@ function useMutation<TArgs extends unknown[], TResult>(
   reset(): void;
 }
 ```
-- Use it to wrap writes like `pb.put(...)`, `pb.update(...)`, or any other async workflow you want to expose as a React action state.
+- Use it to wrap writes like `pb.create(...)`, `pb.update(...)`, or any other async workflow you want to expose as a React action state.

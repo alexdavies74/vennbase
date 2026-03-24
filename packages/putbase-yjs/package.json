@@ -1,7 +1,7 @@
 {
   "name": "@putbase/yjs",
   "version": "0.1.4",
-  "description": "Yjs bindings for PutBase CRDT sync.",
+  "description": "Yjs adapters for PutBase CRDT sync.",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "crdt", "yjs"],
   "repository": {
     "type": "git",

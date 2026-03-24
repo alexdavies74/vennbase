@@ -11,10 +11,8 @@ import type { BackendClient, DeployWorkerArgs } from "./types";
 
 const FEDERATION_WORKER_ROW_SENTINEL = "bootstrap";
 const WORKER_METADATA_NAMESPACE = "putbase";
-const LEGACY_WORKER_METADATA_NAMESPACE = `${"puter"}-${"fed"}`;
 const FEDERATION_WORKER_URL_KV_PREFIX = `${WORKER_METADATA_NAMESPACE}:federation-worker-url:v2`;
 const FEDERATION_WORKER_RUNTIME_KV_PREFIX = `${WORKER_METADATA_NAMESPACE}:federation-worker-runtime:v2`;
-const LEGACY_FEDERATION_WORKER_URL_KV_PREFIX = `${LEGACY_WORKER_METADATA_NAMESPACE}:federation-worker-url:v2`;
 const FEDERATION_WORKER_DIR = `${WORKER_METADATA_NAMESPACE}/workers`;
 const sharedFederationWorkerPromises = new Map<string, Promise<string>>();
 const sharedFederationWorkerUrls = new Map<string, string>();
@@ -289,10 +287,6 @@ export class Provisioning {
     return `${FEDERATION_WORKER_RUNTIME_KV_PREFIX}:${username}:${appHostHash}`;
   }
 
-  private legacyFederationWorkerUrlKey(username: string, appHostHash: string): string {
-    return `${LEGACY_FEDERATION_WORKER_URL_KV_PREFIX}:${username}:${appHostHash}`;
-  }
-
   private async loadFederationWorkerUrl(username: string, appHostHash: string): Promise<string | null> {
     this.backend = resolveBackend(this.backend);
 
@@ -301,14 +295,9 @@ export class Provisioning {
       return null;
     }
 
-    for (const key of [
-      this.federationWorkerUrlKey(username, appHostHash),
-      this.legacyFederationWorkerUrlKey(username, appHostHash),
-    ]) {
-      const value = await kv.get<unknown>(key).catch(() => undefined);
-      if (typeof value === "string" && value.trim()) {
-        return stripTrailingSlash(value.trim());
-      }
+    const value = await kv.get<unknown>(this.federationWorkerUrlKey(username, appHostHash)).catch(() => undefined);
+    if (typeof value === "string" && value.trim()) {
+      return stripTrailingSlash(value.trim());
     }
 
     return null;

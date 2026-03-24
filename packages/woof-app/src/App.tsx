@@ -1,7 +1,7 @@
 import { puter } from "@heyputer/puter.js";
-import type { CrdtBinding, RowRef } from "@putbase/core";
-import { useCrdt, useInviteFromLocation, useInviteLink, useMutation, usePutBase, useQuery, useRow, useSession } from "@putbase/react";
-import { createYjsBinding } from "@putbase/yjs";
+import type { CrdtAdapter, RowRef } from "@putbase/core";
+import { useCrdt, useAcceptInviteFromUrl, useShareLink, useMutation, usePutBase, useQuery, useRow, useSession } from "@putbase/react";
+import { createYjsAdapter } from "@putbase/yjs";
 import { useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 
@@ -26,7 +26,7 @@ function SetupPanel(props: {
   return (
     <section className="panel">
       <h1>Adopt a dog</h1>
-      <p className="muted">Create a room for your dog, or join an existing room via invite link.</p>
+      <p className="muted">Create a room for your dog, or join an existing room via share link.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -171,11 +171,11 @@ function RoomScreen(props: {
 }) {
   const pb = usePutBase<WoofSchema>();
   const [copyStatus, setCopyStatus] = useState("");
-  const bindingRef = useRef<CrdtBinding<Y.Doc> | null>(null);
+  const bindingRef = useRef<CrdtAdapter<Y.Doc> | null>(null);
   if (bindingRef.current === null) {
-    bindingRef.current = createYjsBinding(Y);
+    bindingRef.current = createYjsAdapter(Y);
   }
-  const inviteLink = useInviteLink(pb, props.row.ref);
+  const shareLink = useShareLink(pb, props.row.ref);
   const crdt = useCrdt(props.row, bindingRef.current);
   const relinquish = useMutation(async () => {
     await service.relinquish();
@@ -191,16 +191,16 @@ function RoomScreen(props: {
           id="copy-link"
           className="secondary"
           type="button"
-          disabled={!inviteLink.inviteLink}
+          disabled={!shareLink.shareLink}
           onClick={() => {
-            if (!inviteLink.inviteLink) {
+            if (!shareLink.shareLink) {
               return;
             }
 
-            void navigator.clipboard.writeText(inviteLink.inviteLink).then(() => {
+            void navigator.clipboard.writeText(shareLink.shareLink).then(() => {
               setCopyStatus("Invite link copied.");
             }).catch(() => {
-              setCopyStatus("Could not copy invite link.");
+              setCopyStatus("Could not copy share link.");
             });
           }}
         >
@@ -218,10 +218,10 @@ function RoomScreen(props: {
         </button>
       </div>
       <p className="muted">
-        {inviteLink.inviteLink ? <a id="invite-link" href={inviteLink.inviteLink}>{inviteLink.inviteLink}</a> : "Could not create invite link yet."}
+        {shareLink.shareLink ? <a id="invite-link" href={shareLink.shareLink}>{shareLink.shareLink}</a> : "Could not create share link yet."}
         {" "}
         <span id="invite-status">
-          {copyStatus || (inviteLink.error ? getErrorMessage(inviteLink.error, "Could not create invite link yet.") : "")}
+          {copyStatus || (shareLink.error ? getErrorMessage(shareLink.error, "Could not create share link yet.") : "")}
         </span>
       </p>
       <TagsPanel
@@ -246,14 +246,14 @@ export function App() {
   const [readyStatus, setReadyStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [readyError, setReadyError] = useState("");
   const [dismissedDogRef, setDismissedDogRef] = useState<RowRef<"dogs"> | null>(null);
-  const invite = useInviteFromLocation<WoofSchema, DogRowHandle>(pb, {
+  const invite = useAcceptInviteFromUrl<WoofSchema, DogRowHandle>(pb, {
     clearInviteParams: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";
       url.hash = "";
       return url.toString();
     },
-    open: async (inviteInput, pb) => service.expectDogRow(await pb.openInvite(inviteInput)),
+    accept: async (inviteInput, putBase) => service.expectDogRow(await putBase.acceptInvite(inviteInput)),
     onOpen: async (nextRow) => {
       setDismissedDogRef(null);
       await pb.ensureReady();
@@ -286,7 +286,7 @@ export function App() {
   const restoredRow = openedActiveRow.status === "success" ? openedActiveRow.data : null;
   const row = inviteRow ?? restoredRow;
   const bootError = invite.status === "error"
-    ? getErrorMessage(invite.error, "Failed to join invite link.")
+    ? getErrorMessage(invite.error, "Failed to join share link.")
     : dogHistory.status === "error"
       ? getErrorMessage(dogHistory.error, "Could not restore saved room.")
       : openedActiveRow.status === "error"

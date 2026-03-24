@@ -1,8 +1,8 @@
-export type MutationStatus = "pending" | "settled" | "failed";
+export type MutationStatus = "pending" | "committed" | "failed";
 
 export interface MutationReceipt<TValue = void> {
   readonly value: TValue;
-  readonly settled: Promise<TValue>;
+  readonly committed: Promise<TValue>;
   readonly status: MutationStatus;
   readonly error: unknown;
 }
@@ -18,14 +18,14 @@ export function createMutationReceipt<TValue>(value: TValue): MutableMutationRec
   let resolvePromise: (value: TValue) => void = () => undefined;
   let rejectPromise: (error: unknown) => void = () => undefined;
 
-  const settled = new Promise<TValue>((resolve, reject) => {
+  const committed = new Promise<TValue>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
   });
 
   return {
     value,
-    settled,
+    committed,
     get status() {
       return status;
     },
@@ -36,7 +36,7 @@ export function createMutationReceipt<TValue>(value: TValue): MutableMutationRec
       if (status !== "pending") {
         return;
       }
-      status = "settled";
+      status = "committed";
       resolvePromise(next);
     },
     reject(nextError: unknown) {

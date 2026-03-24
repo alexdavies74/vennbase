@@ -9,7 +9,7 @@ export type { MutationReceipt, MutationStatus } from "./mutation-receipt";
 export type {
   AuthSession,
   BackendClient,
-  CrdtBinding,
+  CrdtAdapter,
   CrdtConnectCallbacks,
   CrdtConnection,
   DeployWorkerArgs,
@@ -26,9 +26,9 @@ export type {
   AnyRowRef,
   CollectionIndexes,
   CollectionName,
+  DbCreateOptions,
   DbFieldValue,
   DbMemberInfo,
-  DbPutOptions,
   DbQueryOptions,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
@@ -38,6 +38,6 @@ export type {
   QueryWhere,
   MemberRole,
   RowRef,
-  RowTarget,
+  RowInput,
   RowFields,
 } from "./schema";

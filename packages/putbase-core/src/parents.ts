@@ -1,6 +1,6 @@
 import type { RowRuntime } from "./row-runtime";
 import type { Transport } from "./transport";
-import type { DbSchema, RowRef, RowTarget } from "./schema";
+import type { DbSchema, RowInput, RowRef } from "./schema";
 import { assertParentAllowed } from "./schema";
 import { normalizeRowRef } from "./row-reference";
 import type { JsonValue } from "./types";
@@ -10,10 +10,10 @@ export class Parents {
     private readonly transport: Transport,
     private readonly rowRuntime: RowRuntime,
     private readonly schema: DbSchema,
-    private readonly refreshFields: (row: RowTarget) => Promise<Record<string, JsonValue>>,
+    private readonly refreshFields: (row: RowInput) => Promise<Record<string, JsonValue>>,
   ) {}
 
-  async addRemote(child: RowTarget, parent: RowTarget): Promise<void> {
+  async addRemote(child: RowInput, parent: RowInput): Promise<void> {
     const childRef = normalizeRowRef(child);
     const parentRef = normalizeRowRef(parent);
     assertParentAllowed(this.schema, childRef.collection, parentRef.collection);
@@ -37,7 +37,7 @@ export class Parents {
     });
   }
 
-  async removeRemote(child: RowTarget, parent: RowTarget): Promise<void> {
+  async removeRemote(child: RowInput, parent: RowInput): Promise<void> {
     const childRef = normalizeRowRef(child);
     const parentRef = normalizeRowRef(parent);
     const childSnapshot = await this.rowRuntime.getRow(childRef);
@@ -53,7 +53,7 @@ export class Parents {
     });
   }
 
-  async list<TParentCollection extends string>(child: RowTarget): Promise<Array<RowRef<TParentCollection>>> {
+  async list<TParentCollection extends string>(child: RowInput): Promise<Array<RowRef<TParentCollection>>> {
     const childRef = normalizeRowRef(child);
     const row = await this.rowRuntime.getRow(childRef);
     return row.parentRefs as Array<RowRef<TParentCollection>>;

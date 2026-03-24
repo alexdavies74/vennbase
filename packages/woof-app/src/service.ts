@@ -11,7 +11,7 @@ type PuterAI = Pick<AI, "chat">;
 
 export type WoofDbPort = Pick<
   WoofDb,
-  "whoAmI" | "put" | "query" | "update" | "listMembers"
+  "whoAmI" | "create" | "query" | "update" | "listMembers"
 >;
 
 export interface ChatEntry {
@@ -49,7 +49,7 @@ export class WoofService {
   }
 
   enterChat(args: { dogName: string }): DogRowHandle {
-    const row = this.db.put("dogs", { name: args.dogName }).value;
+    const row = this.db.create("dogs", { name: args.dogName }).value;
     this.activateHistory(row);
     return row;
   }
@@ -118,7 +118,7 @@ export class WoofService {
     }
 
     const actor = await this.db.whoAmI();
-    const tagWrite = this.db.put(
+    const tagWrite = this.db.create(
       "tags",
       {
         label: trimmed,
@@ -129,7 +129,7 @@ export class WoofService {
         in: row.ref,
       },
     );
-    await tagWrite.settled;
+    await tagWrite.committed;
   }
 
   async relinquish(): Promise<void> {
@@ -137,7 +137,7 @@ export class WoofService {
   }
 
   activateHistory(row: DogRowHandle): void {
-    const historyRow = this.db.put("dogHistory", {
+    const historyRow = this.db.create("dogHistory", {
       dogRef: row.ref,
       status: "active",
     }).value;
@@ -160,7 +160,7 @@ export class WoofService {
         historyRow.id === keepHistoryRowId
           ? Promise.resolve(historyRow)
           :
-        this.db.update("dogHistory", historyRow.ref, { status: "inactive" }).settled),
+        this.db.update("dogHistory", historyRow.ref, { status: "inactive" }).committed),
     );
   }
 

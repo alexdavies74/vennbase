@@ -58,16 +58,16 @@ const db = new PutBase({
 });
 
 // @ts-expect-error tasks require an explicit project scope on insert
-void db.put("tasks", { title: "Ship v2" });
-void db.put("tasks", { title: "Ship v2", points: 3 }, { in: projectRef });
-void db.put("gameRecords", { gameRef: projectRef, role: "owner" });
-void db.put("gameRecords", { gameRef: projectRef, role: "owner" }, { in: userRef });
+void db.create("tasks", { title: "Ship v2" });
+void db.create("tasks", { title: "Ship v2", points: 3 }, { in: projectRef });
+void db.create("gameRecords", { gameRef: projectRef, role: "owner" });
+void db.create("gameRecords", { gameRef: projectRef, role: "owner" }, { in: userRef });
 
 // @ts-expect-error tasks.title is required on insert
-void db.put("tasks", {});
+void db.create("tasks", {});
 
 // @ts-expect-error tasks can only be created under projects
-void db.put("tasks", { title: "Ship v2" }, { in: teamRef });
+void db.create("tasks", { title: "Ship v2" }, { in: teamRef });
 
 void db.query("tasks", { in: projectRef, where: { status: "done" } });
 void db.query("tasks", { in: projectRef, index: "byStatus", value: "done" });
@@ -91,28 +91,28 @@ void db.query("tasks", { in: teamRef });
 void db.query("mixedRecords", { where: { label: "x" } });
 
 // @ts-expect-error mixed parent collections still require an explicit scope on insert
-void db.put("mixedRecords", { label: "x" });
+void db.create("mixedRecords", { label: "x" });
 
-const projectWrite = db.put("projects", { name: "Website" });
+const projectWrite = db.create("projects", { name: "Website" });
 const project = projectWrite.value;
 const projectName: string = project.fields.name;
 void projectName;
-void projectWrite.settled;
-void db.put("tasks", { title: "Ship v2" }, { in: project });
+void projectWrite.committed;
+void db.create("tasks", { title: "Ship v2" }, { in: project });
 void db.query("tasks", { in: project, where: { status: "done" } });
 void db.getRow(project).then((row) => {
   const collection: "projects" = row.collection;
   void collection;
 });
 void db.createInviteToken(project);
-void db.createInviteLink(project, "invite_token");
+void db.createShareLink(project, "invite_token");
 void db.listMembers(project);
-void db.rememberPerUserRow("recent-project", project);
+void db.saveRow("recent-project", project);
 
 // @ts-expect-error ref fields still require a serializable RowRef
-void db.put("gameRecords", { gameRef: project, role: "owner" });
+void db.create("gameRecords", { gameRef: project, role: "owner" });
 
-const taskWrite = db.put("tasks", { title: "Ship v2" }, { in: projectRef });
+const taskWrite = db.create("tasks", { title: "Ship v2" }, { in: projectRef });
 const task = taskWrite.value;
 const title: string = task.fields.title;
 const status: string = task.fields.status;
@@ -120,7 +120,7 @@ const maybePoints: number | undefined = task.fields.points;
 void title;
 void status;
 void maybePoints;
-void taskWrite.settled;
+void taskWrite.committed;
 void db.update("tasks", task, { status: "done" });
 void task.in.add(project);
 void task.in.list().then((parents) => {

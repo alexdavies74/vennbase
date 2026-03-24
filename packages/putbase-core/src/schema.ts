@@ -6,7 +6,7 @@ export interface RowRef<TCollection extends string = string> {
   baseUrl: string;
 }
 
-export type RowTarget<TCollection extends string = string> =
+export type RowInput<TCollection extends string = string> =
   | RowRef<TCollection>
   | { ref: RowRef<TCollection> };
 
@@ -280,7 +280,7 @@ export type AnyRowRef<Schema extends DbSchema> = {
 }[CollectionName<Schema>];
 
 type ParentInput<TCollection extends string> =
-  [TCollection] extends [never] ? never : RowTarget<TCollection> | RowTarget<TCollection>[];
+  [TCollection] extends [never] ? never : RowInput<TCollection> | RowInput<TCollection>[];
 
 export type AllowedParentRef<
   Schema extends DbSchema,
@@ -298,7 +298,7 @@ export type AnyRow<Schema extends DbSchema> = {
   [TCollection in CollectionName<Schema>]: DbRow<TCollection, RowFields<Schema, TCollection>>;
 }[CollectionName<Schema>];
 
-export type DbPutOptions<
+export type DbCreateOptions<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > =
@@ -317,15 +317,15 @@ export type DbPutOptions<
         name?: string;
       };
 
-export type DbPutArgs<
+export type DbCreateArgs<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > =
   IsUserOnlyCollection<Schema, TCollection> extends true
-    ? [options?: DbPutOptions<Schema, TCollection>]
+    ? [options?: DbCreateOptions<Schema, TCollection>]
     : HasDeclaredParents<Schema, TCollection> extends true
-      ? [options: DbPutOptions<Schema, TCollection>]
-      : [options?: DbPutOptions<Schema, TCollection>];
+      ? [options: DbCreateOptions<Schema, TCollection>]
+      : [options?: DbCreateOptions<Schema, TCollection>];
 
 type QueryFieldValue<TField extends AnyDbFieldBuilder> = Exclude<InferFieldValue<TField>, undefined>;
 
@@ -410,7 +410,7 @@ export interface DbQueryWatchHandle {
   refresh(): Promise<void>;
 }
 
-export type MemberRole = "writer" | "reader";
+export type MemberRole = "editor" | "viewer";
 
 export interface DbMemberInfo<Schema extends DbSchema = DbSchema> {
   username: string;
@@ -471,7 +471,7 @@ export function applyDefaults<
   return next as TFields;
 }
 
-export function assertPutParents(
+export function assertCreateParents(
   collection: string,
   collectionSpec: AnyDbCollectionDefinition,
   parents: RowRef[],

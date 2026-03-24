@@ -1,13 +1,13 @@
 import { createAdaptivePoller } from "./polling";
 import type { RowRuntime } from "./row-runtime";
 import type { CrdtConnectCallbacks, CrdtConnection, SyncMessage } from "./types";
-import type { RowTarget } from "./schema";
+import type { RowInput } from "./schema";
 import { normalizeRowRef } from "./row-reference";
 
 export class Sync {
   constructor(private readonly rowRuntime: RowRuntime) {}
 
-  connectCrdt(row: RowTarget, callbacks: CrdtConnectCallbacks): CrdtConnection {
+  connectCrdt(row: RowInput, callbacks: CrdtConnectCallbacks): CrdtConnection {
     const rowRef = normalizeRowRef(row);
     let lastSequence = 0;
 

@@ -1,5 +1,5 @@
 import type { Transport } from "./transport";
-import type { DbMemberInfo, DbSchema, MemberRole, RowTarget } from "./schema";
+import type { DbMemberInfo, DbSchema, MemberRole, RowInput } from "./schema";
 import { normalizeRowRef } from "./row-reference";
 
 interface ListMembersResponse {
@@ -13,25 +13,25 @@ interface EffectiveMembersResponse {
 export class Members<Schema extends DbSchema> {
   constructor(private readonly transport: Transport) {}
 
-  async addRemote(row: RowTarget, username: string, role: MemberRole): Promise<void> {
+  async addRemote(row: RowInput, username: string, role: MemberRole): Promise<void> {
     await this.transport.row(normalizeRowRef(row)).request("members/add", {
       username,
       role,
     });
   }
 
-  async removeRemote(row: RowTarget, username: string): Promise<void> {
+  async removeRemote(row: RowInput, username: string): Promise<void> {
     await this.transport.row(normalizeRowRef(row)).request("members/remove", {
       username,
     });
   }
 
-  async listDirect(row: RowTarget): Promise<Array<{ username: string; role: MemberRole }>> {
+  async listDirect(row: RowInput): Promise<Array<{ username: string; role: MemberRole }>> {
     const payload = await this.transport.row(normalizeRowRef(row)).request<ListMembersResponse>("members/direct", {});
     return payload.members;
   }
 
-  async listEffective(row: RowTarget): Promise<Array<DbMemberInfo<Schema>>> {
+  async listEffective(row: RowInput): Promise<Array<DbMemberInfo<Schema>>> {
     const payload = await this.transport.row(normalizeRowRef(row)).request<EffectiveMembersResponse>("members/effective", {});
     return payload.members as Array<DbMemberInfo<Schema>>;
   }

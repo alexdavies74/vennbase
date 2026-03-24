@@ -20,7 +20,7 @@ describe("invite parsing", () => {
       collection: "dogs",
       baseUrl: "https://workers.example/alex-1234abcd-federation",
     } as const;
-    const link = db.createInviteLink(
+    const link = db.createShareLink(
       ref,
       "invite_xyz",
     );

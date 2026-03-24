@@ -1,10 +1,10 @@
 import { resolveBackendAsync } from "./backend";
-import type { RowRef, RowTarget } from "./schema";
+import type { RowInput, RowRef } from "./schema";
 import { normalizeRowRef } from "./row-reference";
 import type { BackendClient } from "./types";
 
-const PER_USER_ROW_PREFIX = "putbase:per-user-row:v1";
-const inMemoryPerUserRows = new Map<string, string>();
+const SAVED_ROW_PREFIX = "putbase:saved-row:v1";
+const inMemorySavedRows = new Map<string, string>();
 
 type KvDeleteLike = {
   delete?: (key: string) => Promise<unknown>;
@@ -14,16 +14,16 @@ type KvDeleteLike = {
 function normalizeStorageKey(key: string): string {
   const normalized = key.trim();
   if (!normalized) {
-    throw new Error("Per-user row key is required");
+    throw new Error("Saved row key is required");
   }
   return normalized;
 }
 
-function rememberedRowKey(username: string, key: string): string {
-  return `${PER_USER_ROW_PREFIX}:${username}:${normalizeStorageKey(key)}`;
+function savedRowKey(username: string, key: string): string {
+  return `${SAVED_ROW_PREFIX}:${username}:${normalizeStorageKey(key)}`;
 }
 
-function resolveStoredRow(row: RowTarget): string {
+function resolveStoredRow(row: RowInput): string {
   return JSON.stringify(normalizeRowRef(row));
 }
 
@@ -43,20 +43,20 @@ async function deleteStoredRow(
     return;
   }
 
-  inMemoryPerUserRows.delete(entryKey);
+  inMemorySavedRows.delete(entryKey);
 }
 
-export async function loadRememberedPerUserRow(
+export async function loadSavedRow(
   backend: BackendClient | undefined,
   username: string,
   key: string,
 ): Promise<RowRef | null> {
   const resolvedBackend = await resolveBackendAsync(backend);
-  const entryKey = rememberedRowKey(username, key);
+  const entryKey = savedRowKey(username, key);
   const kv = resolvedBackend?.kv;
   const stored = kv?.get
     ? await kv.get<unknown>(entryKey).catch(() => undefined)
-    : inMemoryPerUserRows.get(entryKey);
+    : inMemorySavedRows.get(entryKey);
   if (typeof stored !== "string") {
     return null;
   }
@@ -67,25 +67,18 @@ export async function loadRememberedPerUserRow(
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(normalized) as RowRef;
-    return normalizeRowRef(parsed);
-  } catch {
-    // Old SDK versions stored bare row URLs; those no longer contain enough
-    // metadata to reopen a row, so drop them instead of surfacing parse errors.
-    await deleteStoredRow(backend, entryKey);
-    return null;
-  }
+  const parsed = JSON.parse(normalized) as RowRef;
+  return normalizeRowRef(parsed);
 }
 
-export async function rememberPerUserRow(
+export async function saveRow(
   backend: BackendClient | undefined,
   username: string,
   key: string,
-  row: RowTarget,
+  row: RowInput,
 ): Promise<void> {
   const resolvedBackend = await resolveBackendAsync(backend);
-  const entryKey = rememberedRowKey(username, key);
+  const entryKey = savedRowKey(username, key);
   const value = resolveStoredRow(row);
   const kv = resolvedBackend?.kv;
   if (kv?.set) {
@@ -93,14 +86,13 @@ export async function rememberPerUserRow(
     return;
   }
 
-  inMemoryPerUserRows.set(entryKey, value);
+  inMemorySavedRows.set(entryKey, value);
 }
 
-export async function clearRememberedPerUserRow(
+export async function clearSavedRow(
   backend: BackendClient | undefined,
   username: string,
   key: string,
 ): Promise<void> {
-  const entryKey = rememberedRowKey(username, key);
-  await deleteStoredRow(backend, entryKey);
+  await deleteStoredRow(backend, savedRowKey(username, key));
 }

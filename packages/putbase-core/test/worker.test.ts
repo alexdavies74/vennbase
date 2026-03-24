@@ -236,8 +236,8 @@ describe("RowWorker", () => {
 
     expect(directMembers.status).toBe(200);
     expect((await jsonBody(directMembers)).members).toEqual(expect.arrayContaining([
-      expect.objectContaining({ username: "owner", role: "writer" }),
-      expect.objectContaining({ username: "guest", role: "writer" }),
+      expect.objectContaining({ username: "owner", role: "editor" }),
+      expect.objectContaining({ username: "guest", role: "editor" }),
     ]));
 
     const outsiderRead = await worker.handle(
@@ -526,7 +526,7 @@ describe("RowWorker", () => {
     });
   });
 
-  it("blocks sync sends from reader members", async () => {
+  it("blocks sync sends from viewer members", async () => {
     const worker = new RowWorker(
       {
         owner: "owner",
@@ -554,8 +554,8 @@ describe("RowWorker", () => {
         rowId: "row_reader",
         username: "owner",
         body: {
-          username: "reader",
-          role: "reader",
+          username: "viewer",
+          role: "viewer",
         },
       }),
     );
@@ -565,7 +565,7 @@ describe("RowWorker", () => {
         url: rowEndpoint("row_reader", "sync/send"),
         action: "sync/send",
         rowId: "row_reader",
-        username: "reader",
+        username: "viewer",
         body: {
           id: "msg_reader",
           rowId: "row_reader",
@@ -579,7 +579,7 @@ describe("RowWorker", () => {
     expect((await jsonBody(post)).code).toBe("UNAUTHORIZED");
   });
 
-  it("allows writer members to manage membership", async () => {
+  it("allows editor members to manage membership", async () => {
     const worker = new RowWorker(
       {
         owner: "owner",
@@ -607,8 +607,8 @@ describe("RowWorker", () => {
         rowId: "row_writer_manage",
         username: "owner",
         body: {
-          username: "writer",
-          role: "writer",
+          username: "editor",
+          role: "editor",
         },
       }),
     );
@@ -618,8 +618,8 @@ describe("RowWorker", () => {
         url: rowEndpoint("row_writer_manage", "row/join"),
         action: "row/join",
         rowId: "row_writer_manage",
-        username: "writer",
-        body: { username: "writer" },
+        username: "editor",
+        body: { username: "editor" },
       }),
     );
 
@@ -628,19 +628,19 @@ describe("RowWorker", () => {
         url: rowEndpoint("row_writer_manage", "members/add"),
         action: "members/add",
         rowId: "row_writer_manage",
-        username: "writer",
+        username: "editor",
         body: {
-          username: "reader",
-          role: "reader",
+          username: "viewer",
+          role: "viewer",
         },
       }),
     );
 
     expect(response.status).toBe(200);
-    expect((await jsonBody(response)).members).toEqual(expect.arrayContaining(["owner", "writer", "reader"]));
+    expect((await jsonBody(response)).members).toEqual(expect.arrayContaining(["owner", "editor", "viewer"]));
   });
 
-  it("blocks reader members from managing membership", async () => {
+  it("blocks viewer members from managing membership", async () => {
     const worker = new RowWorker(
       {
         owner: "owner",
@@ -668,8 +668,8 @@ describe("RowWorker", () => {
         rowId: "row_reader_manage",
         username: "owner",
         body: {
-          username: "reader",
-          role: "reader",
+          username: "viewer",
+          role: "viewer",
         },
       }),
     );
@@ -679,8 +679,8 @@ describe("RowWorker", () => {
         url: rowEndpoint("row_reader_manage", "row/join"),
         action: "row/join",
         rowId: "row_reader_manage",
-        username: "reader",
-        body: { username: "reader" },
+        username: "viewer",
+        body: { username: "viewer" },
       }),
     );
 
@@ -689,10 +689,10 @@ describe("RowWorker", () => {
         url: rowEndpoint("row_reader_manage", "members/add"),
         action: "members/add",
         rowId: "row_reader_manage",
-        username: "reader",
+        username: "viewer",
         body: {
           username: "guest",
-          role: "reader",
+          role: "viewer",
         },
       }),
     );
@@ -729,7 +729,7 @@ describe("RowWorker", () => {
         rowId: "row_invalid_role",
         username: "owner",
         body: {
-          username: "writer",
+          username: "editor",
           role: "admin",
         },
       }),
@@ -739,7 +739,7 @@ describe("RowWorker", () => {
     expect((await jsonBody(response)).code).toBe("BAD_REQUEST");
   });
 
-  it("does not grant writer access to legacy admin member roles", async () => {
+  it("does not grant editor access to legacy admin member roles", async () => {
     const kv = new InMemoryKv();
     const worker = new RowWorker(
       {
@@ -769,7 +769,7 @@ describe("RowWorker", () => {
         username: "owner",
         body: {
           username: "guest",
-          role: "writer",
+          role: "editor",
         },
       }),
     );
@@ -815,7 +815,7 @@ describe("RowWorker", () => {
 
     expect(membersResponse.status).toBe(200);
     expect((await jsonBody(membersResponse)).members).toEqual(expect.arrayContaining([
-      expect.objectContaining({ username: "guest", role: "reader" }),
+      expect.objectContaining({ username: "guest", role: "viewer" }),
     ]));
     await expect(kv.get(rowMemberRolesStorageKey("row_legacy_role"))).resolves.toEqual({ guest: "admin" });
   });

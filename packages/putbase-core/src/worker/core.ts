@@ -427,9 +427,9 @@ function sameRowRef(left: RowRef, right: RowRef): boolean {
 
 function roleRank(role: MemberRole | null): number {
   switch (role) {
-    case "writer":
+    case "editor":
       return 2;
-    case "reader":
+    case "viewer":
       return 1;
     default:
       return 0;
@@ -441,12 +441,12 @@ function maxRole(left: MemberRole | null, right: MemberRole | null): MemberRole 
 }
 
 function normalizeStoredMemberRole(role: unknown): MemberRole | null {
-  if (role === "writer") {
-    return "writer";
+  if (role === "editor") {
+    return "editor";
   }
 
-  if (role === "reader") {
-    return "reader";
+  if (role === "viewer") {
+    return "viewer";
   }
 
   return null;
@@ -871,7 +871,7 @@ export class RowWorker {
 
     if (!isOwner) {
       const roles = await this.getMemberRoles(rowId);
-      roles[body.username] = roles[body.username] ?? "writer";
+      roles[body.username] = roles[body.username] ?? "editor";
       await this.kv.set(rowMemberRolesKey(rowId), roles);
     }
 
@@ -1118,9 +1118,9 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "childRef, childOwner, and collection are required");
     }
 
-    const requesterCanManageParent = await this.hasRole(parentRowId, principal, ctx, ["writer"]);
+    const requesterCanManageParent = await this.hasRole(parentRowId, principal, ctx, ["editor"]);
     if (!requesterCanManageParent && principal.username !== body.childOwner) {
-      error(401, "UNAUTHORIZED", "Only child owner or parent writer can unregister child");
+      error(401, "UNAUTHORIZED", "Only child owner or parent editor can unregister child");
     }
 
     const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
@@ -1313,7 +1313,7 @@ export class RowWorker {
     await this.assertWriter(rowId, principal, ctx);
     const username = body.username?.trim();
     const role = body.role;
-    if (!username || !role || (role !== "writer" && role !== "reader")) {
+    if (!username || !role || (role !== "editor" && role !== "viewer")) {
       error(400, "BAD_REQUEST", "username and valid role are required");
     }
 
@@ -1380,7 +1380,7 @@ export class RowWorker {
     return jsonResponse(200, {
       members: members.map((username) => ({
         username,
-        role: username === this.config.owner ? "writer" : roles[username] ?? "reader",
+        role: username === this.config.owner ? "editor" : roles[username] ?? "viewer",
       })),
     });
   }
@@ -1403,7 +1403,7 @@ export class RowWorker {
     const directRoles = await this.getMemberRoles(rowId);
 
     for (const username of direct) {
-      const role: MemberRole = username === this.config.owner ? "writer" : directRoles[username] ?? "reader";
+      const role: MemberRole = username === this.config.owner ? "editor" : directRoles[username] ?? "viewer";
       const existing = members.get(username);
       if (!existing || roleRank(role) > roleRank(existing.role)) {
         members.set(username, { username, role, via: "direct" });
@@ -1468,7 +1468,7 @@ export class RowWorker {
     parentBaseUrl: string;
     principal: VerifiedPrincipal;
   }): Promise<void> {
-    const isParentMember = await this.hasRole(args.parentRowId, args.principal, args.ctx, ["writer", "reader"]);
+    const isParentMember = await this.hasRole(args.parentRowId, args.principal, args.ctx, ["editor", "viewer"]);
     const canWriteChild = await this.canWriteChildRow(args);
 
     if (isParentMember && canWriteChild) {
@@ -1485,7 +1485,7 @@ export class RowWorker {
       return;
     }
 
-    error(401, "UNAUTHORIZED", "Must be a parent member or a writer on a linked child row");
+    error(401, "UNAUTHORIZED", "Must be a parent member or a editor on a linked child row");
   }
 
   private async canWriteChildRow(args: {
@@ -1500,7 +1500,7 @@ export class RowWorker {
     }
 
     const role = await this.resolveRemoteRowRole(args.childRef, args.auth.principal, args.ctx, 1);
-    return role === "writer";
+    return role === "editor";
   }
 
   private async resolveRemoteRowRole(
@@ -1799,7 +1799,7 @@ export class RowWorker {
     ctx: WorkerRequestContext,
   ): Promise<void> {
     const role = await this.resolveMemberRole(rowId, principal, ctx);
-    if (role !== "writer") {
+    if (role !== "editor") {
       error(401, "UNAUTHORIZED", "Writers only");
     }
   }
@@ -1873,7 +1873,7 @@ export class RowWorker {
       if (this.config.ownerPublicKeyJwk && canonicalize(principal.publicKeyJwk) !== canonicalize(this.config.ownerPublicKeyJwk)) {
         return null;
       }
-      return "writer";
+      return "editor";
     }
 
     const members = await this.getMembers(rowId);
@@ -1888,7 +1888,7 @@ export class RowWorker {
     }
 
     const roles = await this.getMemberRoles(rowId);
-    const role = roles[principal.username] ?? "reader";
+    const role = roles[principal.username] ?? "viewer";
     return role;
   }
 
