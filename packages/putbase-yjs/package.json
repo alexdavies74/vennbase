@@ -1,6 +1,6 @@
 {
   "name": "@putbase/yjs",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Yjs adapters for PutBase CRDT sync.",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "crdt", "yjs"],
   "repository": {

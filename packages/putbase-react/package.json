@@ -1,6 +1,6 @@
 {
   "name": "@putbase/react",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "React hooks for PutBase — a multi-user database for apps that have no backend.",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "react", "hooks"],
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@putbase/core",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A multi-user database for apps that have no backend.",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "crdt", "storage"],
   "repository": {
