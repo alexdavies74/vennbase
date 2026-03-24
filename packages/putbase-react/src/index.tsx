@@ -85,7 +85,7 @@ export interface UseInviteFromLocationOptions<
   href?: string | null;
   clearLocation?: boolean | ((url: URL) => string);
   onOpen?: (result: TResult) => void | Promise<void>;
-  open?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
+  open?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
 }
 
 export interface UseInviteFromLocationResult<TResult> extends UseResourceResult<TResult> {
@@ -100,8 +100,8 @@ export interface UsePerUserRowOptions<
   key: string;
   href?: string | null;
   clearLocation?: boolean | ((url: URL) => string);
-  loadRememberedRow?: (row: AnyRowHandle<Schema>, client: PutBase<Schema>) => Promise<TResult> | TResult;
-  openInvite?: (inviteInput: string, client: PutBase<Schema>) => Promise<TResult>;
+  loadRememberedRow?: (row: AnyRowHandle<Schema>, pb: PutBase<Schema>) => Promise<TResult> | TResult;
+  openInvite?: (inviteInput: string, pb: PutBase<Schema>) => Promise<TResult>;
   getRow?: (result: TResult) => RowRef;
 }
 
@@ -114,8 +114,10 @@ export interface UsePerUserRowResult<TResult> extends UseResourceResult<TResult 
 
 export interface PutBaseProviderProps<Schema extends DbSchema> {
   children: ReactNode;
-  client: PutBase<Schema>;
+  pb: PutBase<Schema>;
   subscribeToActivity?: ActivitySubscriber;
+  client?: never;
+  db?: never;
 }
 
 const RuntimeContext = createContext<PutBaseReactRuntime<any> | null>(null);
@@ -143,14 +145,14 @@ function makeResourceResult<TData>(
   };
 }
 
-function useRuntime<Schema extends DbSchema>(client?: PutBase<Schema>): PutBaseReactRuntime<Schema> {
+function useRuntime<Schema extends DbSchema>(pb?: PutBase<Schema>): PutBaseReactRuntime<Schema> {
   const contextRuntime = useContext(RuntimeContext);
-  if (client) {
-    if (contextRuntime && contextRuntime.client === client) {
+  if (pb) {
+    if (contextRuntime && contextRuntime.client === pb) {
       return contextRuntime as PutBaseReactRuntime<Schema>;
     }
 
-    return getDefaultRuntime(client);
+    return getDefaultRuntime(pb);
   }
 
   if (!contextRuntime) {
@@ -288,16 +290,28 @@ function getRowFromResult<TResult>(
 
 export function PutBaseProvider<Schema extends DbSchema>({
   children,
-  client,
+  pb,
   subscribeToActivity,
-}: PutBaseProviderProps<Schema>) {
+  ...legacyProps
+}: PutBaseProviderProps<Schema> & {
+  client?: PutBase<Schema>;
+  db?: PutBase<Schema>;
+}) {
+  if (legacyProps.client) {
+    throw new Error("PutBaseProvider now expects `pb`, not `client`.");
+  }
+
+  if (legacyProps.db) {
+    throw new Error("PutBaseProvider expects `pb`, not `db`.");
+  }
+
   const runtimeRef = useRef<PutBaseReactRuntime<Schema> | null>(null);
   if (
     runtimeRef.current === null ||
-    runtimeRef.current.client !== client ||
+    runtimeRef.current.client !== pb ||
     runtimeRef.current.externalSubscribeToActivity !== subscribeToActivity
   ) {
-    runtimeRef.current = new Runtime(client, subscribeToActivity);
+    runtimeRef.current = new Runtime(pb, subscribeToActivity);
   }
 
   return (
@@ -380,10 +394,10 @@ export function useCrdt<TValue>(
 }
 
 export function usePutBaseReady<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   options: UseHookOptions = {},
 ): UseResourceResult<void> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const blocked = blockedResourceResult<void>(session);
   const resource = useOptionalResource((options.enabled ?? true) && !blocked, "ready", runtime, () =>
@@ -393,10 +407,10 @@ export function usePutBaseReady<Schema extends DbSchema>(
 }
 
 export function useSession<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   options: UseHookOptions = {},
 ): UseSessionResult {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const resource = useSessionResource(runtime, options.enabled ?? true);
   return {
     ...resource,
@@ -410,10 +424,10 @@ export function useSession<Schema extends DbSchema>(
 }
 
 export function useCurrentUser<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   options: UseHookOptions = {},
 ): UseResourceResult<PutBaseUser> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   if (session.status === "error") {
     return makeResourceResult<PutBaseUser>({
@@ -438,14 +452,14 @@ export function useQuery<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
 >(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   collection: TCollection,
   options: DbQueryOptions<Schema, TCollection> | null | undefined,
   hookOptions: UseHookOptions = {},
 ): UseQueryResult<
   RowHandle<Schema, TCollection>
 > {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
   const resourceKey = options ? makeQueryKey(collection, options) : null;
   const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection>>>(session);
@@ -470,13 +484,13 @@ export function useRow<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
 >(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget<TCollection> | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<
   RowHandle<Schema, TCollection>
 > {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeRowKey(rowRef.collection, rowRef) : null;
@@ -497,11 +511,11 @@ export function useRow<
 }
 
 export function useParents<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<RowRef>> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeParentsKey(rowRef) : null;
@@ -520,11 +534,11 @@ export function useParents<Schema extends DbSchema>(
 }
 
 export function useMemberUsernames<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<string[]> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeMembersKey("usernames", rowRef) : null;
@@ -543,11 +557,11 @@ export function useMemberUsernames<Schema extends DbSchema>(
 }
 
 export function useDirectMembers<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<{ username: string; role: MemberRole }>> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeMembersKey("direct", rowRef) : null;
@@ -566,11 +580,11 @@ export function useDirectMembers<Schema extends DbSchema>(
 }
 
 export function useEffectiveMembers<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget | null | undefined,
   options: UseHookOptions = {},
 ): UseResourceResult<Array<DbMemberInfo<Schema>>> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeMembersKey("effective", rowRef) : null;
@@ -589,11 +603,11 @@ export function useEffectiveMembers<Schema extends DbSchema>(
 }
 
 export function useInviteLink<Schema extends DbSchema>(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   row: RowTarget | null | undefined,
   options: UseHookOptions = {},
 ): UseInviteLinkResult {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? resolveRowTarget(row) : null;
   const resourceKey = rowRef ? makeInviteLinkKey(rowRef) : null;
@@ -627,10 +641,10 @@ export function useInviteFromLocation<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 >(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   options: UseInviteFromLocationOptions<Schema, TResult> = {},
 ): UseInviteFromLocationResult<TResult> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const enabled = options.enabled ?? true;
   const session = useSessionResource(runtime, options.enabled ?? true);
   const detectedInviteInput = options.href ?? getInviteHrefFromLocation();
@@ -889,10 +903,10 @@ export function usePerUserRow<
   Schema extends DbSchema,
   TResult = AnyRowHandle<Schema>,
 >(
-  client: PutBase<Schema>,
+  pb: PutBase<Schema>,
   options: UsePerUserRowOptions<Schema, TResult>,
 ): UsePerUserRowResult<TResult> {
-  const runtime = useRuntime(client);
+  const runtime = useRuntime(pb);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const inviteInput = options.href ?? getInviteHrefFromLocation();
   const clearLocationOption = options.clearLocation ?? true;

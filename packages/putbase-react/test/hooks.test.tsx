@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, useEffect, type ReactElement } from "react";
+import { act, createElement, useEffect, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -405,8 +405,8 @@ describe("@putbase/react", () => {
 });
 
 describe("@putbase/react", () => {
-  it("reads the client from provider context", async () => {
-    const db = new FakeDb() as unknown as PutBase<TestSchema>;
+  it("reads pb from provider context", async () => {
+    const pb = new FakeDb() as unknown as PutBase<TestSchema>;
     let seen: PutBase<TestSchema> | null = null;
 
     function Probe() {
@@ -415,12 +415,12 @@ describe("@putbase/react", () => {
     }
 
     const app = await renderApp(
-      <PutBaseProvider client={db}>
+      <PutBaseProvider pb={pb}>
         <Probe />
       </PutBaseProvider>,
     );
 
-    expect(seen).toBe(db);
+    expect(seen).toBe(pb);
     await app.unmount();
   });
 
@@ -1510,7 +1510,7 @@ describe("@putbase/react", () => {
 
     const app = await renderApp(
       <PutBaseProvider
-        client={db as unknown as PutBase<TestSchema>}
+        pb={db as unknown as PutBase<TestSchema>}
         subscribeToActivity={(notify) => {
           notifyActivity = notify;
           return () => undefined;

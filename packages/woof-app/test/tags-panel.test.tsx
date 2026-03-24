@@ -142,7 +142,7 @@ describe("TagsPanel", () => {
     };
 
     const app = await renderApp(
-      <PutBaseProvider client={new FakeDb() as unknown as PutBase<typeof woofSchema>}>
+      <PutBaseProvider pb={new FakeDb() as unknown as PutBase<typeof woofSchema>}>
         <TagsPanel row={row} onCreateTag={async () => undefined} />
       </PutBaseProvider>,
     );

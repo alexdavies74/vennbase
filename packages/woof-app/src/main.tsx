@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { PutBaseProvider } from "@putbase/react";
 
 import { App } from "./App";
-import { db } from "./services";
+import { pb } from "./services";
 
 const appElement = document.getElementById("app");
 if (!appElement) {
@@ -13,7 +13,7 @@ if (!appElement) {
 
 createRoot(appElement).render(
   <StrictMode>
-    <PutBaseProvider client={db}>
+    <PutBaseProvider pb={pb}>
       <App />
     </PutBaseProvider>
   </StrictMode>,

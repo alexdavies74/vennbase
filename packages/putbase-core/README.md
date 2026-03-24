@@ -12,18 +12,18 @@ This makes PutBase particularly well-suited for:
 
 ```ts
 // Write
-const board = db.put("boards", { title: "Launch checklist" }).value;
-db.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
+const board = pb.put("boards", { title: "Launch checklist" }).value;
+pb.put("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
 
 // Read (React)
-const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
+const { rows: cards } = useQuery<Schema, "cards">(pb, "cards", {
   in: board,
   index: "byCreatedAt",
   order: "asc",
 });
 
 // Share
-const { inviteLink } = useInviteLink(db, board);
+const { inviteLink } = useInviteLink(pb, board);
 ```
 
 ---
@@ -104,7 +104,7 @@ Create one `PutBase` instance for your app and pass it an `appBaseUrl` so that i
 import { PutBase } from "@putbase/core";
 import { schema } from "./schema";
 
-export const db = new PutBase({ schema, appBaseUrl: window.location.origin });
+export const pb = new PutBase({ schema, appBaseUrl: window.location.origin });
 ```
 
 ## Auth and startup
@@ -112,13 +112,13 @@ export const db = new PutBase({ schema, appBaseUrl: window.location.origin });
 Use `getSession()` to detect whether the current browser already has a Puter session, and call `signIn()` from a user gesture when it does not:
 
 ```ts
-const session = await db.getSession();
+const session = await pb.getSession();
 
 if (!session.signedIn) {
-  await db.signIn();        // call this from a button click
+  await pb.signIn();        // call this from a button click
 }
 
-await db.ensureReady();
+await pb.ensureReady();
 ```
 
 
@@ -128,11 +128,11 @@ await db.ensureReady();
 
 ```ts
 // Create a top-level row
-const board = db.put("boards", { title: "Launch checklist" }).value;
+const board = pb.put("boards", { title: "Launch checklist" }).value;
 
 // Create a child row — pass the parent row or row ref
-db.put("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board });
-db.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
+pb.put("cards", { text: "Write README", done: false, createdAt: Date.now() }, { in: board });
+pb.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
 ```
 
 `put` and `update` are synchronous optimistic writes. Use `.value` on the returned receipt when you want the row handle immediately.
@@ -140,7 +140,7 @@ db.put("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, 
 To update fields on an existing row:
 
 ```ts
-db.update("cards", card, { done: true });
+pb.update("cards", card, { done: true });
 ```
 
 ---
@@ -155,7 +155,7 @@ Queries never mean "all accessible rows". If a collection is not declared as `in
 
 ```ts
 // `recentBoards` is declared as `in: ["user"]`, so the current user scope is implicit.
-const recentBoards = await db.query("recentBoards", {
+const recentBoards = await pb.query("recentBoards", {
   index: "byOpenedAt",
   order: "desc",
   limit: 10,
@@ -164,7 +164,7 @@ const recentBoards = await db.query("recentBoards", {
 
 ```ts
 // Multi-parent queries run in parallel, then merge and sort their results
-const shelf = await db.query("recentBoards", {
+const shelf = await pb.query("recentBoards", {
   in: [personalHome, sharedHome],
   index: "byOpenedAt",
   order: "desc",
@@ -180,7 +180,7 @@ const shelf = await db.query("recentBoards", {
 import { useQuery } from "@putbase/react";
 
 function CardList({ board }: { board: BoardHandle }) {
-  const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
+  const { rows: cards } = useQuery<Schema, "cards">(pb, "cards", {
     in: board,
     index: "byCreatedAt",
     order: "asc",
@@ -199,13 +199,13 @@ function CardList({ board }: { board: BoardHandle }) {
 `rows` is always a typed array — never `undefined`. Other hooks in `@putbase/react`: `useRow`, `useCurrentUser`, `useInviteLink`, `useInviteFromLocation`, `useMemberUsernames`, `useDirectMembers`, and `useMutation`.
 
 
-For app boot, prefer `useSession(db)`:
+For app boot, prefer `useSession(pb)`:
 
 ```tsx
 import { useSession } from "@putbase/react";
 
 function AppShell() {
-  const session = useSession(db);
+  const session = useSession(pb);
 
   if (session.status === "loading") {
     return <p>Checking session…</p>;
@@ -229,19 +229,19 @@ Sharing is a three-step flow:
 
 ```ts
 // 1. Generate a token for the row you want to share
-const token = db.createInviteToken(board).value;
+const token = pb.createInviteToken(board).value;
 
 // 2. Build a link the recipient can open in their browser
-const link = db.createInviteLink(board, token.token);
+const link = pb.createInviteLink(board, token.token);
 // → "https://yourapp.com/?pb=..."
 
 // 3. Recipient opens the link; your app calls openInvite
-const board = await db.openInvite(link);
+const board = await pb.openInvite(link);
 ```
 
-`openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`.
+`openInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `pb.parseInvite(input)`.
 
-In React apps, `useInviteFromLocation(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
+In React apps, `useInviteFromLocation(pb, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `openInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
 
 Users who join through an invite token are added as direct `"writer"` members by default. `"reader"` members can view rows but cannot call `update()` or send CRDT messages.
 
@@ -253,15 +253,15 @@ Once users have joined a row you can inspect and manage the member list:
 
 ```ts
 // Flat list of usernames
-const members = await db.listMembers(board);
+const members = await pb.listMembers(board);
 
 // With roles
-const detailed = await db.listDirectMembers(board);
+const detailed = await pb.listDirectMembers(board);
 // → [{ username: "alice", role: "writer" }, ...]
 
 // Add or remove manually
-await db.addMember(board, "bob", "writer").settled;
-await db.removeMember(board, "eve").settled;
+await pb.addMember(board, "bob", "writer").settled;
+await pb.removeMember(board, "eve").settled;
 ```
 
 Membership inherited through a parent row is visible via `listEffectiveMembers`.
@@ -314,7 +314,7 @@ pnpm --filter woof-app dev
 
 | Method | Description |
 |--------|-------------|
-| `new PutBase({ schema, appBaseUrl? })` | Create a client. Pass `appBaseUrl` so invite links point back to your app. |
+| `new PutBase({ schema, appBaseUrl? })` | Create a PutBase instance. Pass `appBaseUrl` so invite links point back to your app. |
 | `ensureReady()` | Explicitly await authentication and provisioning before mutations. Recommended during app startup. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
 | `put(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Most apps use `.value`; await `.settled` when you need remote confirmation. |
@@ -349,7 +349,7 @@ pnpm --filter woof-app dev
 | `.ref` | Portable `RowRef` object for persistence, invites, ref-typed fields, and reopening the row later. |
 | `.id` / `.owner` | Row identity metadata. |
 | `.refresh()` | Re-fetch fields from the server. Resolves to the latest field snapshot. |
-| `.connectCrdt(callbacks)` | Shorthand for `db.connectCrdt(row, callbacks)`. |
+| `.connectCrdt(callbacks)` | Shorthand for `pb.connectCrdt(row, callbacks)`. |
 | `.in.add(parent)` / `.in.remove(parent)` / `.in.list()` | Manage parent links. |
 | `.members.add(username, { role })` / `.members.remove(username)` / `.members.list()` | Manage membership. |
 

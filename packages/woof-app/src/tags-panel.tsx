@@ -35,10 +35,10 @@ export interface TagsPanelProps {
 }
 
 export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
-  const db = usePutBase<WoofSchema>();
+  const pb = usePutBase<WoofSchema>();
   const [tagInput, setTagInput] = useState("");
   const [validationError, setValidationError] = useState("");
-  const tagsQuery = useQuery(db, "tags", {
+  const tagsQuery = useQuery(pb, "tags", {
     in: row.ref,
     index: "byCreatedAt",
     order: "asc",
