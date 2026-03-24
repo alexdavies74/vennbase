@@ -9,7 +9,7 @@ import {
   clearSavedRow,
   loadSavedRow,
   saveRow,
-} from "./per-user-rows";
+} from "./saved-rows";
 import { Provisioning } from "./provisioning";
 import { Query } from "./query";
 import { RowHandle, type AnyRowHandle, type RowHandleBackend } from "./row-handle";
@@ -161,17 +161,13 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   }
 
   async saveRow(rowKey: string, row: RowInput): Promise<void> {
-    const user = await this.identity.whoAmI();
-    await saveRow(resolveBackend(this.options.backend), user.username, rowKey, row);
+    await this.identity.whoAmI();
+    await saveRow(resolveBackend(this.options.backend), rowKey, row);
   }
 
   async openSavedRow(rowKey: string): Promise<AnyRowHandle<Schema> | null> {
-    const user = await this.identity.whoAmI();
-    const savedRow = await loadSavedRow(
-      resolveBackend(this.options.backend),
-      user.username,
-      rowKey,
-    );
+    await this.identity.whoAmI();
+    const savedRow = await loadSavedRow(resolveBackend(this.options.backend), rowKey);
     if (!savedRow) {
       return null;
     }
@@ -180,8 +176,8 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
   }
 
   async clearSavedRow(rowKey: string): Promise<void> {
-    const user = await this.identity.whoAmI();
-    await clearSavedRow(resolveBackend(this.options.backend), user.username, rowKey);
+    await this.identity.whoAmI();
+    await clearSavedRow(resolveBackend(this.options.backend), rowKey);
   }
 
   /**
@@ -674,11 +670,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       ? { username: usernameOverride }
       : await this.identity.whoAmI();
     const backend = resolveBackend(this.options.backend);
-    const rememberedRow = await loadSavedRow(
-      backend,
-      user.username,
-      INTERNAL_USER_SCOPE_ROW_KEY,
-    );
+    const rememberedRow = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
 
     if (rememberedRow) {
       const remembered = await this.resolveUserScopeRowFromRef(rememberedRow, user.username);
@@ -699,7 +691,7 @@ export class PutBase<Schema extends DbSchema = DbSchema> implements RowHandleBac
       fields: {},
       collection: USER_SCOPE_COLLECTION,
     });
-    await saveRow(backend, user.username, INTERNAL_USER_SCOPE_ROW_KEY, rowRef);
+    await saveRow(backend, INTERNAL_USER_SCOPE_ROW_KEY, rowRef);
     return rowRef;
   }
 

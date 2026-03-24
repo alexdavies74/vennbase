@@ -1,7 +1,13 @@
-import type { Puter } from "@heyputer/puter.js";
+import type { KV, Puter } from "@heyputer/puter.js";
 import type { RowRef } from "./schema";
 
-export type BackendClient = Pick<Puter, "auth" | "getUser" | "fs" | "workers" | "kv">;
+export interface BackendKv extends Pick<KV, "get" | "set"> {
+  delete(key: string): Promise<unknown>;
+}
+
+export type BackendClient = Pick<Puter, "auth" | "getUser" | "fs" | "workers"> & {
+  kv?: BackendKv;
+};
 
 export type JsonValue =
   | string

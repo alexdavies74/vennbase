@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMutationReceipt } from "../src/mutation-receipt";
 import { OptimisticStore } from "../src/optimistic-store";
-import { loadSavedRow, saveRow } from "../src/per-user-rows";
+import { loadSavedRow, saveRow } from "../src/saved-rows";
 import { PutBase } from "../src/putbase";
 import { Query } from "../src/query";
 import { collection, defineSchema, field, index } from "../src/schema";
@@ -266,14 +266,14 @@ describe("PutBase rows", () => {
       role: "owner",
     }));
 
-    const rememberedBefore = await loadSavedRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY);
+    const rememberedBefore = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
     expect(rememberedBefore).toBeTruthy();
 
     await db.query("gameRecords", { where: { role: "owner" } });
-    const rememberedAfterReuse = await loadSavedRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY);
+    const rememberedAfterReuse = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
     expect(rememberedAfterReuse).toEqual(rememberedBefore);
 
-    await saveRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY, {
+    await saveRow(backend, INTERNAL_USER_SCOPE_ROW_KEY, {
       id: "row_missing",
       collection: "user",
       baseUrl: "https://alice-federation.example",
@@ -286,7 +286,7 @@ describe("PutBase rows", () => {
     }));
 
     const recreated = await db.query("gameRecords", { where: { role: "viewer" } });
-    const rememberedAfterRecreate = await loadSavedRow(backend, "alice", INTERNAL_USER_SCOPE_ROW_KEY);
+    const rememberedAfterRecreate = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
 
     expect(recreated).toHaveLength(1);
     expect(rememberedAfterRecreate).toBeTruthy();

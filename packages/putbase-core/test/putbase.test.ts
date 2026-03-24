@@ -334,79 +334,39 @@ describe("PutBase", () => {
     await expect(db.openSavedRow("current-row")).resolves.toBeNull();
   });
 
-  it("isolates remembered rows by username", async () => {
+  it("ignores legacy username-prefixed remembered rows", async () => {
     const kv = new MapKv();
-    const fetchFn = async (input: RequestInfo | URL): Promise<Response> => {
-      const url = asUrl(input);
-      const rowId = url.includes("friend_row") ? "friend_row" : "owner_row";
-      if (url.endsWith("/row/get")) {
-        return new Response(
-            JSON.stringify({
-              id: rowId,
-              name: rowId,
-              owner: rowId === "friend_row" ? "friend" : "owner",
-              baseUrl: "https://worker.example",
-              createdAt: 1,
-              collection: "rows",
-              members: ["owner"],
-              parentRefs: [],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (url.endsWith("/fields/get")) {
-        return new Response(
-          JSON.stringify({ fields: { name: rowId }, collection: "rows" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-
-      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      });
-    };
-    const ownerDb = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "owner" }),
-      backend: { workers: {}, kv } as BackendClient,
-      fetchFn,
-    });
-    const friendDb = new PutBase({
-      schema: MINIMAL_SCHEMA,
-      identityProvider: async () => ({ username: "friend" }),
-      backend: { workers: {}, kv } as BackendClient,
-      fetchFn,
-    });
-
-    await ownerDb.saveRow("current-row", {
-      id: "owner_row",
-      collection: "rows",
-      baseUrl: "https://worker.example",
-    });
-    await friendDb.saveRow("current-row", {
-      id: "friend_row",
-      collection: "rows",
-      baseUrl: "https://worker.example",
-    });
-
-    await expect(ownerDb.openSavedRow("current-row")).resolves.toMatchObject({
-      id: "owner_row",
-      ref: {
+    await kv.set(
+      "putbase:saved-row:v1:owner:current-row",
+      JSON.stringify({
         id: "owner_row",
         collection: "rows",
         baseUrl: "https://worker.example",
-      },
+      }),
+    );
+
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      backend: { workers: {}, kv } as BackendClient,
     });
-    await expect(friendDb.openSavedRow("current-row")).resolves.toMatchObject({
-      id: "friend_row",
-      ref: {
-        id: "friend_row",
-        collection: "rows",
-        baseUrl: "https://worker.example",
-      },
+
+    await expect(db.openSavedRow("current-row")).resolves.toBeNull();
+  });
+
+  it("does not persist remembered rows without kv storage", async () => {
+    const db = new PutBase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
     });
+
+    await db.saveRow("current-row", {
+      id: "row_1",
+      collection: "rows",
+      baseUrl: "https://worker.example",
+    });
+
+    await expect(db.openSavedRow("current-row")).resolves.toBeNull();
   });
 
   it("explains how to provide Puter when signIn is called without a backend", async () => {
