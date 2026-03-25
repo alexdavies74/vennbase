@@ -10,13 +10,13 @@ This makes CoveDB particularly well-suited for:
 - **Apps built by AI coding agents** — the explicit-grant access model is simple enough that even a small-context agent can reason about it correctly
 - **Apps with user-pays AI** — Puter provides AI APIs billed to the user's own account, so you can build AI-powered features with zero hosting cost and a single login flow
 
-```ts
+```tsx
 // Write
 const board = db.create("boards", { title: "Launch checklist" }).value;
 db.create("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in: board });
 
 // Read (React)
-const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
+const { rows: cards } = useQuery(db, "cards", {
   in: board,
   index: "byCreatedAt",
   order: "asc",
@@ -44,7 +44,7 @@ Access control is **explicit-grant only**. There are no complex rule expressions
 pnpm add @covedb/core
 ```
 
-Using React? Start with `@covedb/react`.
+React apps: `pnpm add @covedb/react @covedb/core`.
 
 ---
 
@@ -109,16 +109,22 @@ export const db = new CoveDB({ schema, appBaseUrl: window.location.origin });
 
 ## Auth and startup
 
-Use `getSession()` to detect whether the current browser already has a Puter session, and call `signIn()` from a user gesture when it does not:
+```tsx
+import { useSession } from "@covedb/react";
 
-```ts
-const session = await db.getSession();
+function AppShell() {
+  const session = useSession(db);
 
-if (!session.signedIn) {
-  await db.signIn();        // call this from a button click
+  if (session.status === "loading") {
+    return <p>Checking session…</p>;
+  }
+
+  if (!session.session?.signedIn) {
+    return <button onClick={() => void session.signIn()}>Log in with Puter</button>;
+  }
+
+  return <App />;
 }
-
-await db.ensureReady();
 ```
 
 
@@ -164,10 +170,10 @@ const recentBoards = await db.query("recentBoards", {
 
 ```ts
 // Multi-parent queries run in parallel, then merge and sort their results
-const shelf = await db.query("recentBoards", {
-  in: [personalHome, sharedHome],
-  index: "byOpenedAt",
-  order: "desc",
+const cards = await db.query("cards", {
+  in: [todoBoard, bugsBoard],
+  index: "byCreatedAt",
+  order: "asc",
   limit: 20,
 });
 ```
@@ -179,45 +185,14 @@ const shelf = await db.query("recentBoards", {
 ```tsx
 import { useQuery } from "@covedb/react";
 
-function CardList({ board }: { board: BoardHandle }) {
-  const { rows: cards } = useQuery<Schema, "cards">(db, "cards", {
-    in: board,
-    index: "byCreatedAt",
-    order: "asc",
-  });
-
-  return (
-    <ul>
-      {cards.map((card) => (
-        <li key={card.id}>{card.fields.text}</li>
-      ))}
-    </ul>
-  );
-}
+const { rows: cards } = useQuery(db, "cards", {
+  in: board,
+  index: "byCreatedAt",
+  order: "asc",
+});
 ```
 
-`rows` is always a typed array — never `undefined`. Other hooks in `@covedb/react`: `useRow`, `useCurrentUser`, `useShareLink`, `useAcceptInviteFromUrl`, `useMemberUsernames`, `useDirectMembers`, and `useMutation`.
-
-
-For app boot, prefer `useSession(db)`:
-
-```tsx
-import { useSession } from "@covedb/react";
-
-function AppShell() {
-  const session = useSession(db);
-
-  if (session.status === "loading") {
-    return <p>Checking session…</p>;
-  }
-
-  if (!session.session?.signedIn) {
-    return <button onClick={() => void session.signIn()}>Log in with Puter</button>;
-  }
-
-  return <App />;
-}
-```
+`rows` is always a typed array — never `undefined`.
 
 ---
 
@@ -225,7 +200,7 @@ function AppShell() {
 
 Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
 
-Sharing is a three-step flow:
+In React, prefer `useShareLink(db, row)` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, the flow is three steps:
 
 ```ts
 // 1. Generate a token for the row you want to share
@@ -236,12 +211,10 @@ const link = db.createShareLink(board, token.token);
 // → "https://yourapp.com/?db=..."
 
 // 3. Recipient opens the link; your app calls acceptInvite
-const board = await db.acceptInvite(link);
+const sharedBoard = await db.acceptInvite(link);
 ```
 
-`acceptInvite` accepts either a full invite URL (including the one in `window.location.href` when the user lands on your page) or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`.
-
-In React apps, `useAcceptInviteFromUrl(db, ...)` wraps the common invite-landing flow: detect the current invite URL, wait for session resolution, call `acceptInvite`, optionally await `onOpen`, and optionally clear the invite params from the address bar after success.
+`acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
 
 Users who join through an invite token are added as direct `"editor"` members by default. `"viewer"` members can view rows but cannot call `update()` or send CRDT messages.
 
@@ -274,9 +247,9 @@ CoveDB includes a CRDT message bridge. Connect any CRDT library to a row and all
 
 Sending CRDT updates requires `"editor"` access, but all members can poll and receive them.
 
-Here is the recommended [Yjs](https://yjs.dev) integration:
+In React, here is the recommended [Yjs](https://yjs.dev) integration:
 
-```ts
+```tsx
 import * as Y from "yjs";
 import { createYjsAdapter } from "@covedb/yjs";
 import { useCrdt } from "@covedb/react";
@@ -315,7 +288,9 @@ pnpm --filter woof-app dev
 | Method | Description |
 |--------|-------------|
 | `new CoveDB({ schema, appBaseUrl? })` | Create a CoveDB instance. Pass `appBaseUrl` so share links point back to your app. |
-| `ensureReady()` | Explicitly await authentication and provisioning before mutations. Recommended during app startup. |
+| `getSession()` | Check whether the current browser already has a Puter session. |
+| `signIn()` | Start the Puter sign-in flow. Call this from a user gesture such as a button click. |
+| `ensureReady()` | Explicitly await authentication and provisioning before mutations. Most useful in imperative startup flows and before imperative writes. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
 | `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Most apps use `.value`; await `.committed` when you need remote confirmation. |
 | `update(collection, row, fields)` | Merge field updates onto a row optimistically and return a `MutationReceipt<RowHandle>` immediately. `row` can be a `RowHandle` or `RowRef`. |
