@@ -1,4 +1,4 @@
-import { collection, defineSchema, field, index } from "@putbase/core";
+import { collection, defineSchema, field, index } from "@covedb/core";
 
 export const schema = defineSchema({
   boards: collection({

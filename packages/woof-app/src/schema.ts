@@ -1,11 +1,11 @@
 import {
-  PutBase,
+  CoveDB,
   RowHandle,
   collection,
   defineSchema,
   field,
   index,
-} from "@putbase/core";
+} from "@covedb/core";
 
 export const woofSchema = defineSchema({
   dogs: collection({
@@ -38,7 +38,7 @@ export const woofSchema = defineSchema({
 });
 
 export type WoofSchema = typeof woofSchema;
-export type WoofDb = PutBase<WoofSchema>;
+export type WoofDb = CoveDB<WoofSchema>;
 export type DogRowHandle = RowHandle<WoofSchema, "dogs">;
 export type DogHistoryRowHandle = RowHandle<WoofSchema, "dogHistory">;
 export type TagRowHandle = RowHandle<WoofSchema, "tags">;

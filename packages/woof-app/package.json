@@ -12,9 +12,9 @@
   },
   "dependencies": {
     "@heyputer/puter.js": "^2.2.11",
-    "@putbase/core": "workspace:*",
-    "@putbase/react": "workspace:*",
-    "@putbase/yjs": "workspace:*",
+    "@covedb/core": "workspace:*",
+    "@covedb/react": "workspace:*",
+    "@covedb/yjs": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "yjs": "^13.6.0"

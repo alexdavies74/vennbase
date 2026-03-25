@@ -1,10 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { PutBaseProvider } from "@putbase/react";
+import { CoveDBProvider } from "@covedb/react";
 
 import { App } from "./App";
-import { pb } from "./services";
+import { db } from "./services";
 
 const appElement = document.getElementById("app");
 if (!appElement) {
@@ -13,8 +13,8 @@ if (!appElement) {
 
 createRoot(appElement).render(
   <StrictMode>
-    <PutBaseProvider pb={pb}>
+    <CoveDBProvider db={db}>
       <App />
-    </PutBaseProvider>
+    </CoveDBProvider>
   </StrictMode>,
 );

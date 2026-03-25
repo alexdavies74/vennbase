@@ -1,5 +1,5 @@
 {
-  "name": "putbase",
+  "name": "covedb",
   "private": true,
   "packageManager": "pnpm@10.0.0",
   "scripts": {

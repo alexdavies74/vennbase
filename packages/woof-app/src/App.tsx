@@ -1,7 +1,7 @@
 import { puter } from "@heyputer/puter.js";
-import type { CrdtAdapter, RowRef } from "@putbase/core";
-import { useCrdt, useAcceptInviteFromUrl, useShareLink, useMutation, usePutBase, useQuery, useRow, useSession } from "@putbase/react";
-import { createYjsAdapter } from "@putbase/yjs";
+import type { CrdtAdapter, RowRef } from "@covedb/core";
+import { useCrdt, useAcceptInviteFromUrl, useShareLink, useMutation, useCoveDB, useQuery, useRow, useSession } from "@covedb/react";
+import { createYjsAdapter } from "@covedb/yjs";
 import { useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 
@@ -169,13 +169,13 @@ function RoomScreen(props: {
   onRelinquished(): Promise<void>;
   row: DogRowHandle;
 }) {
-  const pb = usePutBase<WoofSchema>();
+  const db = useCoveDB<WoofSchema>();
   const [copyStatus, setCopyStatus] = useState("");
   const bindingRef = useRef<CrdtAdapter<Y.Doc> | null>(null);
   if (bindingRef.current === null) {
     bindingRef.current = createYjsAdapter(Y);
   }
-  const shareLink = useShareLink(pb, props.row.ref);
+  const shareLink = useShareLink(db, props.row.ref);
   const crdt = useCrdt(props.row, bindingRef.current);
   const relinquish = useMutation(async () => {
     await service.relinquish();
@@ -235,8 +235,8 @@ function RoomScreen(props: {
 }
 
 export function App() {
-  const pb = usePutBase<WoofSchema>();
-  const session = useSession(pb);
+  const db = useCoveDB<WoofSchema>();
+  const session = useSession(db);
   const signedInUser =
     session.status === "success" && session.data?.signedIn
       ? session.data.user
@@ -246,24 +246,24 @@ export function App() {
   const [readyStatus, setReadyStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [readyError, setReadyError] = useState("");
   const [dismissedDogRef, setDismissedDogRef] = useState<RowRef<"dogs"> | null>(null);
-  const invite = useAcceptInviteFromUrl<WoofSchema, DogRowHandle>(pb, {
+  const invite = useAcceptInviteFromUrl<WoofSchema, DogRowHandle>(db, {
     clearInviteParams: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";
       url.hash = "";
       return url.toString();
     },
-    accept: async (inviteInput, putBase) => service.expectDogRow(await putBase.acceptInvite(inviteInput)),
+    accept: async (inviteInput, db) => service.expectDogRow(await db.acceptInvite(inviteInput)),
     onOpen: async (nextRow) => {
       setDismissedDogRef(null);
-      await pb.ensureReady();
+      await db.ensureReady();
       service.activateHistory(nextRow);
     },
   });
   const invitePending = invite.hasInvite;
   const inviteRow = invite.status === "success" ? invite.data ?? null : null;
   const dogHistory = useQuery(
-    pb,
+    db,
     "dogHistory",
     signedInUser
       ? {
@@ -280,7 +280,7 @@ export function App() {
     return dogRef.id !== dismissedDogRef.id || dogRef.baseUrl !== dismissedDogRef.baseUrl;
   }) ?? null;
   const activeRowRef = inviteRow ? null : activeHistoryRow?.fields.dogRef ?? null;
-  const openedActiveRow = useRow(pb, activeRowRef, {
+  const openedActiveRow = useRow(db, activeRowRef, {
     enabled: !!activeRowRef,
   });
   const restoredRow = openedActiveRow.status === "success" ? openedActiveRow.data : null;
@@ -310,7 +310,7 @@ export function App() {
     let cancelled = false;
     setReadyStatus("loading");
     setReadyError("");
-    void pb.ensureReady()
+    void db.ensureReady()
       .then(() => {
         if (cancelled) {
           return;
@@ -328,7 +328,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [pb, session.data, session.status]);
+  }, [db, session.data, session.status]);
 
   if (session.status === "loading") {
     return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;

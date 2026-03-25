@@ -3,9 +3,9 @@
 import { act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { RowHandle, type PutBase } from "@putbase/core";
+import { RowHandle, type CoveDB } from "@covedb/core";
 
-import { PutBaseProvider } from "@putbase/react";
+import { CoveDBProvider } from "@covedb/react";
 import { TagsPanel } from "../src/tags-panel";
 import { woofSchema } from "../src/schema";
 
@@ -128,9 +128,9 @@ describe("TagsPanel", () => {
     };
 
     const app = await renderApp(
-      <PutBaseProvider pb={new FakeDb() as unknown as PutBase<typeof woofSchema>}>
+      <CoveDBProvider db={new FakeDb() as unknown as CoveDB<typeof woofSchema>}>
         <TagsPanel row={row} onCreateTag={async () => undefined} />
-      </PutBaseProvider>,
+      </CoveDBProvider>,
     );
 
     await waitFor(() => {

@@ -1,6 +1,6 @@
-import { useInviteFromLocation, useInviteLink, useMutation, useQuery, useRow, useSession } from "@putbase/react";
+import { useAcceptInviteFromUrl, useMutation, useQuery, useRow, useSession, useShareLink } from "@covedb/react";
 import { useEffect, useState } from "react";
-import type { RowHandle } from "@putbase/core";
+import type { RowHandle } from "@covedb/core";
 import { db } from "./db";
 import type { Schema } from "./schema";
 
@@ -23,15 +23,15 @@ async function rememberRecentBoard(board: BoardHandle): Promise<void> {
     const updatedRecentBoardWrite = db.update("recentBoards", existingRecentBoard.ref, {
       openedAt: Date.now(),
     });
-    await updatedRecentBoardWrite.settled;
+    await updatedRecentBoardWrite.committed;
     return;
   }
 
-  const recentBoardWrite = db.put("recentBoards", {
+  const recentBoardWrite = db.create("recentBoards", {
     boardRef: board.ref,
     openedAt: Date.now(),
   });
-  await recentBoardWrite.settled;
+  await recentBoardWrite.committed;
 }
 
 async function loadRecentBoards(): Promise<RecentBoardHandle[]> {
@@ -57,10 +57,9 @@ export default function App() {
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
   const session = useSession(db);
   const signedIn = session.status === "success" && session.data?.signedIn === true;
-  const incomingInvite = useInviteFromLocation<Schema>(db, {
+  const incomingInvite = useAcceptInviteFromUrl<Schema, BoardHandle>(db, {
     enabled: board === null,
-    onOpen: (handle) => {
-      const nextBoard = handle as BoardHandle;
+    onOpen: (nextBoard) => {
       void rememberRecentBoard(nextBoard).catch(console.error);
       setBoard(nextBoard);
     },
@@ -75,7 +74,7 @@ export default function App() {
   return !signedIn
     ? (
       <main>
-        <h1>PutBase Todo</h1>
+        <h1>CoveDB Todo</h1>
         <section>
           <h2>{invitePending ? "Log in to join board" : "Log in to start"}</h2>
           <p>{invitePending ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
@@ -116,9 +115,9 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
   const [recentBoardsError, setRecentBoardsError] = useState("");
 
   const createBoard = useMutation(async (t: string) => {
-    const boardWrite = db.put("boards", { title: t });
+    const boardWrite = db.create("boards", { title: t });
     const board = boardWrite.value;
-    await boardWrite.settled;
+    await boardWrite.committed;
     await rememberRecentBoard(board);
     return board;
   });
@@ -147,7 +146,7 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
 
   return (
     <main>
-      <h1>PutBase Todo</h1>
+      <h1>CoveDB Todo</h1>
 
       <section>
         <h2>New board</h2>
@@ -231,7 +230,7 @@ function OpeningInviteView() {
   return (
     <main>
       <section>
-        <h1>PutBase Todo</h1>
+        <h1>CoveDB Todo</h1>
         <h2>Opening shared board</h2>
         <p className="muted">Joining the invite and loading the board…</p>
       </section>
@@ -250,16 +249,16 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
     order: "asc",
   });
 
-  const { inviteLink } = useInviteLink(db, board.ref);
+  const { shareLink } = useShareLink(db, board.ref);
 
   const addCard = useMutation(async (cardText: string) => {
-    const cardWrite = db.put("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board.ref });
-    await cardWrite.settled;
+    const cardWrite = db.create("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board.ref });
+    await cardWrite.committed;
   });
 
   const toggleDone = useMutation(async (card: CardHandle) => {
     const updatedCardWrite = db.update("cards", card.ref, { done: !card.fields.done });
-    await updatedCardWrite.settled;
+    await updatedCardWrite.committed;
   });
 
   return (
@@ -306,11 +305,11 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
 
       <div className="invite-bar">
         <span>Invite others to collaborate:</span>
-        {inviteLink
+        {shareLink
           ? (
             <button
               className="secondary small"
-              onClick={() => navigator.clipboard.writeText(inviteLink)}
+              onClick={() => navigator.clipboard.writeText(shareLink)}
             >
               Copy invite link
             </button>

@@ -1,7 +1,7 @@
-import { PUTBASE_INVITE_TARGET_PARAM, PutBaseError } from "@putbase/core";
+import { COVEDB_INVITE_TARGET_PARAM, CoveDBError } from "@covedb/core";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof PutBaseError) {
+  if (error instanceof CoveDBError) {
     const detailsParts: Array<string | number> = [error.code];
     if (error.status !== undefined) {
       detailsParts.push(error.status);
@@ -37,7 +37,7 @@ function hasStringMessage(value: unknown): value is { message: string } {
 
 export function getInviteInputFromLocation(href: string): string | null {
   const url = new URL(href);
-  return url.searchParams.has(PUTBASE_INVITE_TARGET_PARAM) ? url.toString() : null;
+  return url.searchParams.has(COVEDB_INVITE_TARGET_PARAM) ? url.toString() : null;
 }
 
 export function clearInviteLocation(): void {

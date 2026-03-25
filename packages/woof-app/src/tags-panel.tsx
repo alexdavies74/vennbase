@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, usePutBase, useQuery } from "@putbase/react";
+import { useMutation, useCoveDB, useQuery } from "@covedb/react";
 
 import type { DogRowHandle, WoofSchema } from "./schema";
 import { getErrorMessage } from "./utils";
@@ -35,10 +35,10 @@ export interface TagsPanelProps {
 }
 
 export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
-  const pb = usePutBase<WoofSchema>();
+  const db = useCoveDB<WoofSchema>();
   const [tagInput, setTagInput] = useState("");
   const [validationError, setValidationError] = useState("");
-  const tagsQuery = useQuery(pb, "tags", {
+  const tagsQuery = useQuery(db, "tags", {
     in: row.ref,
     index: "byCreatedAt",
     order: "asc",

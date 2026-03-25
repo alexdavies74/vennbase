@@ -1,0 +1,44 @@
+{
+  "name": "@covedb/yjs",
+  "version": "0.1.5",
+  "description": "Yjs adapters for CoveDB CRDT sync.",
+  "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "crdt", "yjs"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexdavies74/covedb.git",
+    "directory": "packages/covedb-yjs"
+  },
+  "homepage": "https://github.com/alexdavies74/covedb/tree/main/packages/covedb-yjs#readme",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@covedb/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "yjs": "^13.6.0"
+  },
+  "devDependencies": {
+    "yjs": "^13.6.0"
+  }
+}
