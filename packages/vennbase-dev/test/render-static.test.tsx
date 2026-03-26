@@ -23,7 +23,8 @@ describe("renderStaticPage", () => {
     expect(html).toContain("Build multi-user apps without writing a single access rule.");
     expect(html).toContain("Zero backend");
     expect(html).toContain('<section class="hero">');
-    expect(html).not.toContain('<script type="module"');
+    expect(html).toContain("For coding agents");
+    expect(html).toContain("Copy prompt");
   });
 
   it("renders the reference page content into the HTML shell", () => {

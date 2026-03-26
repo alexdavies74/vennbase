@@ -309,6 +309,94 @@ h1 {
   padding-bottom: 0;
 }
 
+.prompt-band {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: var(--surface);
+}
+
+.prompt-band__copy {
+  padding: 1rem 1.25rem 0.35rem;
+}
+
+.prompt-band__copy p {
+  margin: 0.35rem 0 0;
+  max-width: none;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+.prompt-band__panel {
+  display: grid;
+  gap: 0;
+  padding: 0 1.25rem 1rem;
+  align-content: start;
+  background:
+    linear-gradient(180deg, rgba(31, 36, 48, 0.02), transparent 70%),
+    var(--surface);
+}
+
+.prompt-band__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: start;
+}
+
+.prompt-band__textarea {
+  width: 100%;
+  min-height: 2.75rem;
+  max-height: 2.75rem;
+  padding: 0.58rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: #fbfaf6;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.55;
+  overflow: auto;
+  resize: none;
+}
+
+.prompt-band__textarea:focus {
+  outline: 2px solid rgba(37, 108, 103, 0.18);
+  outline-offset: 0;
+}
+
+.prompt-band__button {
+  min-height: 2.75rem;
+  padding: 0.58rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.prompt-band__button:hover {
+  border-color: var(--ink-soft);
+}
+
+.prompt-band__button[data-copy-state="success"] {
+  border-color: rgba(37, 108, 103, 0.4);
+  background: rgba(37, 108, 103, 0.08);
+  color: var(--teal);
+}
+
+.prompt-band__button[data-copy-state="error"] {
+  border-color: rgba(149, 84, 93, 0.35);
+  background: rgba(149, 84, 93, 0.08);
+  color: var(--rose);
+}
+
 .intro-band {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.8fr) minmax(260px, 0.78fr);
@@ -762,6 +850,10 @@ blockquote {
     align-items: flex-start;
     flex-direction: column;
     border-radius: 0;
+  }
+
+  .prompt-band__controls {
+    grid-template-columns: 1fr;
   }
 
   .top-nav__links,

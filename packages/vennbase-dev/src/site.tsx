@@ -4,6 +4,11 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { ParsedReadme, ReadmeSection, ReferenceSubsection } from "./parse-readme";
 
+const AGENT_PROMPT_SNIPPET = [
+  "Use @vennbase/react and @vennbase/core for data, and puter.js for other backend needs. See https://registry.npmjs.org/@vennbase/core",
+  "Don't write a backend! Use only vennbase/puter.",
+].join("\n");
+
 interface MarkdownCardProps {
   title: string;
   markdown: string;
@@ -130,6 +135,34 @@ export function HomePage({ content }: { content: ParsedReadme }) {
       </header>
 
       <main className="page-content">
+        <section className="prompt-band" aria-label="Coding agent prompt snippet">
+          <div className="prompt-band__copy">
+            <p className="eyebrow">For coding agents</p>
+            <p>
+              Paste this into your coding agent so it uses Vennbase and pulls the package docs instead
+              of inventing a backend.
+            </p>
+          </div>
+          <div className="prompt-band__panel" data-copy-prompt>
+            <div className="prompt-band__controls">
+              <textarea
+                id="agent-prompt-snippet"
+                className="prompt-band__textarea"
+                aria-label="Coding agent prompt snippet"
+                data-copy-snippet
+                readOnly
+                rows={1}
+                spellCheck={false}
+                value={AGENT_PROMPT_SNIPPET}
+                wrap="off"
+              />
+              <button className="prompt-band__button" data-copy-button type="button">
+                Copy prompt
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="dark-strip">
           <div className="featured-grid">
             {featuredSections.map((section, index) => (
