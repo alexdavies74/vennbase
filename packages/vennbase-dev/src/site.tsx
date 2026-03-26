@@ -31,6 +31,14 @@ const markdownComponents = {
       </a>
     );
   },
+  img: ({ src, alt, ...props }: ComponentPropsWithoutRef<"img">) => (
+    <img
+      {...props}
+      alt={alt}
+      className="markdown-image"
+      src={resolveReadmeAssetUrl(src)}
+    />
+  ),
   code: ({ className, children, ...props }: ComponentPropsWithoutRef<"code">) => {
     const isBlock = Boolean(className?.includes("language-"));
     if (isBlock) {
@@ -90,14 +98,18 @@ export function HomePage({ content }: { content: ParsedReadme }) {
         <TopNav />
         <section className="hero">
           <div className="hero-copy">
-            <h1 className="hero-title">
-              <span>{content.title}</span>
-            </h1>
+            <img
+              className="hero-mark"
+              src="/core-assets/mark.svg"
+              alt={content.title}
+            />
             <p className="hero-tagline">{content.tagline}</p>
-            <p className="hero-lead">
+            <div className="hero-lead">
               <InlineMarkdown markdown={content.lead} />
-            </p>
-            <p className="hero-support">{content.supportingLine}</p>
+            </div>
+            <div className="hero-support">
+              <InlineMarkdown markdown={content.supportingLine} />
+            </div>
             <ul className="feature-list">
               {content.featureBullets.map((feature) => (
                 <li key={feature}>
@@ -193,8 +205,7 @@ function TopNav() {
   return (
     <nav className="top-nav">
       <a className="wordmark" href="/">
-        <span className="wordmark__dot" aria-hidden="true" />
-        vennbase.dev
+        Vennbase
       </a>
       <div className="top-nav__links">
         <a href="/">Overview</a>
@@ -285,4 +296,21 @@ function getCodeLanguage(children: ReactNode): string | null {
 function sectionTone(index: number): string {
   const tones = ["tone-mint", "tone-gold", "tone-coral"];
   return tones[index % tones.length] ?? tones[0];
+}
+
+function resolveReadmeAssetUrl(src?: string): string | undefined {
+  if (!src || isExternalUrl(src) || src.startsWith("/")) {
+    return src;
+  }
+
+  const normalized = src.replace(/^\.\//, "");
+  if (normalized.startsWith("assets/")) {
+    return `/${normalized.replace(/^assets\//, "core-assets/")}`;
+  }
+
+  return src;
+}
+
+function isExternalUrl(url: string): boolean {
+  return /^(?:[a-z]+:)?\/\//i.test(url) || url.startsWith("data:");
 }

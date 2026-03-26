@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="./assets/mark.svg" alt="Vennbase mark" width="180" />
+</p>
+
 # Vennbase
 
 **Build multi-user apps without writing a single access rule.**
 
-Vennbase is a TypeScript SDK for collaborative, local-first web apps — with no backend to run, no server to pay for, and no access control rules to misconfigure. Users sign in with their [Puter](https://puter.com) account. Your app only sees the user's subset of the data stored in Puter.
+Vennbase is a TypeScript client-side database for collaborative, local-first web apps — with no backend to run, no server to pay for, and no access control rules to misconfigure. Users sign in with their [Puter](https://puter.com) account. Your app only sees the user's subset of the data stored in Puter.
 
 ```tsx
 // Write

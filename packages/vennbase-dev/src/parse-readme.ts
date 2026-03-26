@@ -178,7 +178,8 @@ function isPlainParagraph(block: string): boolean {
     !block.startsWith("- ") &&
     block !== "---" &&
     !block.startsWith("**") &&
-    !block.startsWith("#")
+    !block.startsWith("#") &&
+    !block.startsWith("<")
   );
 }
 

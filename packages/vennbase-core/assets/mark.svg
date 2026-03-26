@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="white"/>
+
+  <!-- Large offscreen ovals: moved farther apart to create central breathing room -->
+  <ellipse cx="800" cy="-1380" rx="1000" ry="2220"
+           fill="none" stroke="#4169E1" stroke-width="30"/>
+  <ellipse cx="800" cy="2280" rx="1000" ry="2220"
+           fill="none" stroke="#7D3CFF" stroke-width="30"/>
+
+  <!-- Face motif, kept large and centered -->
+  <g fill="none" stroke="black" stroke-width="18">
+    <circle cx="800" cy="450" r="250"/>
+    <circle cx="728" cy="390" r="50"/>
+    <circle cx="872" cy="390" r="50"/>
+    <circle cx="800" cy="540" r="62"/>
+  </g>
+</svg>
