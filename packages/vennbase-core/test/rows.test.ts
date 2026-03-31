@@ -264,6 +264,68 @@ describe("Vennbase rows", () => {
     expect(records).toEqual([]);
   });
 
+  it("matches ref where clauses even when row-ref property order differs", async () => {
+    const transport = {
+      row: vi.fn().mockReturnValue({
+        request: vi.fn().mockResolvedValue({
+          rows: [{
+            rowId: "record_1",
+            owner: "alice",
+            baseUrl: "https://worker.example",
+            collection: "gameRecords",
+            fields: {
+              gameRef: {
+                baseUrl: "https://worker.example",
+                id: "project_1",
+                collection: "projects",
+              },
+              role: "owner",
+            },
+          }],
+        }),
+      }),
+    };
+    const getRow = vi.fn(async (row: { id: string; collection: string; baseUrl: string }) => ({
+      id: row.id,
+      collection: "gameRecords",
+      owner: "alice",
+      ref: row,
+      fields: {
+        gameRef: {
+          id: "project_1",
+          collection: "projects",
+          baseUrl: "https://worker.example",
+        },
+        role: "owner",
+      },
+    }));
+    const optimisticStore = new OptimisticStore();
+    const query = new Query(
+      transport as never,
+      { getRow } as never,
+      optimisticStore,
+      schema,
+    );
+
+    const records = await query.query("gameRecords", {
+      in: {
+        id: "user_scope",
+        collection: "user",
+        baseUrl: "https://worker.example",
+      },
+      where: {
+        gameRef: {
+          id: "project_1",
+          collection: "projects",
+          baseUrl: "https://worker.example",
+        },
+      },
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0].id).toBe("record_1");
+  });
+
   it("reuses and recreates remembered user scope rows as needed", async () => {
     const network = new TestWorkerNetwork();
     const backend = { workers: {}, kv: new InMemoryKv() } as BackendClient;

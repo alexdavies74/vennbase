@@ -1,4 +1,5 @@
 import type { JsonValue } from "./types";
+import { stableJsonStringify } from "./stable-json";
 
 const NULL_SENTINEL = "\\x00";
 
@@ -34,7 +35,7 @@ export function encodeFieldValue(value: JsonValue): string {
   }
 
   if (Array.isArray(value) || typeof value === "object") {
-    return `j:${encodeURIComponent(JSON.stringify(value))}`;
+    return `j:${encodeURIComponent(stableJsonStringify(value))}`;
   }
 
   return `u:${encodeURIComponent(String(value))}`;
