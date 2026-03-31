@@ -1,0 +1,257 @@
+:root {
+  --bg: #f3efe6;
+  --panel: #fffdf8;
+  --panel-alt: #f9f3e8;
+  --text: #241d15;
+  --muted: #6f6357;
+  --line: #ddcfba;
+  --accent: #15664f;
+  --accent-soft: #d7ebe4;
+  --danger: #a73333;
+  --shadow: rgba(36, 29, 21, 0.08);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top, rgba(21, 102, 79, 0.08), transparent 38%),
+    linear-gradient(180deg, #f7f2e8, var(--bg));
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  color: white;
+}
+
+button.secondary {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+button.small {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: white;
+}
+
+.shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.card {
+  background: linear-gradient(180deg, var(--panel), var(--panel-alt));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 14px 32px var(--shadow);
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(21, 102, 79, 0.08);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(1.7rem, 4vw, 2.4rem);
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+h3 {
+  font-size: 1rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.toolbar,
+.section-header,
+.share-row,
+.list-item,
+.booking-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-header {
+  margin-bottom: 14px;
+}
+
+.share-row {
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.share-link {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  word-break: break-all;
+}
+
+.field-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.field-grid label,
+.schedule-form label {
+  display: block;
+}
+
+.field-grid span,
+.schedule-form span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.availability-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.availability-header {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.availability-day {
+  font-weight: 600;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.list-item {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(111, 99, 87, 0.14);
+}
+
+.list-item:last-child {
+  border-bottom: none;
+}
+
+.day-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.day-block {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.day-block h3 {
+  margin-bottom: 10px;
+}
+
+.slot-status,
+.booking-owner {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-header {
+    display: none;
+  }
+
+  .toolbar,
+  .section-header,
+  .share-row,
+  .list-item,
+  .booking-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .share-link {
+    width: 100%;
+  }
+}
