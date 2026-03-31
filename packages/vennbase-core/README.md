@@ -200,7 +200,7 @@ const { rows: cards = [], status } = useQuery(db, "cards", {
 
 Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
 
-In React, prefer `useShareLink(db, row, { role: "editor" })` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, the default editor invite flow is three steps:
+In React, prefer `useShareLink(db, row, { role: "editor" })` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
 
 ```ts
 // 1. Generate a token for the row you want to share

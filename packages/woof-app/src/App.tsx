@@ -246,22 +246,24 @@ export function App() {
   const [readyStatus, setReadyStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [readyError, setReadyError] = useState("");
   const [dismissedDogRef, setDismissedDogRef] = useState<RowRef<"dogs"> | null>(null);
-  const invite = useAcceptInviteFromUrl<WoofSchema, DogRowHandle>(db, {
+  const invite = useAcceptInviteFromUrl<WoofSchema>(db, {
     clearInviteParams: (url) => {
       url.pathname = url.pathname === "/join" ? "/" : url.pathname;
       url.search = "";
       url.hash = "";
       return url.toString();
     },
-    accept: async (inviteInput, db) => service.expectDogRow(await db.acceptInvite(inviteInput)),
     onOpen: async (nextRow) => {
+      const dogRow = service.expectDogRow(nextRow);
       setDismissedDogRef(null);
       await db.ensureReady();
-      service.activateHistory(nextRow);
+      service.activateHistory(dogRow);
     },
   });
   const invitePending = invite.hasInvite;
-  const inviteRow = invite.status === "success" ? invite.data ?? null : null;
+  const inviteRow = invite.status === "success" && invite.data?.kind === "opened"
+    ? service.expectDogRow(invite.data.row)
+    : null;
   const dogHistory = useQuery(
     db,
     "dogHistory",

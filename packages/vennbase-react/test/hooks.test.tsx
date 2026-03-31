@@ -123,6 +123,7 @@ class FakeDb {
     | null = null;
   queryCalls = 0;
   getRowCalls = 0;
+  joinInviteCalls = 0;
   acceptInviteCalls = 0;
   lastInviteInput: string | null = null;
   getExistingShareTokenCallRoles: string[] = [];
@@ -142,6 +143,7 @@ class FakeDb {
   lastOpenedRow: RowRef | null = null;
   dogHandle: ReturnType<typeof makeDogRow> | null = null;
   inviteDogHandle: ReturnType<typeof makeDogRow> | null = null;
+  pendingInviteOpen = false;
 
   private getStableDogHandle(name: string): ReturnType<typeof makeDogRow> {
     if (!this.dogHandle) {
@@ -217,7 +219,30 @@ class FakeDb {
   async getRow(row?: RowRef): Promise<ReturnType<typeof makeDogRow>> {
     this.getRowCalls += 1;
     this.lastOpenedRow = row ?? null;
+    if (this.pendingInviteOpen) {
+      this.pendingInviteOpen = false;
+      return this.getStableInviteDogHandle(this.inviteDogName);
+    }
     return this.getStableDogHandle(this.dogName);
+  }
+
+  async joinInvite(inviteInput: string): Promise<{ ref: RowRef; role: "viewer" | "submitter" }> {
+    this.joinInviteCalls += 1;
+    this.lastInviteInput = inviteInput;
+    const url = new URL(inviteInput);
+    const payload = url.searchParams.get(VENNBASE_INVITE_TARGET_PARAM);
+    if (!payload) {
+      throw new Error("missing invite payload");
+    }
+
+    const parsed = JSON.parse(payload) as { ref: RowRef; shareToken?: string };
+    const role = parsed.shareToken === "invite_submitter" ? "submitter" : "viewer";
+    this.pendingInviteOpen = role !== "submitter";
+
+    return {
+      ref: parsed.ref,
+      role,
+    };
   }
 
   async acceptInvite(inviteInput: string): Promise<ReturnType<typeof makeDogRow>> {
@@ -701,11 +726,11 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
     let openedDogName = "";
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as Vennbase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
         onOpen: (row) => {
           openedDogName = row.fields.name;
         },
@@ -717,7 +742,7 @@ describe("@vennbase/react", () => {
 
     expect(latest?.hasInvite).toBe(true);
     expect(latest?.status).toBe("loading");
-    expect(db.acceptInviteCalls).toBe(0);
+    expect(db.joinInviteCalls).toBe(0);
 
     await act(async () => {
       session.resolve({ signedIn: true, user: { username: "alex" } });
@@ -725,7 +750,8 @@ describe("@vennbase/react", () => {
       await flushMicrotasks();
     });
 
-    expect(db.acceptInviteCalls).toBe(1);
+    expect(db.joinInviteCalls).toBe(1);
+    expect(db.getRowCalls).toBe(1);
     expect(db.lastInviteInput).toBe(inviteUrl(dogRef()));
     expect(openedDogName).toBe("Buddy");
     await waitFor(() => {
@@ -750,11 +776,11 @@ describe("@vennbase/react", () => {
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     const onOpen = deferred<void>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
     let openedDogName = "";
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as Vennbase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
         onOpen: async (row) => {
           openedDogName = row.fields.name;
           await onOpen.promise;
@@ -772,7 +798,7 @@ describe("@vennbase/react", () => {
     });
 
     await waitFor(() => {
-      expect(db.acceptInviteCalls).toBe(1);
+      expect(db.joinInviteCalls).toBe(1);
     });
     expect(openedDogName).toBe("Buddy");
     expect(latest?.status).toBe("loading");
@@ -804,10 +830,10 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as Vennbase<TestSchema>);
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>);
       return <div>{latest.hasInvite ? latest.status : "no-invite"}</div>;
     }
 
@@ -825,25 +851,71 @@ describe("@vennbase/react", () => {
       expect(latest?.status).toBe("idle");
       expect(latest?.data).toBeUndefined();
     });
-    expect(db.acceptInviteCalls).toBe(1);
+    expect(db.joinInviteCalls).toBe(1);
     await app.unmount();
   });
 
-  it("reports onOpen failures without clearing the invite URL", async () => {
+  it("returns joined results for submitter invites without opening the row", async () => {
     window.history.replaceState(
       {},
       "",
-      `/?${VENNBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+      inviteUrl(dogRef(), "invite_submitter"),
+    );
+
+    const db = new FakeDb();
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+    let resolvedKind = "";
+    let resolvedRole = "";
+    let openedCalls = 0;
+
+    function Probe() {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        clearInviteParams: false,
+        onOpen: () => {
+          openedCalls += 1;
+        },
+        onResolve: (result) => {
+          resolvedKind = result.kind;
+          resolvedRole = result.role;
+        },
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("success");
+      expect(latest?.data).toEqual({
+        kind: "joined",
+        ref: dogRef(),
+        role: "submitter",
+      });
+    });
+
+    expect(db.joinInviteCalls).toBe(1);
+    expect(db.getRowCalls).toBe(0);
+    expect(openedCalls).toBe(0);
+    expect(resolvedKind).toBe("joined");
+    expect(resolvedRole).toBe("submitter");
+    await app.unmount();
+  });
+
+  it("reports onResolve failures without clearing the invite URL", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
     );
 
     const db = new FakeDb();
     const session = deferred<{ signedIn: true; user: { username: string } }>();
     db.sessionPromise = session.promise;
-    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema, ReturnType<typeof makeDogRow>>(db as unknown as Vennbase<TestSchema>, {
-        onOpen: async () => {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        onResolve: async () => {
           throw new Error("activate failed");
         },
       });
@@ -888,42 +960,23 @@ describe("@vennbase/react", () => {
     expect(latest?.hasInvite).toBe(false);
     expect(latest?.inviteInput).toBeNull();
     expect(latest?.status).toBe("idle");
-    expect(db.acceptInviteCalls).toBe(0);
+    expect(db.joinInviteCalls).toBe(0);
     await app.unmount();
   });
 
-  it("supports custom invite openers for app-specific post-processing", async () => {
+  it("returns opened invite details for readable invites", async () => {
     window.history.replaceState(
       {},
       "",
-      `/?${VENNBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
+      inviteUrl(dogRef()),
     );
 
     const db = new FakeDb();
-    const acceptInvite = vi.fn(async (inviteInput: string) => {
-      const result = {
-        inviteInput,
-        kind: "profile" as const,
-        row: makeDogRow("Buddy"),
-      };
-      return Object.assign(result, { self: result });
-    });
-    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema, {
-      inviteInput: string;
-      kind: "profile";
-      row: ReturnType<typeof makeDogRow>;
-      self?: unknown;
-    }>> | null = null;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema, {
-        inviteInput: string;
-        kind: "profile";
-        row: ReturnType<typeof makeDogRow>;
-        self?: unknown;
-      }>(db as unknown as Vennbase<TestSchema>, {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
         clearInviteParams: false,
-        accept: async (inviteInput) => acceptInvite(inviteInput),
       });
       return <div>{latest.status}</div>;
     }
@@ -931,17 +984,17 @@ describe("@vennbase/react", () => {
     const app = await renderApp(<Probe />);
 
     await waitFor(() => {
-      expect(acceptInvite).toHaveBeenCalledWith(
-        `http://localhost:3000/?${VENNBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
-      );
       expect(latest?.status).toBe("success");
-      expect(latest?.data?.inviteInput).toBe(
-        `http://localhost:3000/?${VENNBASE_INVITE_TARGET_PARAM}=https%3A%2F%2Fworker.example%2Frows%2Fdog_1&token=invite_1`,
-      );
-      expect(latest?.data?.row.fields.name).toBe("Buddy");
+      expect(latest?.data).toMatchObject({
+        kind: "opened",
+        ref: dogRef(),
+        role: "viewer",
+      });
+      expect(latest?.data?.kind === "opened" ? latest.data.row.fields.name : null).toBe("Buddy");
     });
 
-    expect(db.acceptInviteCalls).toBe(0);
+    expect(db.joinInviteCalls).toBe(1);
+    expect(db.getRowCalls).toBe(1);
     expect(window.location.search).toContain(VENNBASE_INVITE_TARGET_PARAM);
     await app.unmount();
   });

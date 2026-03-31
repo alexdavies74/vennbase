@@ -9,7 +9,7 @@ import {
   type RowRef,
 } from "@vennbase/core";
 
-import { useShareLink, useQuery, useRow } from "./index";
+import { useAcceptInviteFromUrl, useShareLink, useQuery, useRow } from "./index";
 
 const schema = defineSchema({
   dogs: collection({
@@ -32,6 +32,7 @@ type TagHandle = RowHandle<TestSchema, "tags">;
 
 type DogResult = ReturnType<typeof useRow<TestSchema, "dogs">>;
 type TagRows = ReturnType<typeof useQuery<TestSchema, "tags">>["rows"];
+type InviteResult = ReturnType<typeof useAcceptInviteFromUrl<TestSchema>>["data"];
 
 declare const dogResult: DogResult;
 declare const tagRows: TagRows;
@@ -39,6 +40,7 @@ declare const dogHandle: DogHandle;
 declare const anyRowHandle: AnyRowHandle<TestSchema>;
 declare const tagRef: RowRef<"tags">;
 declare const anyClient: Vennbase<TestSchema>;
+declare const inviteResult: InviteResult;
 
 const maybeAnyRowHandle: AnyRowHandle<TestSchema> | undefined = dogResult.data;
 const maybeDogHandle: DogHandle | undefined = dogResult.data;
@@ -57,6 +59,11 @@ void maybeTagHandle;
 void fallbackTagRows;
 void projectedTag;
 void dogName;
+
+if (inviteResult?.kind === "opened") {
+  const openedRow: AnyRowHandle<TestSchema> = inviteResult.row;
+  void openedRow;
+}
 
 // @ts-expect-error key-query projections are anonymous and do not expose row refs
 void projectedTag?.ref;

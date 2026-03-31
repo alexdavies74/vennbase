@@ -172,7 +172,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useShareLink` lazily generates (or reuses) a share link for a row. Always pass an explicit role such as `{ role: "editor" }`, `{ role: "contributor" }`, or `{ role: "submitter" }`. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, calls `acceptInvite`, waits for `onOpen`, and then clears the invite params.
+`useShareLink` lazily generates (or reuses) a share link for a row. Always pass an explicit role such as `{ role: "editor" }`, `{ role: "contributor" }`, or `{ role: "submitter" }`. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a submitter-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params.
 
 ```tsx
 import { useShareLink, useAcceptInviteFromUrl } from "@vennbase/react";
@@ -189,20 +189,21 @@ function InviteHandler() {
   useAcceptInviteFromUrl(db, {
     onOpen: (board) => {
       // navigate to the shared board
+      console.log(board);
     },
   });
   return null;
 }
 ```
 
-For submitter links, override the accept step so the app joins the inbox without trying to open the parent row:
+Submitter links now resolve directly without a workaround:
 
 ```tsx
 function SubmissionHandler() {
   useAcceptInviteFromUrl(db, {
-    accept: (inviteInput, client) => client.joinInvite(inviteInput),
-    onOpen: ({ ref, role }) => {
-      console.log(ref, role);
+    onResolve: (result) => {
+      if (result.kind !== "joined") return;
+      console.log(result.ref, result.role);
     },
   });
   return null;
@@ -261,7 +262,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isRefreshing, error, refreshError, refresh }` |
 | `useShareLink(db, row, options)` | db, row handle or row ref, `{ role: "editor" \| "contributor" \| "viewer" \| "submitter" }` | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
-| `useAcceptInviteFromUrl(db, options?)` | db, `{ url?, clearInviteParams?, onOpen?, accept? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
+| `useAcceptInviteFromUrl(db, options?)` | db, `{ url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, url?, clearInviteParams?, loadSavedRow?, acceptInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
@@ -349,35 +350,49 @@ function useShareLink<Schema extends DbSchema>(
 ### `useAcceptInviteFromUrl`
 
 ```ts
-interface UseAcceptInviteFromUrlOptions<
-  Schema extends DbSchema,
-  TResult = AnyRowHandle<Schema>,
-> extends UseHookOptions {
-  url?: string | null;
-  clearInviteParams?: boolean | ((url: URL) => string);
-  onOpen?: (result: TResult) => void | Promise<void>;
-  accept?: (inviteInput: string, db: Vennbase<Schema>) => Promise<TResult>;
+interface OpenedInviteResult<Schema extends DbSchema> {
+  kind: "opened";
+  ref: RowRef;
+  role: "editor" | "contributor" | "viewer";
+  row: AnyRowHandle<Schema>;
 }
 
-interface UseAcceptInviteFromUrlResult<TResult> extends UseResourceResult<TResult> {
+interface JoinedInviteResult {
+  kind: "joined";
+  ref: RowRef;
+  role: "submitter";
+}
+
+type AcceptedInviteResult<Schema extends DbSchema> =
+  | OpenedInviteResult<Schema>
+  | JoinedInviteResult;
+
+interface UseAcceptInviteFromUrlOptions<Schema extends DbSchema> extends UseHookOptions {
+  url?: string | null;
+  clearInviteParams?: boolean | ((url: URL) => string);
+  onOpen?: (row: AnyRowHandle<Schema>) => void | Promise<void>;
+  onResolve?: (result: AcceptedInviteResult<Schema>) => void | Promise<void>;
+}
+
+interface UseAcceptInviteFromUrlResult<Schema extends DbSchema>
+  extends UseResourceResult<AcceptedInviteResult<Schema>> {
   hasInvite: boolean;
   inviteInput: string | null;
 }
 
-function useAcceptInviteFromUrl<
-  Schema extends DbSchema,
-  TResult = AnyRowHandle<Schema>,
->(
+function useAcceptInviteFromUrl<Schema extends DbSchema>(
   db: Vennbase<Schema>,
-  options?: UseAcceptInviteFromUrlOptions<Schema, TResult>,
-): UseAcceptInviteFromUrlResult<TResult>
+  options?: UseAcceptInviteFromUrlOptions<Schema>,
+): UseAcceptInviteFromUrlResult<Schema>
 ```
 
 - `url` defaults to `window.location.href`.
 - `clearInviteParams` defaults to `true`.
-- `onOpen` runs after invite acceptance succeeds and may be async.
-- The hook stays in `loading` until `onOpen` finishes and the invite params are removed from the current URL.
-- Override `accept` when invite acceptance should return something other than `db.acceptInvite(...)`.
+- `onOpen` runs only for readable invites and receives the opened row directly.
+- `onResolve` runs after invite resolution succeeds and may be async.
+- Readable invites resolve to `{ kind: "opened", row, ref, role }`.
+- Submitter invites resolve to `{ kind: "joined", ref, role: "submitter" }`.
+- The hook stays in `loading` until `onOpen` and `onResolve` finish and the invite params are removed from the current URL.
 
 ### `useMutation`
 

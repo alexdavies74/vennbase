@@ -85,17 +85,43 @@ export interface UseShareLinkOptions extends UseHookOptions {
   role: MemberRole;
 }
 
+export interface OpenedInviteResult<
+  Schema extends DbSchema,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
+> {
+  kind: "opened";
+  ref: RowRef;
+  role: Exclude<MemberRole, "submitter">;
+  row: TOpened;
+}
+
+export interface JoinedInviteResult {
+  kind: "joined";
+  ref: RowRef;
+  role: "submitter";
+}
+
+export type AcceptedInviteResult<
+  Schema extends DbSchema,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
+> =
+  | OpenedInviteResult<Schema, TOpened>
+  | JoinedInviteResult;
+
 export interface UseAcceptInviteFromUrlOptions<
   Schema extends DbSchema,
-  TResult = AnyRowHandle<Schema>,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
 > extends UseHookOptions {
   url?: string | null;
   clearInviteParams?: boolean | ((url: URL) => string);
-  onOpen?: (result: TResult) => void | Promise<void>;
-  accept?: (inviteInput: string, db: Vennbase<Schema>) => Promise<TResult>;
+  onOpen?: (row: TOpened) => void | Promise<void>;
+  onResolve?: (result: AcceptedInviteResult<Schema, TOpened>) => void | Promise<void>;
 }
 
-export interface UseAcceptInviteFromUrlResult<TResult> extends UseResourceResult<TResult> {
+export interface UseAcceptInviteFromUrlResult<
+  Schema extends DbSchema,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
+> extends UseResourceResult<AcceptedInviteResult<Schema, TOpened>> {
   hasInvite: boolean;
   inviteInput: string | null;
 }
@@ -292,6 +318,31 @@ function getRowFromResult<TResult>(
     throw new Error("useSavedRow could not resolve a row. Pass getRow when returning non-row data.");
   }
   return row;
+}
+
+async function resolveInviteFromUrl<
+  Schema extends DbSchema,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
+>(
+  inviteInput: string,
+  db: Vennbase<Schema>,
+): Promise<AcceptedInviteResult<Schema, TOpened>> {
+  const joined = await db.joinInvite(inviteInput);
+  if (joined.role === "submitter") {
+    return {
+      kind: "joined",
+      ref: joined.ref,
+      role: joined.role,
+    };
+  }
+
+  const row = await db.getRow(joined.ref as RowRef<CollectionName<Schema>>) as TOpened;
+  return {
+    kind: "opened",
+    ref: joined.ref,
+    role: joined.role,
+    row,
+  };
 }
 
 export function VennbaseProvider<Schema extends DbSchema>({
@@ -659,11 +710,11 @@ export function useShareLink<Schema extends DbSchema>(
 
 export function useAcceptInviteFromUrl<
   Schema extends DbSchema,
-  TResult = AnyRowHandle<Schema>,
+  TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
 >(
   db: Vennbase<Schema>,
-  options: UseAcceptInviteFromUrlOptions<Schema, TResult> = {},
-): UseAcceptInviteFromUrlResult<TResult> {
+  options: UseAcceptInviteFromUrlOptions<Schema, TOpened> = {},
+): UseAcceptInviteFromUrlResult<Schema, TOpened> {
   const runtime = useRuntime(db);
   const enabled = options.enabled ?? true;
   const session = useSessionResource(runtime, options.enabled ?? true);
@@ -676,7 +727,7 @@ export function useAcceptInviteFromUrl<
   const clearInviteParamsOption = options.clearInviteParams ?? true;
   const deliveryKey = inviteInput ?? null;
   const onOpenRef = useRef(options.onOpen);
-  const acceptRef = useRef(options.accept);
+  const onResolveRef = useRef(options.onResolve);
   const clearInviteParamsRef = useRef(clearInviteParamsOption);
   const [deliveryEpoch, setDeliveryEpoch] = useState(0);
   const currentDeliveryKey = deliveryKey ? `${deliveryKey}:${deliveryEpoch}` : null;
@@ -692,7 +743,7 @@ export function useAcceptInviteFromUrl<
   const [deliveryState, setDeliveryState] = useState(deliveryStateRef.current);
 
   onOpenRef.current = options.onOpen;
-  acceptRef.current = options.accept;
+  onResolveRef.current = options.onResolve;
   clearInviteParamsRef.current = clearInviteParamsOption;
 
   useEffect(() => {
@@ -726,14 +777,7 @@ export function useAcceptInviteFromUrl<
     runtime,
     () => runtime.getLoadOnce(
       resourceKey as string,
-      () => {
-        const acceptInvite = acceptRef.current;
-        if (acceptInvite) {
-          return acceptInvite(inviteInput as string, runtime.client);
-        }
-
-        return runtime.client.acceptInvite(inviteInput as string) as Promise<TResult>;
-      },
+      () => resolveInviteFromUrl<Schema, TOpened>(inviteInput as string, runtime.client),
     ),
   );
 
@@ -784,7 +828,7 @@ export function useAcceptInviteFromUrl<
     }
 
     let cancelled = false;
-    const openedResult = resource.data;
+    const resolvedInvite = resource.data;
     const nextLoadingState = {
       key: currentDeliveryKey,
       status: "loading" as const,
@@ -795,7 +839,10 @@ export function useAcceptInviteFromUrl<
 
     void (async () => {
       try {
-        await onOpenRef.current?.(openedResult);
+        if (resolvedInvite.kind === "opened") {
+          await onOpenRef.current?.(resolvedInvite.row);
+        }
+        await onResolveRef.current?.(resolvedInvite);
         if (cancelled) {
           return;
         }
