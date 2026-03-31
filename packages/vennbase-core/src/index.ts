@@ -3,7 +3,7 @@ export { RowHandle } from "./row-handle";
 export type { AnyRowHandle } from "./row-handle";
 export { VennbaseError } from "./errors";
 export { VENNBASE_INVITE_TARGET_PARAM } from "./invites";
-export { collection, defineSchema, field, index } from "./schema";
+export { collection, defineSchema, field } from "./schema";
 export type { VennbaseOptions } from "./vennbase";
 export type { MutationReceipt, MutationStatus } from "./mutation-receipt";
 export type {
@@ -24,17 +24,20 @@ export type {
   AllowedParentRef,
   AnyRow,
   AnyRowRef,
-  CollectionIndexes,
   CollectionName,
   DbCreateOptions,
   DbFieldValue,
+  DbFullQueryOptions,
+  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryProjectedRow,
+  DbQuerySelect,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
-  IndexValue,
   InsertFields,
+  KeyFieldNames,
   QueryWhere,
   MemberRole,
   RowRef,

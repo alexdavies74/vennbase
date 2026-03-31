@@ -1,4 +1,3 @@
-import { encodeCompositeFieldValues } from "../key-encoding";
 import { parseProtectedRequest, verifyPrincipalProof, verifyRequestProof } from "../auth";
 import { canonicalize } from "../crypto";
 import type { WorkersHandler } from "@heyputer/puter.js";
@@ -73,7 +72,7 @@ interface PostFieldsRequest {
 }
 
 interface ChildSchemaPayload {
-  indexes?: Record<string, { fields?: string[] }>;
+  keyFields?: string[];
 }
 
 interface RegisterChildRequest {
@@ -108,15 +107,15 @@ interface MemberMutationRequest {
 
 interface QueryRequest {
   collection: string;
-  index?: string;
-  value?: string | null;
+  select?: "full" | "keys";
+  orderBy?: string;
   order?: "asc" | "desc";
   limit?: number;
   where?: Record<string, DbFieldValue>;
 }
 
 interface ChildCollectionSchema {
-  indexes: Record<string, { fields: string[] }>;
+  keyFields: string[];
 }
 
 interface ChildEntry {
@@ -126,16 +125,6 @@ interface ChildEntry {
   collection: string;
   fields: Record<string, JsonValue>;
   addedAt: number;
-  updatedAt: number;
-  active: boolean;
-}
-
-interface IndexEntry {
-  rowId: string;
-  owner: string;
-  baseUrl: string;
-  collection: string;
-  fields: Record<string, JsonValue>;
   updatedAt: number;
   active: boolean;
 }
@@ -264,25 +253,6 @@ function rowChildKey(parentId: string, collection: string, childOwner: string, c
   return `${rowChildPrefix(parentId, collection)}${childOwner}:${childRowId}`;
 }
 
-function rowIndexPrefix(parentId: string, collection: string, indexName: string): string {
-  return `row:${parentId}:idx:${collection}:${indexName}:`;
-}
-
-function rowIndexCollectionPrefix(parentId: string, collection: string): string {
-  return `row:${parentId}:idx:${collection}:`;
-}
-
-function rowIndexKey(
-  parentId: string,
-  collection: string,
-  indexName: string,
-  encodedValue: string,
-  childOwner: string,
-  childRowId: string,
-): string {
-  return `${rowIndexPrefix(parentId, collection, indexName)}${encodedValue}:${childOwner}:${childRowId}`;
-}
-
 function stripTrailingSlash(input: string): string {
   return input.replace(/\/+$/g, "");
 }
@@ -392,6 +362,20 @@ function toFieldRecord(value: unknown, fieldName: string): Record<string, DbFiel
   }
 
   return output;
+}
+
+function pickFieldRecordKeys(
+  fields: Record<string, DbFieldValue>,
+  keyFields: string[],
+): Record<string, DbFieldValue> {
+  const next: Record<string, DbFieldValue> = {};
+  for (const fieldName of keyFields) {
+    const value = fields[fieldName];
+    if (value !== undefined) {
+      next[fieldName] = value;
+    }
+  }
+  return next;
 }
 
 function isRowRefLike(value: unknown): value is RowRef {
@@ -528,6 +512,42 @@ function deepEqualJson(left: JsonValue, right: JsonValue): boolean {
   }
 
   return false;
+}
+
+function stableJsonStringify(value: JsonValue | undefined): string {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJsonStringify(entry as JsonValue)).join(",")}]`;
+  }
+
+  const record = value as Record<string, JsonValue>;
+  const entries = Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
+function compareQueryFieldValue(left: JsonValue | undefined, right: JsonValue | undefined): number {
+  if (left === right) {
+    return 0;
+  }
+
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right;
+  }
+
+  if (typeof left === "boolean" && typeof right === "boolean") {
+    return Number(left) - Number(right);
+  }
+
+  if (typeof left === "object" || typeof right === "object") {
+    return stableJsonStringify(left).localeCompare(stableJsonStringify(right));
+  }
+
+  return String(left ?? "").localeCompare(String(right ?? ""));
 }
 
 interface WorkerRequestContext {
@@ -1124,13 +1144,16 @@ export class RowWorker {
     if (schema) {
       await this.kv.set(rowChildSchemaKey(parentRowId, body.collection), schema);
     }
+    const storedSchema = schema ?? await this.getChildSchema(parentRowId, body.collection);
+    const keyFields = storedSchema?.keyFields ?? [];
+    const childFields = body.fields ? toFieldRecord(body.fields, "fields") : {};
 
     const childEntry: ChildEntry = {
       rowId: childRef.id,
       owner: body.childOwner,
       baseUrl: childRef.baseUrl,
       collection: body.collection,
-      fields: body.fields ? toFieldRecord(body.fields, "fields") : {},
+      fields: keyFields.length > 0 ? pickFieldRecordKeys(childFields, keyFields) : childFields,
       addedAt: this.now(),
       updatedAt: this.now(),
       active: true,
@@ -1140,11 +1163,6 @@ export class RowWorker {
       rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id),
       childEntry,
     );
-
-    const storedSchema = await this.getChildSchema(parentRowId, body.collection);
-    if (storedSchema) {
-      await this.writeChildIndexes(parentRowId, childEntry, storedSchema);
-    }
 
     return jsonResponse(200, {
       ok: true,
@@ -1188,8 +1206,6 @@ export class RowWorker {
       } satisfies ChildEntry);
     }
 
-    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, childRef.id);
-
     return jsonResponse(200, { ok: true });
   }
 
@@ -1221,6 +1237,8 @@ export class RowWorker {
     });
 
     const schema = await this.getChildSchema(parentRowId, body.collection);
+    const keyFields = schema?.keyFields ?? [];
+    const nextFields = toFieldRecord(body.fields, "fields");
     const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
     const existing = await this.kv.get<ChildEntry>(childKey);
     const nextEntry: ChildEntry = {
@@ -1228,23 +1246,13 @@ export class RowWorker {
       owner: body.childOwner,
       baseUrl: childRef.baseUrl || stripTrailingSlash(existing?.baseUrl ?? ""),
       collection: body.collection,
-      fields: toFieldRecord(body.fields, "fields"),
+      fields: keyFields.length > 0 ? pickFieldRecordKeys(nextFields, keyFields) : nextFields,
       addedAt: existing?.addedAt ?? this.now(),
       updatedAt: this.now(),
       active: true,
     };
 
     await this.kv.set(childKey, nextEntry);
-    await this.tombstoneChildIndexes(parentRowId, body.collection, body.childOwner, childRef.id);
-
-    if (!schema) {
-      return jsonResponse(200, {
-        ok: true,
-        updated: false,
-      });
-    }
-
-    await this.writeChildIndexes(parentRowId, nextEntry, schema);
     return jsonResponse(200, {
       ok: true,
       updated: true,
@@ -1277,32 +1285,51 @@ export class RowWorker {
       action: "db/query",
       rowId: parentRowId,
     });
-    await this.assertReadableMember(parentRowId, principal, ctx);
+    const role = await this.resolveMemberRole(parentRowId, principal, ctx);
+    if (!role) {
+      error(401, "UNAUTHORIZED", "Members only");
+    }
 
     const collection = payload.collection?.trim();
     if (!collection) {
       error(400, "BAD_REQUEST", "collection is required");
     }
 
-    const indexName = payload.index?.trim() ?? "";
+    const select = payload.select === "keys" ? "keys" : "full";
+    if (role === "submitter" && select !== "keys") {
+      error(401, "UNAUTHORIZED", "Submitters may only query key fields");
+    }
+    if (role === "submitter" && select === "keys") {
+      // allowed
+    } else if (role === "submitter") {
+      error(401, "UNAUTHORIZED", "Readable members only");
+    }
+
     const order = (payload.order ?? "asc").toLowerCase() === "desc" ? "desc" : "asc";
     const limit = Math.max(
       1,
       Math.min(MAX_QUERY_LIMIT, parseOptionalNonNegativeInteger(payload.limit == null ? null : String(payload.limit), 50)),
     );
+    const orderBy = payload.orderBy?.trim() || undefined;
     const where = payload.where ? toFieldRecord(payload.where, "where") : undefined;
+    const schema = await this.getChildSchema(parentRowId, collection);
+    const keyFields = schema?.keyFields ?? [];
 
-    let rows: ChildEntry[];
-    if (indexName) {
-      rows = await this.queryByIndex(parentRowId, collection, indexName, payload.value ?? null, order, limit);
-    } else {
-      rows = await this.queryByChildren(parentRowId, collection, where, order, limit);
+    for (const fieldName of Object.keys(where ?? {})) {
+      if (!keyFields.includes(fieldName)) {
+        error(400, "BAD_REQUEST", `where.${fieldName} must be a key field`);
+      }
     }
+    if (orderBy && !keyFields.includes(orderBy)) {
+      error(400, "BAD_REQUEST", `orderBy must be a key field`);
+    }
+
+    const rows = await this.queryByChildren(parentRowId, collection, where, orderBy, order, limit);
 
     return jsonResponse(200, {
       rows: rows.map((row) => ({
         rowId: row.rowId,
-        owner: row.owner,
+        ...(select === "full" ? { owner: row.owner } : {}),
         baseUrl: row.baseUrl,
         collection: row.collection,
         fields: row.fields,
@@ -1655,56 +1682,11 @@ export class RowWorker {
     }
   }
 
-  private async queryByIndex(
-    parentRowId: string,
-    collection: string,
-    indexName: string,
-    valueParam: string | null,
-    order: "asc" | "desc",
-    limit: number,
-  ): Promise<ChildEntry[]> {
-    const prefix = valueParam === null
-      ? rowIndexPrefix(parentRowId, collection, indexName)
-      : `${rowIndexPrefix(parentRowId, collection, indexName)}${valueParam}:`;
-
-    const entries = await this.kv.list(prefix);
-    const ordered = order === "asc" ? entries : [...entries].reverse();
-    const deduped = new Map<string, ChildEntry>();
-
-    for (const entry of ordered) {
-      const value = entry.value as IndexEntry;
-      if (!value || value.active === false) {
-        continue;
-      }
-
-      const child: ChildEntry = {
-        rowId: value.rowId,
-        owner: value.owner,
-        baseUrl: value.baseUrl,
-        collection: value.collection,
-        fields: value.fields,
-        addedAt: value.updatedAt,
-        updatedAt: value.updatedAt,
-        active: true,
-      };
-
-      const dedupeKey = `${child.owner}:${child.rowId}`;
-      if (!deduped.has(dedupeKey)) {
-        deduped.set(dedupeKey, child);
-      }
-
-      if (deduped.size >= limit) {
-        break;
-      }
-    }
-
-    return Array.from(deduped.values()).slice(0, limit);
-  }
-
   private async queryByChildren(
     parentRowId: string,
     collection: string,
     where: Record<string, JsonValue> | undefined,
+    orderBy: string | undefined,
     order: "asc" | "desc",
     limit: number,
   ): Promise<ChildEntry[]> {
@@ -1720,116 +1702,48 @@ export class RowWorker {
       ))
       : activeChildren;
 
-    filtered.sort((left, right) => left.updatedAt - right.updatedAt || left.rowId.localeCompare(right.rowId));
-    if (order === "desc") {
-      filtered.reverse();
-    }
+    filtered.sort((left, right) => {
+      if (orderBy) {
+        const comparison = compareQueryFieldValue(left.fields[orderBy], right.fields[orderBy]);
+        if (comparison !== 0) {
+          return order === "desc" ? -comparison : comparison;
+        }
+      }
+
+      const baseUrlComparison = left.baseUrl.localeCompare(right.baseUrl);
+      if (baseUrlComparison !== 0) {
+        return order === "desc" ? -baseUrlComparison : baseUrlComparison;
+      }
+
+      const rowIdComparison = left.rowId.localeCompare(right.rowId);
+      return order === "desc" ? -rowIdComparison : rowIdComparison;
+    });
 
     return filtered.slice(0, limit);
   }
 
-  private async writeChildIndexes(
-    parentRowId: string,
-    child: ChildEntry,
-    schema: ChildCollectionSchema,
-  ): Promise<void> {
-    const indexes = schema.indexes;
-    const fields = child.fields;
-
-    await Promise.all(
-      Object.entries(indexes).map(async ([indexName, index]) => {
-        const indexValues = index.fields.map((fieldName) => fields[fieldName] ?? null);
-        const encoded = encodeCompositeFieldValues(indexValues);
-        const indexedFields: Record<string, JsonValue> = {};
-        for (const fieldName of index.fields) {
-          indexedFields[fieldName] = fields[fieldName] ?? null;
-        }
-
-        const key = rowIndexKey(
-          parentRowId,
-          child.collection,
-          indexName,
-          encoded,
-          child.owner,
-          child.rowId,
-        );
-
-        const payload: IndexEntry = {
-          rowId: child.rowId,
-          owner: child.owner,
-          baseUrl: child.baseUrl,
-          collection: child.collection,
-          fields: indexedFields,
-          updatedAt: this.now(),
-          active: true,
-        };
-
-        await this.kv.set(key, payload);
-      }),
-    );
-  }
-
-  private async tombstoneChildIndexes(
-    parentRowId: string,
-    collection: string,
-    childOwner: string,
-    childRowId: string,
-  ): Promise<void> {
-    const suffix = `:${childOwner}:${childRowId}`;
-    const entries = await this.kv.list(rowIndexCollectionPrefix(parentRowId, collection));
-
-    await Promise.all(entries.map(async (entry) => {
-      if (!entry.key.endsWith(suffix)) {
-        return;
-      }
-
-      const existing = entry.value as IndexEntry;
-      if (!existing || existing.active === false) {
-        return;
-      }
-
-      await this.kv.set(entry.key, {
-        ...existing,
-        active: false,
-        updatedAt: this.now(),
-      } satisfies IndexEntry);
-    }));
-  }
-
   private normalizeChildSchema(schema: ChildSchemaPayload | undefined): ChildCollectionSchema | null {
-    if (!schema?.indexes || !isRecord(schema.indexes)) {
+    if (!schema?.keyFields || !Array.isArray(schema.keyFields)) {
       return null;
     }
 
-    const normalized: ChildCollectionSchema = {
-      indexes: {},
-    };
-
-    for (const [name, value] of Object.entries(schema.indexes)) {
-      if (!isRecord(value)) {
-        continue;
-      }
-
-      const fields = Array.isArray(value.fields)
-        ? value.fields.filter((field): field is string => typeof field === "string" && field.length > 0)
-        : [];
-      if (fields.length === 0) {
-        continue;
-      }
-
-      normalized.indexes[name] = { fields };
+    const keyFields = schema.keyFields.filter((field): field is string => typeof field === "string" && field.length > 0);
+    if (keyFields.length === 0) {
+      return null;
     }
 
-    return Object.keys(normalized.indexes).length > 0 ? normalized : null;
+    return { keyFields };
   }
 
   private async getChildSchema(parentRowId: string, collection: string): Promise<ChildCollectionSchema | null> {
     const stored = await this.kv.get<ChildCollectionSchema>(rowChildSchemaKey(parentRowId, collection));
-    if (!stored || !isRecord(stored.indexes)) {
+    if (!stored || !Array.isArray(stored.keyFields)) {
       return null;
     }
 
-    return stored;
+    return {
+      keyFields: stored.keyFields.filter((field): field is string => typeof field === "string" && field.length > 0),
+    };
   }
 
   private async getParentRefs(rowId: string): Promise<RowRef[]> {

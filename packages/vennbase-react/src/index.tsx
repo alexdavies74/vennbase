@@ -17,8 +17,11 @@ import type {
   CrdtAdapter,
   CrdtConnectCallbacks,
   CrdtConnection,
+  DbFullQueryOptions,
+  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryProjectedRow,
   DbSchema,
   MemberRole,
   VennbaseUser,
@@ -446,22 +449,47 @@ export function useQuery<
 >(
   db: Vennbase<Schema>,
   collection: TCollection,
+  options: DbKeyQueryOptions<Schema, TCollection> | null | undefined,
+  hookOptions?: UseHookOptions,
+): UseQueryResult<
+  DbQueryProjectedRow<Schema, TCollection>
+>;
+export function useQuery<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+>(
+  db: Vennbase<Schema>,
+  collection: TCollection,
+  options: DbFullQueryOptions<Schema, TCollection> | null | undefined,
+  hookOptions?: UseHookOptions,
+): UseQueryResult<
+  RowHandle<Schema, TCollection>
+>;
+export function useQuery<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+>(
+  db: Vennbase<Schema>,
+  collection: TCollection,
   options: DbQueryOptions<Schema, TCollection> | null | undefined,
   hookOptions: UseHookOptions = {},
 ): UseQueryResult<
-  RowHandle<Schema, TCollection>
+  RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>
 > {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
   const resourceKey = options ? makeQueryKey(collection, options) : null;
-  const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection>>>(session);
+  const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>>(session);
   const resource = useOptionalResource(
     (hookOptions.enabled ?? true) && !!options && !blocked,
     resourceKey,
     runtime,
     () => runtime.getLive(
       resourceKey as string,
-      () => runtime.client.query(collection, options as DbQueryOptions<Schema, TCollection>) as Promise<QueryRows<Schema, TCollection>>,
+      () => runtime.client.query(
+        collection,
+        options as DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection>,
+      ) as Promise<Array<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>>,
       snapshots.queryRows,
     ),
   );

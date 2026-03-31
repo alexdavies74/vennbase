@@ -9,7 +9,6 @@ import {
   collection,
   defineSchema,
   field,
-  index,
   type CrdtAdapter,
   type CrdtConnectCallbacks,
   type CrdtConnection,
@@ -41,10 +40,7 @@ const schema = defineSchema({
     in: ["dogs"],
     fields: {
       label: field.string(),
-      createdAt: field.number(),
-    },
-    indexes: {
-      byCreatedAt: index("createdAt"),
+      createdAt: field.number().key(),
     },
   }),
 });
@@ -624,7 +620,7 @@ describe("@vennbase/react", () => {
     db.signedIn = false;
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1093,7 +1089,7 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1129,7 +1125,7 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1160,7 +1156,7 @@ describe("@vennbase/react", () => {
     db.nextQueryPromise = initialQuery.promise;
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1195,7 +1191,7 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1240,7 +1236,7 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1272,7 +1268,7 @@ describe("@vennbase/react", () => {
     db.nextQueryError = new Error("query failed");
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1301,7 +1297,7 @@ describe("@vennbase/react", () => {
     function Probe() {
       latest = useQuery(db as unknown as Vennbase<TestSchema>, "tags", {
         in: boardHandle.ref,
-        index: "byCreatedAt",
+        orderBy: "createdAt",
         order: "asc",
       });
       return <div>{(latest.rows ?? []).map((row) => row.fields.label).join(",")}</div>;
@@ -1488,7 +1484,7 @@ describe("@vennbase/react", () => {
         collection: "dogs",
         baseUrl: "https://worker.example",
       },
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1537,7 +1533,7 @@ describe("@vennbase/react", () => {
         collection: "dogs",
         baseUrl: "https://worker.example",
       },
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };
@@ -1564,7 +1560,7 @@ describe("@vennbase/react", () => {
     const db = new FakeDb();
     const queryOptions = {
       in: dogRef(),
-      index: "byCreatedAt" as const,
+      orderBy: "createdAt" as const,
       order: "asc" as const,
       limit: 100,
     };

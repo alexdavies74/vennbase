@@ -1,5 +1,3 @@
-import { encodeCompositeFieldValues, encodeFieldValue } from "./key-encoding";
-
 export interface RowRef<TCollection extends string = string> {
   id: string;
   collection: TCollection;
@@ -26,50 +24,62 @@ export interface DbFieldBuilder<
   TType extends FieldType = FieldType,
   TOptional extends boolean = false,
   THasDefault extends boolean = false,
+  TIsKey extends boolean = false,
 > {
   readonly kind: "field";
   readonly type: TType;
   readonly isOptional: TOptional;
   readonly hasDefault: THasDefault;
+  readonly isKey: TIsKey;
   readonly defaultValue: THasDefault extends true ? TValue : undefined;
   readonly refCollections?: readonly string[];
-  optional(): DbFieldBuilder<TValue, TType, true, THasDefault>;
-  default(value: TValue): DbFieldBuilder<TValue, TType, TOptional, true>;
+  optional(): DbFieldBuilder<TValue, TType, true, THasDefault, TIsKey>;
+  default(value: TValue): DbFieldBuilder<TValue, TType, TOptional, true, TIsKey>;
+  key(): DbFieldBuilder<TValue, TType, TOptional, THasDefault, true>;
   readonly __value?: TValue;
 }
 
-type AnyDbFieldBuilder = DbFieldBuilder<DbFieldValue, FieldType, boolean, boolean>;
+type AnyDbFieldBuilder = DbFieldBuilder<DbFieldValue, FieldType, boolean, boolean, boolean>;
 
 function createFieldBuilder<
   TValue extends DbFieldValue,
   TType extends FieldType,
   TOptional extends boolean,
   THasDefault extends boolean,
+  TIsKey extends boolean,
 >(config: {
   type: TType;
   isOptional: TOptional;
   hasDefault: THasDefault;
+  isKey: TIsKey;
   defaultValue?: TValue;
   refCollections?: readonly string[];
-}): DbFieldBuilder<TValue, TType, TOptional, THasDefault> {
+}): DbFieldBuilder<TValue, TType, TOptional, THasDefault, TIsKey> {
   return {
     kind: "field",
     type: config.type,
     isOptional: config.isOptional,
     hasDefault: config.hasDefault,
+    isKey: config.isKey,
     defaultValue: config.defaultValue as THasDefault extends true ? TValue : undefined,
     refCollections: config.refCollections,
     optional() {
-      return createFieldBuilder<TValue, TType, true, THasDefault>({
+      return createFieldBuilder<TValue, TType, true, THasDefault, TIsKey>({
         ...config,
         isOptional: true,
       });
     },
     default(value: TValue) {
-      return createFieldBuilder<TValue, TType, TOptional, true>({
+      return createFieldBuilder<TValue, TType, TOptional, true, TIsKey>({
         ...config,
         hasDefault: true,
         defaultValue: value,
+      });
+    },
+    key() {
+      return createFieldBuilder<TValue, TType, TOptional, THasDefault, true>({
+        ...config,
+        isKey: true,
       });
     },
   };
@@ -77,31 +87,35 @@ function createFieldBuilder<
 
 export const field = {
   string() {
-    return createFieldBuilder<string, "string", false, false>({
+    return createFieldBuilder<string, "string", false, false, false>({
       type: "string",
       isOptional: false,
       hasDefault: false,
+      isKey: false,
     });
   },
   number() {
-    return createFieldBuilder<number, "number", false, false>({
+    return createFieldBuilder<number, "number", false, false, false>({
       type: "number",
       isOptional: false,
       hasDefault: false,
+      isKey: false,
     });
   },
   boolean() {
-    return createFieldBuilder<boolean, "boolean", false, false>({
+    return createFieldBuilder<boolean, "boolean", false, false, false>({
       type: "boolean",
       isOptional: false,
       hasDefault: false,
+      isKey: false,
     });
   },
   date() {
-    return createFieldBuilder<string, "date", false, false>({
+    return createFieldBuilder<string, "date", false, false, false>({
       type: "date",
       isOptional: false,
       hasDefault: false,
+      isKey: false,
     });
   },
   ref<const TCollections extends string | readonly string[]>(collections: TCollections) {
@@ -111,46 +125,28 @@ export const field = {
           : never;
 
     const refCollections = Array.isArray(collections) ? [...collections] : [collections];
-    return createFieldBuilder<RowRef<TCollectionName>, "ref", false, false>({
+    return createFieldBuilder<RowRef<TCollectionName>, "ref", false, false, false>({
       type: "ref",
       isOptional: false,
       hasDefault: false,
+      isKey: false,
       refCollections,
     });
   },
 } as const;
 
-type NormalizeIndexFields<TFields extends string | readonly string[]> =
-  TFields extends string ? readonly [TFields] : TFields;
-
-export interface DbIndexDefinition<TFields extends readonly string[] = readonly string[]> {
-  readonly fields: TFields;
-}
-
-export function index<const TFields extends string | readonly string[]>(
-  fields: TFields,
-): DbIndexDefinition<NormalizeIndexFields<TFields>> {
-  return {
-    fields: (Array.isArray(fields) ? [...fields] : [fields]) as unknown as NormalizeIndexFields<TFields>,
-  };
-}
-
 export type DbCollectionDefinition<
   TFields extends Record<string, AnyDbFieldBuilder> = Record<string, AnyDbFieldBuilder>,
   TParents extends readonly string[] | undefined = undefined,
-  TIndexes extends Record<string, DbIndexDefinition> | undefined = undefined,
 > = {
   readonly fields: TFields;
 } & (
   TParents extends readonly string[] ? { readonly in: TParents } : { readonly in?: undefined }
-) & (
-  TIndexes extends Record<string, DbIndexDefinition> ? { readonly indexes: TIndexes } : { readonly indexes?: undefined }
 );
 
 type AnyDbCollectionDefinition = DbCollectionDefinition<
   Record<string, AnyDbFieldBuilder>,
-  readonly string[] | undefined,
-  Record<string, DbIndexDefinition> | undefined
+  readonly string[] | undefined
 >;
 
 export type DbSchema = Record<string, AnyDbCollectionDefinition>;
@@ -162,32 +158,26 @@ type AssertNoReservedCollectionNames<TSchema extends DbSchema> =
 
 export function collection<
   const TFields extends Record<string, AnyDbFieldBuilder>,
-  const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
 >(definition: {
   fields: TFields;
-  indexes?: TIndexes;
-}): DbCollectionDefinition<TFields, undefined, TIndexes>;
+}): DbCollectionDefinition<TFields, undefined>;
 
 export function collection<
   const TFields extends Record<string, AnyDbFieldBuilder>,
   const TParents extends readonly string[],
-  const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
 >(definition: {
   fields: TFields;
   in: TParents;
-  indexes?: TIndexes;
-}): DbCollectionDefinition<TFields, TParents, TIndexes>;
+}): DbCollectionDefinition<TFields, TParents>;
 
 export function collection<
   const TFields extends Record<string, AnyDbFieldBuilder>,
   const TParents extends readonly string[] | undefined = undefined,
-  const TIndexes extends Record<string, DbIndexDefinition<readonly (keyof TFields & string)[]>> | undefined = undefined,
 >(definition: {
   fields: TFields;
   in?: TParents;
-  indexes?: TIndexes;
-}): DbCollectionDefinition<TFields, TParents, TIndexes> {
-  return definition as unknown as DbCollectionDefinition<TFields, TParents, TIndexes>;
+}): DbCollectionDefinition<TFields, TParents> {
+  return definition as unknown as DbCollectionDefinition<TFields, TParents>;
 }
 
 export function defineSchema<const TSchema extends DbSchema>(
@@ -202,13 +192,16 @@ export function defineSchema<const TSchema extends DbSchema>(
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
 type InferFieldValue<TField extends AnyDbFieldBuilder> =
-  TField extends DbFieldBuilder<infer TValue, FieldType, boolean, boolean> ? TValue : never;
+  TField extends DbFieldBuilder<infer TValue, FieldType, boolean, boolean, boolean> ? TValue : never;
 
 type FieldIsOptional<TField extends AnyDbFieldBuilder> =
-  TField extends DbFieldBuilder<infer _TValue, FieldType, infer TOptional, boolean> ? TOptional : never;
+  TField extends DbFieldBuilder<infer _TValue, FieldType, infer TOptional, boolean, boolean> ? TOptional : never;
 
 type FieldHasDefault<TField extends AnyDbFieldBuilder> =
-  TField extends DbFieldBuilder<infer _TValue, FieldType, boolean, infer THasDefault> ? THasDefault : never;
+  TField extends DbFieldBuilder<infer _TValue, FieldType, boolean, infer THasDefault, boolean> ? THasDefault : never;
+
+type FieldIsKey<TField extends AnyDbFieldBuilder> =
+  TField extends DbFieldBuilder<infer _TValue, FieldType, boolean, boolean, infer TIsKey> ? TIsKey : never;
 
 type FieldDefinitions<
   Schema extends DbSchema,
@@ -329,36 +322,20 @@ export type DbCreateArgs<
 
 type QueryFieldValue<TField extends AnyDbFieldBuilder> = Exclude<InferFieldValue<TField>, undefined>;
 
+export type KeyFieldNames<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+> = {
+  [K in keyof FieldDefinitions<Schema, TCollection>]-?:
+    FieldIsKey<FieldDefinitions<Schema, TCollection>[K]> extends true ? K : never;
+}[keyof FieldDefinitions<Schema, TCollection>] & string;
+
 export type QueryWhere<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
 > = Partial<{
-  [K in keyof FieldDefinitions<Schema, TCollection>]: QueryFieldValue<FieldDefinitions<Schema, TCollection>[K]>;
+  [K in KeyFieldNames<Schema, TCollection>]: QueryFieldValue<FieldDefinitions<Schema, TCollection>[K]>;
 }>;
-
-export type CollectionIndexes<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
-> = NonNullable<Schema[TCollection]["indexes"]>;
-
-type IndexValueForFields<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
-  TFields extends readonly string[],
-> = TFields extends readonly [infer TField extends keyof FieldDefinitions<Schema, TCollection> & string]
-  ? QueryFieldValue<FieldDefinitions<Schema, TCollection>[TField]>
-  : {
-    [K in keyof TFields]:
-      TFields[K] extends keyof FieldDefinitions<Schema, TCollection> & string
-        ? QueryFieldValue<FieldDefinitions<Schema, TCollection>[TFields[K]]>
-        : never;
-  };
-
-export type IndexValue<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
-  TIndex extends keyof CollectionIndexes<Schema, TCollection> & string,
-> = IndexValueForFields<Schema, TCollection, CollectionIndexes<Schema, TCollection>[TIndex]["fields"]>;
 
 type QueryBaseOptions<
   Schema extends DbSchema,
@@ -373,32 +350,51 @@ type QueryBaseOptions<
     }
 ) & {
   where?: QueryWhere<Schema, TCollection>;
+  orderBy?: KeyFieldNames<Schema, TCollection>;
   order?: "asc" | "desc";
   limit?: number;
 };
 
-type QueryIndexOptions<
+export type DbQuerySelect = "full" | "keys";
+
+export type KeyRowFields<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-> =
-  [keyof CollectionIndexes<Schema, TCollection> & string] extends [never] ? never
-    : {
-      [TIndex in keyof CollectionIndexes<Schema, TCollection> & string]:
-        QueryBaseOptions<Schema, TCollection> & {
-          index: TIndex;
-          value?: IndexValue<Schema, TCollection, TIndex>;
-        };
-    }[keyof CollectionIndexes<Schema, TCollection> & string];
+> = Simplify<
+  { [K in Extract<KeyFieldNames<Schema, TCollection>, RequiredRowKeys<FieldDefinitions<Schema, TCollection>>>]:
+      InferFieldValue<FieldDefinitions<Schema, TCollection>[K]> } &
+  { [K in Extract<KeyFieldNames<Schema, TCollection>, OptionalRowKeys<FieldDefinitions<Schema, TCollection>>>]?:
+      InferFieldValue<FieldDefinitions<Schema, TCollection>[K]> }
+>;
+
+export interface DbQueryProjectedRow<
+  Schema extends DbSchema = DbSchema,
+  TCollection extends CollectionName<Schema> = CollectionName<Schema>,
+> {
+  id: string;
+  ref: RowRef<TCollection>;
+  collection: TCollection;
+  fields: KeyRowFields<Schema, TCollection>;
+}
+
+export type DbFullQueryOptions<
+  Schema extends DbSchema = DbSchema,
+  TCollection extends CollectionName<Schema> = CollectionName<Schema>,
+> = QueryBaseOptions<Schema, TCollection> & {
+  select?: "full" | undefined;
+};
+
+export type DbKeyQueryOptions<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+> = QueryBaseOptions<Schema, TCollection> & {
+  select: "keys";
+};
 
 export type DbQueryOptions<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
-> =
-  | (QueryBaseOptions<Schema, TCollection> & {
-    index?: undefined;
-    value?: undefined;
-  })
-  | QueryIndexOptions<Schema, TCollection>;
+> = DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection>;
 
 export interface DbQueryWatchCallbacks<TRow> {
   onChange(rows: TRow[]): void;
@@ -492,6 +488,26 @@ export function assertCreateParents(
   }
 }
 
+export function getCollectionKeyFieldNames(collectionSpec: AnyDbCollectionDefinition): string[] {
+  return Object.entries(collectionSpec.fields)
+    .filter(([, fieldSpec]) => fieldSpec.isKey)
+    .map(([fieldName]) => fieldName);
+}
+
+export function pickKeyFieldValues(
+  collectionSpec: AnyDbCollectionDefinition,
+  fields: Record<string, unknown>,
+): Record<string, DbFieldValue> {
+  const next: Record<string, DbFieldValue> = {};
+  for (const fieldName of getCollectionKeyFieldNames(collectionSpec)) {
+    const value = fields[fieldName];
+    if (value !== undefined) {
+      next[fieldName] = value as DbFieldValue;
+    }
+  }
+  return next;
+}
+
 export function assertParentAllowed(
   schema: DbSchema,
   childCollection: string,
@@ -575,66 +591,4 @@ export function assertValidFieldValues(
       );
     }
   }
-}
-
-function encodeQueryIndexValue(
-  indexSpec: DbIndexDefinition,
-  value: DbFieldValue | readonly DbFieldValue[],
-): string {
-  if (indexSpec.fields.length > 1) {
-    if (!Array.isArray(value)) {
-      throw new Error(`Index ${indexSpec.fields.join(",")} requires a tuple value`);
-    }
-    return encodeCompositeFieldValues(Array.from(value));
-  }
-
-  return encodeFieldValue(value as DbFieldValue);
-}
-
-export function pickIndex<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
->(
-  collectionSpec: Schema[TCollection],
-  options: DbQueryOptions<Schema, TCollection>,
-): { name: string; encodedValue: string | null } | null {
-  if (options.index) {
-    const explicit = collectionSpec.indexes?.[options.index];
-    if (!explicit) {
-      throw new Error(`Unknown index: ${options.index}`);
-    }
-
-    if (options.value === undefined || options.value === null) {
-      return { name: options.index, encodedValue: null };
-    }
-
-    return {
-      name: options.index,
-      encodedValue: encodeQueryIndexValue(
-        explicit,
-        options.value as DbFieldValue | readonly DbFieldValue[],
-      ),
-    };
-  }
-
-  if (!options.where || !collectionSpec.indexes) {
-    return null;
-  }
-
-  const whereEntries = Object.entries(options.where);
-  if (whereEntries.length !== 1) {
-    return null;
-  }
-
-  const [whereField, whereValue] = whereEntries[0];
-  for (const [indexName, indexSpec] of Object.entries(collectionSpec.indexes)) {
-    if (indexSpec.fields.length === 1 && indexSpec.fields[0] === whereField) {
-      return {
-        name: indexName,
-        encodedValue: encodeFieldValue(whereValue as DbFieldValue),
-      };
-    }
-  }
-
-  return null;
 }

@@ -13,8 +13,7 @@ async function rememberRecentBoard(board: BoardHandle): Promise<void> {
   // `recentBoards` is declared as `in: ["user"]`, so omitting `in` uses the
   // current signed-in user's built-in user row.
   const existingRecentBoards = await db.query("recentBoards", {
-    index: "byBoardRef",
-    value: board.ref,
+    where: { boardRef: board.ref },
     limit: 1,
   });
   const existingRecentBoard = existingRecentBoards[0] ?? null;
@@ -112,7 +111,7 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
   });
   const openRecent = useMutation(async (recentBoard: RecentBoardHandle) => openRecentBoard(recentBoard));
   const { rows: recentBoards = [], error: recentBoardsError } = useQuery(db, "recentBoards", {
-    index: "byOpenedAt",
+    orderBy: "openedAt",
     order: "desc",
     limit: 10,
   });
@@ -223,7 +222,7 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
 
   const { rows: cards = [], status, error } = useQuery(db, "cards", {
     in: board.ref,
-    index: "byCreatedAt",
+    orderBy: "createdAt",
     order: "asc",
   });
   const cardsError = error instanceof Error

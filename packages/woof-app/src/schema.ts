@@ -4,7 +4,6 @@ import {
   collection,
   defineSchema,
   field,
-  index,
 } from "@vennbase/core";
 
 export const woofSchema = defineSchema({
@@ -16,12 +15,8 @@ export const woofSchema = defineSchema({
   dogHistory: collection({
     in: ["user"],
     fields: {
-      dogRef: field.ref("dogs"),
-      status: field.string(),
-    },
-    indexes: {
-      byDogRef: index("dogRef"),
-      byStatus: index("status"),
+      dogRef: field.ref("dogs").key(),
+      status: field.string().key(),
     },
   }),
   tags: collection({
@@ -29,10 +24,7 @@ export const woofSchema = defineSchema({
     fields: {
       label: field.string(),
       createdBy: field.string(),
-      createdAt: field.number(),
-    },
-    indexes: {
-      byCreatedAt: index("createdAt"),
+      createdAt: field.number().key(),
     },
   }),
 });

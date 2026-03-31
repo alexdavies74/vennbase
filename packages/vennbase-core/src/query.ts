@@ -4,13 +4,16 @@ import { RowHandle } from "./row-handle";
 import { normalizeParentRefs, normalizeRowRef } from "./row-reference";
 import type {
   CollectionName,
+  DbFullQueryOptions,
+  DbKeyQueryOptions,
   DbQueryOptions,
+  DbQueryProjectedRow,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
   RowRef,
 } from "./schema";
-import { getCollectionSpec, pickIndex } from "./schema";
+import { getCollectionSpec, pickKeyFieldValues } from "./schema";
 import { stableJsonStringify } from "./stable-json";
 import type { Transport } from "./transport";
 import { encodeFieldValue } from "./key-encoding";
@@ -18,7 +21,7 @@ import type { JsonValue } from "./types";
 
 interface DbQueryRow {
   rowId: string;
-  owner: string;
+  owner?: string;
   baseUrl: string;
   collection: string;
   fields: Record<string, JsonValue>;
@@ -37,34 +40,6 @@ function matchesWhere(
   }
 
   return Object.entries(where).every(([field, value]) => encodeFieldValue(fields[field] ?? null) === encodeFieldValue(value));
-}
-
-function matchesIndexValue(
-  row: DbQueryRow,
-  indexFields: readonly string[],
-  value: JsonValue | readonly JsonValue[] | undefined,
-): boolean {
-  if (value === undefined) {
-    return true;
-  }
-
-  const decoded = Array.isArray(value) ? value : [value];
-  return indexFields.every((field, index) => encodeFieldValue(row.fields[field] ?? null) === encodeFieldValue(decoded[index] as JsonValue));
-}
-
-function resolveSelectedIndexValue(
-  indexFields: readonly string[],
-  options: { value?: JsonValue | readonly JsonValue[]; where?: Record<string, JsonValue> },
-): JsonValue | readonly JsonValue[] | undefined {
-  if (options.value !== undefined) {
-    return options.value;
-  }
-
-  if (indexFields.length === 1 && options.where && indexFields[0] in options.where) {
-    return options.where[indexFields[0]];
-  }
-
-  return undefined;
 }
 
 function compareFieldValue(left: JsonValue | undefined, right: JsonValue | undefined): number {
@@ -87,29 +62,35 @@ function compareFieldValue(left: JsonValue | undefined, right: JsonValue | undef
   return String(left ?? "").localeCompare(String(right ?? ""));
 }
 
-function compareIndexedRows(
+function compareQueriedRows(
   left: DbQueryRow,
   right: DbQueryRow,
-  indexFields: readonly string[],
+  orderBy: string | undefined,
   order: "asc" | "desc",
 ): number {
-  for (const fieldName of indexFields) {
-    const comparison = compareFieldValue(left.fields[fieldName], right.fields[fieldName]);
+  if (orderBy) {
+    const comparison = compareFieldValue(left.fields[orderBy], right.fields[orderBy]);
     if (comparison !== 0) {
       return order === "desc" ? -comparison : comparison;
     }
   }
 
-  const ownerComparison = left.owner.localeCompare(right.owner);
-  if (ownerComparison !== 0) {
-    return order === "desc" ? -ownerComparison : ownerComparison;
+  const baseUrlComparison = left.baseUrl.localeCompare(right.baseUrl);
+  if (baseUrlComparison !== 0) {
+    return order === "desc" ? -baseUrlComparison : baseUrlComparison;
   }
 
   const rowIdComparison = left.rowId.localeCompare(right.rowId);
   return order === "desc" ? -rowIdComparison : rowIdComparison;
 }
 
-function snapshotRows(rows: Array<RowHandle<DbSchema, string>>): string {
+function snapshotRows(rows: Array<{
+  id: string;
+  collection: string;
+  ref: RowRef;
+  fields: unknown;
+  owner?: string;
+}>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
     collection: row.collection,
@@ -140,8 +121,27 @@ export class Query<Schema extends DbSchema> {
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
+    options: DbKeyQueryOptions<Schema, TCollection>,
+  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbFullQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>>> {
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
+    return this.runQuery(collection, options);
+  }
+
+  private async runQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
     const resolvedOptions = this.resolveOptions
       ? await this.resolveOptions(collection, options)
       : options;
@@ -151,8 +151,9 @@ export class Query<Schema extends DbSchema> {
     }
 
     const collectionSpec = getCollectionSpec(this.schema, collection);
-    const selectedIndex = pickIndex(collectionSpec, resolvedOptions);
+    const orderBy = resolvedOptions.orderBy;
     const limit = Math.max(1, Math.min(200, resolvedOptions.limit ?? 50));
+    const select = resolvedOptions.select ?? "full";
 
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
@@ -160,20 +161,13 @@ export class Query<Schema extends DbSchema> {
           return [];
         }
 
-        let indexName: string | undefined;
-        let value: string | null | undefined;
-        if (selectedIndex) {
-          indexName = selectedIndex.name;
-          value = selectedIndex.encodedValue;
-        }
-
         const response = await this.transport.row(parent).request<DbQueryResponse>("db/query", {
           collection,
+          select,
+          orderBy,
           order: resolvedOptions.order ?? "asc",
           limit,
-          index: indexName,
-          value,
-          where: selectedIndex ? undefined : resolvedOptions.where,
+          where: resolvedOptions.where,
         });
 
         return response.rows.filter((row) => {
@@ -202,21 +196,11 @@ export class Query<Schema extends DbSchema> {
         owner: record.owner,
         baseUrl: record.row.baseUrl,
         collection,
-        fields: this.optimisticStore.getLogicalFields(record.row) ?? {},
+        fields: select === "keys"
+          ? pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {})
+          : (this.optimisticStore.getLogicalFields(record.row) ?? {}),
       }))
-      .filter((row) => {
-        if (selectedIndex) {
-          const indexFields = collectionSpec.indexes?.[selectedIndex.name]?.fields ?? [];
-          return matchesIndexValue(row, indexFields, resolveSelectedIndexValue(
-            indexFields,
-            {
-              value: resolvedOptions.value as JsonValue | readonly JsonValue[] | undefined,
-              where: resolvedOptions.where as Record<string, JsonValue> | undefined,
-            },
-          ));
-        }
-        return matchesWhere(row.fields, resolvedOptions.where as Record<string, JsonValue> | undefined);
-      });
+      .filter((row) => matchesWhere(row.fields, resolvedOptions.where as Record<string, JsonValue> | undefined));
 
     for (const row of optimisticRows) {
       const key = `${row.baseUrl}:${row.rowId}`;
@@ -229,35 +213,36 @@ export class Query<Schema extends DbSchema> {
       const localFields = this.optimisticStore.getLogicalFields({
         id: row.rowId,
         baseUrl: row.baseUrl,
-      }) ?? row.fields;
-
-      if (selectedIndex) {
-        const indexFields = collectionSpec.indexes?.[selectedIndex.name]?.fields ?? [];
-        return matchesIndexValue({
-          ...row,
-          fields: localFields,
-        }, indexFields, resolveSelectedIndexValue(
-          indexFields,
-          {
-            value: resolvedOptions.value as JsonValue | readonly JsonValue[] | undefined,
-            where: resolvedOptions.where as Record<string, JsonValue> | undefined,
-          },
-        ));
-      }
-
-      return matchesWhere(localFields, resolvedOptions.where as Record<string, JsonValue> | undefined);
+      });
+      const effectiveFields = select === "keys"
+        ? pickKeyFieldValues(collectionSpec, localFields ?? row.fields)
+        : (localFields ?? row.fields);
+      return matchesWhere(effectiveFields, resolvedOptions.where as Record<string, JsonValue> | undefined);
     });
-    if (selectedIndex) {
-      const indexFields = collectionSpec.indexes?.[selectedIndex.name]?.fields ?? [];
-      mergedRows.sort((left, right) => compareIndexedRows(
+
+    if (orderBy) {
+      mergedRows.sort((left, right) => compareQueriedRows(
         left,
         right,
-        indexFields,
+        orderBy,
         resolvedOptions.order ?? "asc",
       ));
     }
 
     const limitedRows = mergedRows.slice(0, limit);
+    if (select === "keys") {
+      return limitedRows.map((row) => ({
+        id: row.rowId,
+        ref: normalizeRowRef({
+          id: row.rowId,
+          collection,
+          baseUrl: row.baseUrl,
+        }),
+        collection,
+        fields: pickKeyFieldValues(collectionSpec, row.fields),
+      })) as Array<DbQueryProjectedRow<Schema, TCollection>>;
+    }
+
     const hydrated = await Promise.all(
       limitedRows.map(async (row) => {
         const rowRef: RowRef<TCollection> = normalizeRowRef({
@@ -275,15 +260,36 @@ export class Query<Schema extends DbSchema> {
 
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
+    options: DbKeyQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<DbQueryProjectedRow<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbFullQueryOptions<Schema, TCollection>,
     callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;
 
     const poller = createAdaptivePoller({
       run: async ({ markActivity }) => {
         const result = await this.query(collection, options);
-        const nextSnapshot = snapshotRows(result as unknown as Array<RowHandle<DbSchema, string>>);
+        const nextSnapshot = snapshotRows(result as unknown as Array<{
+          id: string;
+          collection: string;
+          ref: RowRef;
+          fields: unknown;
+          owner?: string;
+        }>);
 
         if (lastSnapshot === nextSnapshot) {
           return;

@@ -3,7 +3,7 @@ import {
   collection,
   defineSchema,
   field,
-  index,
+  type DbQueryProjectedRow,
   type RowRef,
 } from "./schema";
 
@@ -22,22 +22,15 @@ const typeTestSchema = defineSchema({
     in: ["projects"],
     fields: {
       title: field.string(),
-      status: field.string().default("todo"),
+      status: field.string().key().default("todo"),
       points: field.number().optional(),
-    },
-    indexes: {
-      byStatus: index("status"),
-      byTitleStatus: index(["title", "status"]),
     },
   }),
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameRef: field.ref("projects"),
-      role: field.string(),
-    },
-    indexes: {
-      byGameRef: index("gameRef"),
+      gameRef: field.ref("projects").key(),
+      role: field.string().key(),
     },
   }),
   mixedRecords: collection({
@@ -70,19 +63,23 @@ void db.create("tasks", {});
 void db.create("tasks", { title: "Ship v2" }, { in: teamRef });
 
 void db.query("tasks", { in: projectRef, where: { status: "done" } });
-void db.query("tasks", { in: projectRef, index: "byStatus", value: "done" });
-void db.query("tasks", { in: projectRef, index: "byTitleStatus", value: ["Ship v2", "done"] });
+void db.query("tasks", { in: projectRef, orderBy: "status", order: "asc" });
 void db.query("gameRecords", { where: { role: "owner" } });
-void db.query("gameRecords", { index: "byGameRef", value: projectRef });
+void db.query("gameRecords", { where: { gameRef: projectRef } });
+void db.query("tasks", { in: projectRef, select: "keys", orderBy: "status" }).then((rows) => {
+  const first = rows[0] as DbQueryProjectedRow<typeof typeTestSchema, "tasks"> | undefined;
+  const projectedStatus: string | undefined = first?.fields.status;
+  void projectedStatus;
+});
 
 // @ts-expect-error invalid where field
 void db.query("tasks", { in: projectRef, where: { missing: "nope" } });
 
-// @ts-expect-error invalid index name
-void db.query("tasks", { in: projectRef, index: "byMissing", value: "done" });
+// @ts-expect-error title is not a key field
+void db.query("tasks", { in: projectRef, where: { title: "Ship v2" } });
 
-// @ts-expect-error composite indexes require tuple values
-void db.query("tasks", { in: projectRef, index: "byTitleStatus", value: "done" });
+// @ts-expect-error title is not a key field
+void db.query("tasks", { in: projectRef, orderBy: "title" });
 
 // @ts-expect-error tasks can only be queried under projects
 void db.query("tasks", { in: teamRef });

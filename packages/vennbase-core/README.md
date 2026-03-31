@@ -16,7 +16,7 @@ db.create("cards", { text: "Ship it", done: false, createdAt: Date.now() }, { in
 // Read (React)
 const { rows: cards = [] } = useQuery(db, "cards", {
   in: board,
-  index: "byCreatedAt",
+  orderBy: "createdAt",
   order: "asc",
 });
 
@@ -62,7 +62,7 @@ React apps: `pnpm add @vennbase/react @vennbase/core`.
 Define your collections once. TypeScript infers field types throughout the SDK automatically.
 
 ```ts
-import { collection, defineSchema, field, index } from "@vennbase/core";
+import { collection, defineSchema, field } from "@vennbase/core";
 
 export const schema = defineSchema({
   boards: collection({
@@ -73,12 +73,8 @@ export const schema = defineSchema({
   recentBoards: collection({
     in: ["user"],
     fields: {
-      boardRef: field.ref("boards"),
-      openedAt: field.number(),
-    },
-    indexes: {
-      byBoardRef: index("boardRef"),
-      byOpenedAt: index("openedAt"),
+      boardRef: field.ref("boards").key(),
+      openedAt: field.number().key(),
     },
   }),
   cards: collection({
@@ -86,10 +82,7 @@ export const schema = defineSchema({
     fields: {
       text: field.string(),
       done: field.boolean(),
-      createdAt: field.number(),
-    },
-    indexes: {
-      byCreatedAt: index("createdAt"),
+      createdAt: field.number().key(),
     },
   }),
 });
@@ -98,10 +91,9 @@ export type Schema = typeof schema;
 ```
 
 - `collection({ in: [...] })` — `in` lists the allowed parent collections.
-- `field.string()` / `.number()` / `.boolean()` / `.date()` / `.ref(collection)` — typed fields; chain `.optional()` or `.default(value)` as needed
-- `index(fieldName)` — makes a field queryable with ordering and range filters
+- `field.string()` / `.number()` / `.boolean()` / `.date()` / `.ref(collection)` — typed fields; chain `.key()`, `.optional()`, or `.default(value)` as needed
 
-Fields are for metadata that you want to query or index. The canonical CRDT pattern is: row fields hold metadata and row refs, while the CRDT document holds the collaborative value state for that row.
+Fields are for metadata that you want to query. Mark structural/queryable fields with `.key()`. The canonical CRDT pattern is: row fields hold metadata and row refs, while the CRDT document holds the collaborative value state for that row.
 
 ---
 
@@ -171,7 +163,7 @@ Queries never mean "all accessible rows". If a collection is not declared as `in
 ```ts
 // `recentBoards` is declared as `in: ["user"]`, so the current user scope is implicit.
 const recentBoards = await db.query("recentBoards", {
-  index: "byOpenedAt",
+  orderBy: "openedAt",
   order: "desc",
   limit: 10,
 });
@@ -181,7 +173,7 @@ const recentBoards = await db.query("recentBoards", {
 // Multi-parent queries run in parallel, then merge and sort their results
 const cards = await db.query("cards", {
   in: [todoBoard, bugsBoard],
-  index: "byCreatedAt",
+  orderBy: "createdAt",
   order: "asc",
   limit: 20,
 });
@@ -196,7 +188,7 @@ import { useQuery } from "@vennbase/react";
 
 const { rows: cards = [], status } = useQuery(db, "cards", {
   in: board,
-  index: "byCreatedAt",
+  orderBy: "createdAt",
   order: "asc",
 });
 ```
@@ -232,7 +224,7 @@ const joined = await db.joinInvite(submissionLink);
 // joined.role === "submitter"
 ```
 
-`"submitter"` members can create child rows under the shared parent but cannot read the parent row, query its children, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
+`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "keys" })` to see only key fields from sibling rows. They still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
 
 ---
 

@@ -256,12 +256,13 @@ describe("RowWorker", () => {
   });
 
   it("grants submitter invites write-only inbox access", async () => {
+    const kv = new InMemoryKv();
     const worker = new RowWorker(
       {
         owner: "owner",
         workerUrl: "https://worker.example",
       },
-      { kv: new InMemoryKv() },
+      { kv },
     );
 
     await createRow(worker, "project_submitter", "Inbox");
@@ -340,7 +341,12 @@ describe("RowWorker", () => {
           childOwner: "submitter",
           collection: "tasks",
           fields: {
+            status: "todo",
             title: "New request",
+            email: "private@example.com",
+          },
+          schema: {
+            keyFields: ["status"],
           },
         },
       }),
@@ -353,7 +359,6 @@ describe("RowWorker", () => {
       { endpoint: "sync/poll", action: "sync/poll", body: { sinceSequence: 0 } },
       { endpoint: "members/direct", action: "members/direct", body: undefined },
       { endpoint: "parents/list", action: "parents/list", body: {} },
-      { endpoint: "db/query", action: "db/query", body: { collection: "tasks" } },
       { endpoint: "invite-token/get", action: "invite-token/get", body: {} },
     ]) {
       const response = await worker.handle(
@@ -370,6 +375,38 @@ describe("RowWorker", () => {
       expect((await jsonBody(response)).code).toBe("UNAUTHORIZED");
     }
 
+    const submitterQuery = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_submitter", "db/query"),
+        action: "db/query",
+        rowId: "project_submitter",
+        username: "submitter",
+        body: { collection: "tasks", select: "keys", orderBy: "status" },
+      }),
+    );
+
+    expect(submitterQuery.status).toBe(200);
+    const submitterQueryBody = await jsonBody(submitterQuery);
+    expect(submitterQueryBody.rows).toEqual([
+      expect.objectContaining({
+        rowId: "task_submitter",
+        fields: { status: "todo" },
+      }),
+    ]);
+    expect((submitterQueryBody.rows as Array<Record<string, unknown>>)[0]).not.toHaveProperty("owner");
+
+    const submitterFullQuery = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_submitter", "db/query"),
+        action: "db/query",
+        rowId: "project_submitter",
+        username: "submitter",
+        body: { collection: "tasks" },
+      }),
+    );
+    expect(submitterFullQuery.status).toBe(401);
+    expect((await jsonBody(submitterFullQuery)).code).toBe("UNAUTHORIZED");
+
     const ownerQuery = await worker.handle(
       await authedRequest({
         url: rowEndpoint("project_submitter", "db/query"),
@@ -382,8 +419,12 @@ describe("RowWorker", () => {
 
     expect(ownerQuery.status).toBe(200);
     expect((await jsonBody(ownerQuery)).rows).toEqual([
-      expect.objectContaining({ rowId: "task_submitter", owner: "submitter" }),
+      expect.objectContaining({ rowId: "task_submitter", owner: "submitter", fields: { status: "todo" } }),
     ]);
+
+    await expect(kv.get("row:project_submitter:child:tasks:submitter:task_submitter")).resolves.toMatchObject({
+      fields: { status: "todo" },
+    });
   });
 
   it("grants contributors readable access and owned-child submission only", async () => {

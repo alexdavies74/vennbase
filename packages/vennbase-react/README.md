@@ -75,7 +75,7 @@ import { db } from "./db";
 function CardList({ board }: { board: BoardHandle }) {
   const { rows: cards = [], status } = useQuery(db, "cards", {
     in: board,
-    index: "byCreatedAt",
+    orderBy: "createdAt",
     order: "asc",
   });
 
@@ -94,7 +94,7 @@ Collections declared as `in: ["user"]` keep the same ergonomics in React: if you
 ```tsx
 function RecentBoards() {
   const { rows: recentBoards = [] } = useQuery(db, "recentBoards", {
-    index: "byOpenedAt",
+    orderBy: "openedAt",
     order: "desc",
     limit: 10,
   });
@@ -206,6 +206,21 @@ function SubmissionHandler() {
     },
   });
   return null;
+}
+```
+
+If a submitter needs anonymized sibling visibility, use `select: "keys"` so the hook returns projected rows containing only key fields:
+
+```tsx
+function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {
+  const { rows: bookings = [] } = useQuery(db, "bookings", {
+    in: availability,
+    select: "keys",
+    orderBy: "startTime",
+    order: "asc",
+  });
+
+  return <pre>{JSON.stringify(bookings.map((row) => row.fields))}</pre>;
 }
 ```
 

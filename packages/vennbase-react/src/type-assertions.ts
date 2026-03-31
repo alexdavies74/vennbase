@@ -1,9 +1,10 @@
 import {
+  type Vennbase,
   collection,
   defineSchema,
   field,
-  index,
   type AnyRowHandle,
+  type DbQueryProjectedRow,
   type RowHandle,
   type RowRef,
 } from "@vennbase/core";
@@ -20,10 +21,7 @@ const schema = defineSchema({
     in: ["dogs"],
     fields: {
       label: field.string(),
-      createdAt: field.number(),
-    },
-    indexes: {
-      byCreatedAt: index("createdAt"),
+      createdAt: field.number().key(),
     },
   }),
 });
@@ -40,17 +38,24 @@ declare const tagRows: TagRows;
 declare const dogHandle: DogHandle;
 declare const anyRowHandle: AnyRowHandle<TestSchema>;
 declare const tagRef: RowRef<"tags">;
-declare const anyClient: any;
+declare const anyClient: Vennbase<TestSchema>;
 
 const maybeAnyRowHandle: AnyRowHandle<TestSchema> | undefined = dogResult.data;
 const maybeDogHandle: DogHandle | undefined = dogResult.data;
 const fallbackTagRows: TagHandle[] = tagRows ?? [];
 const maybeTagHandle: TagHandle | undefined = tagRows?.[0];
+const projectedTags = useQuery(anyClient, "tags", {
+  in: dogHandle,
+  select: "keys",
+  orderBy: "createdAt",
+});
+const projectedTag: DbQueryProjectedRow<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
 const dogName: string = dogHandle.fields.name;
 void maybeAnyRowHandle;
 void maybeDogHandle;
 void maybeTagHandle;
 void fallbackTagRows;
+void projectedTag;
 void dogName;
 
 if (dogResult.data) {

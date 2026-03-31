@@ -6,7 +6,7 @@ import { loadSavedRow, saveRow } from "../src/saved-rows";
 import { VennbaseError } from "../src/errors";
 import { Vennbase } from "../src/vennbase";
 import { Query } from "../src/query";
-import { collection, defineSchema, field, index } from "../src/schema";
+import { collection, defineSchema, field } from "../src/schema";
 import type { BackendClient } from "../src/types";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 import { RowWorker } from "../src/worker/core";
@@ -70,20 +70,14 @@ const schema = defineSchema({
     in: ["projects"],
     fields: {
       title: field.string(),
-      status: field.string().default("todo"),
-    },
-    indexes: {
-      byStatus: index("status"),
+      status: field.string().key().default("todo"),
     },
   }),
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameRef: field.ref("projects"),
-      role: field.string(),
-    },
-    indexes: {
-      byGameRef: index("gameRef"),
+      gameRef: field.ref("projects").key(),
+      role: field.string().key(),
     },
   }),
 });
@@ -242,8 +236,7 @@ describe("Vennbase rows", () => {
     }));
 
     const records = await db.query("gameRecords", {
-      index: "byGameRef",
-      value: project.ref,
+      where: { gameRef: project.ref },
     });
     const parents = await record.in.list();
 
@@ -452,17 +445,26 @@ describe("Vennbase rows", () => {
 
     const task = await settle(bobDb.create("tasks", { title: "Need review" }, { in: joined.ref }));
 
-    const submitterQuery = bobDb.query("tasks", { in: joined.ref });
-    await expect(submitterQuery).rejects.toBeInstanceOf(VennbaseError);
-    await expect(submitterQuery).rejects.toMatchObject({
-      code: "UNAUTHORIZED",
-      status: 401,
-    });
+    const submitterRows = await bobDb.query("tasks", { in: joined.ref, select: "keys" });
+    expect(submitterRows).toEqual([
+      expect.objectContaining({
+        id: task.id,
+        fields: { status: "todo" },
+      }),
+    ]);
+    expect(submitterRows[0]).not.toHaveProperty("owner");
 
     const ownerRows = await aliceDb.query("tasks", { in: project.ref });
     expect(ownerRows).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: task.id }),
     ]));
+
+    const submitterFullQuery = bobDb.query("tasks", { in: joined.ref });
+    await expect(submitterFullQuery).rejects.toBeInstanceOf(VennbaseError);
+    await expect(submitterFullQuery).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
 
     const memberRole = await bobDb.getRow(task.ref).then((row) => row.members.effective());
     expect(memberRole).not.toEqual(expect.arrayContaining([
@@ -564,10 +566,7 @@ describe("Vennbase rows", () => {
         in: ["shelves"],
         fields: {
           title: field.string(),
-          rank: field.number(),
-        },
-        indexes: {
-          byRank: index("rank"),
+          rank: field.number().key(),
         },
       }),
     });
@@ -644,7 +643,7 @@ describe("Vennbase rows", () => {
           baseUrl: "https://worker.example",
         },
       ],
-      index: "byRank",
+      orderBy: "rank",
       order: "asc",
       limit: 2,
     });

@@ -13,7 +13,7 @@ import type {
   RowInput,
   RowFields,
 } from "./schema";
-import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec } from "./schema";
+import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec, pickKeyFieldValues } from "./schema";
 import type { Transport } from "./transport";
 import { normalizeParentRefs, normalizeRowRef, rowRefKey } from "./row-reference";
 import type { JsonValue } from "./types";
@@ -248,6 +248,8 @@ export class Rows<Schema extends DbSchema> {
   private async syncParentIndexes(row: RowInput, fields: Record<string, JsonValue>): Promise<void> {
     const rowRef = normalizeRowRef(row);
     const snapshot = await this.rowRuntime.getRow(rowRef);
+    const collectionSpec = getCollectionSpec(this.schema, rowRef.collection);
+    const keyFields = pickKeyFieldValues(collectionSpec, fields);
     this.optimisticStore.recordParents(rowRef, snapshot.parentRefs);
     await Promise.all(
       snapshot.parentRefs.map((parentRef) =>
@@ -255,7 +257,7 @@ export class Rows<Schema extends DbSchema> {
           childRef: rowRef,
           childOwner: snapshot.owner,
           collection: rowRef.collection,
-          fields,
+          fields: keyFields,
         }),
       ),
     );

@@ -3,8 +3,11 @@ import type {
   AuthSession,
   AnyRowHandle,
   CollectionName,
+  DbFullQueryOptions,
+  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryProjectedRow,
   DbSchema,
   MemberRole,
   VennbaseUser,
@@ -212,9 +215,9 @@ function snapshotSession(value: AuthSession): string {
 function snapshotQueryRows(value: Array<{
   id: string;
   collection: string;
-  owner: string;
   ref: RowRef;
   fields: unknown;
+  owner?: string;
 }>): string {
   return stableJsonStringify(
     value.map((row) => ({
@@ -541,4 +544,8 @@ export const snapshots = {
 export type QueryRows<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-> = Array<RowHandle<Schema, TCollection>>;
+  TOptions extends DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection> =
+    DbFullQueryOptions<Schema, TCollection>,
+> = TOptions extends DbKeyQueryOptions<Schema, TCollection>
+  ? Array<DbQueryProjectedRow<Schema, TCollection>>
+  : Array<RowHandle<Schema, TCollection>>;

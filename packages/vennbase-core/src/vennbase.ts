@@ -22,8 +22,11 @@ import type {
   CollectionName,
   DbCreateArgs,
   DbCreateOptions,
+  DbFullQueryOptions,
+  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryProjectedRow,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
@@ -221,15 +224,42 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
+    options: DbKeyQueryOptions<Schema, TCollection>,
+  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbFullQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>>> {
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  async query<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
     return this.queryModule.query(collection, options);
   }
 
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
+    options: DbKeyQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<DbQueryProjectedRow<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbFullQueryOptions<Schema, TCollection>,
     callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+  ): DbQueryWatchHandle;
+  watchQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);
   }

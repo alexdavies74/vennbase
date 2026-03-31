@@ -1,4 +1,4 @@
-import { collection, defineSchema, field, index } from "@vennbase/core";
+import { collection, defineSchema, field } from "@vennbase/core";
 
 export const schema = defineSchema({
   boards: collection({
@@ -9,12 +9,8 @@ export const schema = defineSchema({
   recentBoards: collection({
     in: ["user"],
     fields: {
-      boardRef: field.ref("boards"),
-      openedAt: field.number(),
-    },
-    indexes: {
-      byBoardRef: index("boardRef"),
-      byOpenedAt: index("openedAt"),
+      boardRef: field.ref("boards").key(),
+      openedAt: field.number().key(),
     },
   }),
   cards: collection({
@@ -22,10 +18,7 @@ export const schema = defineSchema({
     fields: {
       text: field.string(),
       done: field.boolean(),
-      createdAt: field.number(),
-    },
-    indexes: {
-      byCreatedAt: index("createdAt"),
+      createdAt: field.number().key(),
     },
   }),
 });
