@@ -526,10 +526,13 @@ describe("Vennbase rows", () => {
     expect(submitterRows).toEqual([
       expect.objectContaining({
         id: task.id,
+        collection: "tasks",
         fields: { status: "todo" },
       }),
     ]);
     expect(submitterRows[0]).not.toHaveProperty("owner");
+    expect(submitterRows[0]).not.toHaveProperty("baseUrl");
+    expect(submitterRows[0]).not.toHaveProperty("ref");
 
     const ownerRows = await aliceDb.query("tasks", { in: project.ref });
     expect(ownerRows).toEqual(expect.arrayContaining([
@@ -783,6 +786,102 @@ describe("Vennbase rows", () => {
 
     expect(rows.map((row) => row.id)).toEqual(["card_1", "card_2"]);
     expect(getRow.mock.calls.map(([row]) => row.id)).toEqual(["card_1", "card_2"]);
+  });
+
+  it("returns anonymous projected rows for key queries and dedupes multi-parent results by id", async () => {
+    const multiParentSchema = defineSchema({
+      shelves: collection({
+        fields: {
+          name: field.string(),
+        },
+      }),
+      cards: collection({
+        in: ["shelves"],
+        fields: {
+          title: field.string(),
+          rank: field.number().key(),
+        },
+      }),
+    });
+
+    const parentResponses = new Map([
+      ["shelf_1", {
+        rows: [
+          {
+            rowId: "card_2",
+            collection: "cards",
+            fields: { rank: 2 },
+          },
+          {
+            rowId: "card_3",
+            collection: "cards",
+            fields: { rank: 3 },
+          },
+        ],
+      }],
+      ["shelf_2", {
+        rows: [
+          {
+            rowId: "card_1",
+            collection: "cards",
+            fields: { rank: 1 },
+          },
+          {
+            rowId: "card_2",
+            collection: "cards",
+            fields: { rank: 2 },
+          },
+        ],
+      }],
+    ]);
+
+    const transport = {
+      row: vi.fn((parent: { id: string }) => ({
+        request: vi.fn().mockResolvedValue(parentResponses.get(parent.id)),
+      })),
+    };
+    const getRow = vi.fn();
+    const optimisticStore = new OptimisticStore();
+    const query = new Query(
+      transport as never,
+      { getRow } as never,
+      optimisticStore,
+      multiParentSchema,
+    );
+
+    const rows = await query.query("cards", {
+      in: [
+        {
+          id: "shelf_1",
+          collection: "shelves",
+          baseUrl: "https://worker.example",
+        },
+        {
+          id: "shelf_2",
+          collection: "shelves",
+          baseUrl: "https://worker.example",
+        },
+      ],
+      select: "keys",
+      orderBy: "rank",
+      order: "asc",
+      limit: 2,
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "card_1",
+        collection: "cards",
+        fields: { rank: 1 },
+      },
+      {
+        id: "card_2",
+        collection: "cards",
+        fields: { rank: 2 },
+      },
+    ]);
+    expect(rows[0]).not.toHaveProperty("ref");
+    expect(getRow).not.toHaveBeenCalled();
   });
 
   it("skips remote querying when the parent exists only as a pending optimistic create", async () => {

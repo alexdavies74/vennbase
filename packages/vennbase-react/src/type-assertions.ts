@@ -58,6 +58,9 @@ void fallbackTagRows;
 void projectedTag;
 void dogName;
 
+// @ts-expect-error key-query projections are anonymous and do not expose row refs
+void projectedTag?.ref;
+
 if (dogResult.data) {
   // @ts-expect-error parentless rows should not accept parent refs
   void dogResult.data.in.add(tagRef);

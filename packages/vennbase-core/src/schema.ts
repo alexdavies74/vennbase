@@ -372,7 +372,6 @@ export interface DbQueryProjectedRow<
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > {
   id: string;
-  ref: RowRef<TCollection>;
   collection: TCollection;
   fields: KeyRowFields<Schema, TCollection>;
 }

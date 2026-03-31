@@ -13,6 +13,7 @@ import {
   type CrdtConnectCallbacks,
   type CrdtConnection,
   type DbMemberInfo,
+  type DbQueryProjectedRow,
   type Vennbase,
   type RowRef,
 } from "@vennbase/core";
@@ -106,6 +107,14 @@ function makeTagRow(id: string, label: string) {
   );
 }
 
+function makeProjectedTagRow(id: string, createdAt: number): DbQueryProjectedRow<TestSchema, "tags"> {
+  return {
+    id,
+    collection: "tags",
+    fields: { createdAt },
+  };
+}
+
 class FakeDb {
   username = "alex";
   signedIn = true;
@@ -123,7 +132,7 @@ class FakeDb {
   failSession = false;
   dogName = "Rex";
   inviteDogName = "Buddy";
-  queryRows = [makeTagRow("tag_1", "friendly")];
+  queryRows: Array<ReturnType<typeof makeTagRow> | DbQueryProjectedRow<TestSchema, "tags">> = [makeTagRow("tag_1", "friendly")];
   nextQueryError: Error | null = null;
   nextQueryPromise: Promise<typeof this.queryRows> | null = null;
   activitySubscriber: (() => void) | null = null;
@@ -1147,6 +1156,33 @@ describe("@vennbase/react", () => {
 
     expect(db.queryCalls).toBe(2);
     expect(app.container.textContent).toContain("friendly,sleepy");
+    await app.unmount();
+  });
+
+  it("supports live key queries with anonymous projected rows", async () => {
+    const db = new FakeDb();
+    db.queryRows = [makeProjectedTagRow("tag_1", 1), makeProjectedTagRow("tag_2", 2)];
+
+    function Probe() {
+      const result = useQuery(db as unknown as Vennbase<TestSchema>, "tags", {
+        in: dogRef(),
+        select: "keys",
+        orderBy: "createdAt",
+        order: "asc",
+      });
+      return <div>{(result.rows ?? []).map((row) => `${row.id}:${row.fields.createdAt}`).join(",")}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+    expect(app.container.textContent).toContain("tag_1:1,tag_2:2");
+
+    db.queryRows = [makeProjectedTagRow("tag_1", 1), makeProjectedTagRow("tag_2", 2), makeProjectedTagRow("tag_3", 3)];
+    await act(async () => {
+      db.emitLocalMutation();
+      await flushMicrotasks();
+    });
+
+    expect(app.container.textContent).toContain("tag_1:1,tag_2:2,tag_3:3");
     await app.unmount();
   });
 

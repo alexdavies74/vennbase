@@ -51,7 +51,7 @@ The customer never holds a viewer link to `bookingRoots` itself, so they cannot 
 
 **Problem.** Customers need to see which slots are already taken so they can pick an open one — but they shouldn't see other customers' private booking details.
 
-**Trick.** Query with `select: "keys"`. Submitters can run this query against the inbox without needing read access to the parent. The response includes only fields declared `.key()` in the schema.
+**Trick.** Query with `select: "keys"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an anonymous projection: it includes only `id`, `collection`, and fields declared `.key()` in the schema.
 
 **In the UI** — reactive:
 
@@ -76,7 +76,7 @@ if (existing.some((b) => b.fields.slotStartMs === args.slotStartMs && b.fields.s
 }
 ```
 
-`select: "keys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows key-only sibling queries.
+`select: "keys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows key-only sibling queries. These projected rows are not locatable row refs; use a full query if you need to reopen a row later.
 
 ---
 

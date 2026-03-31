@@ -70,6 +70,9 @@ void db.query("tasks", { in: projectRef, select: "keys", orderBy: "status" }).th
   const first = rows[0] as DbQueryProjectedRow<typeof typeTestSchema, "tasks"> | undefined;
   const projectedStatus: string | undefined = first?.fields.status;
   void projectedStatus;
+
+  // @ts-expect-error key-query projections are anonymous and do not expose row refs
+  void first?.ref;
 });
 
 // @ts-expect-error invalid where field

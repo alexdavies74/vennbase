@@ -425,6 +425,8 @@ describe("RowWorker", () => {
       }),
     ]);
     expect((submitterQueryBody.rows as Array<Record<string, unknown>>)[0]).not.toHaveProperty("owner");
+    expect((submitterQueryBody.rows as Array<Record<string, unknown>>)[0]).not.toHaveProperty("baseUrl");
+    expect((submitterQueryBody.rows as Array<Record<string, unknown>>)[0]).not.toHaveProperty("ref");
 
     const submitterFullQuery = await worker.handle(
       await authedRequest({

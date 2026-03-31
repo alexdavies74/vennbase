@@ -1318,8 +1318,7 @@ export class RowWorker {
     return jsonResponse(200, {
       rows: rows.map((row) => ({
         rowId: row.rowId,
-        ...(select === "full" ? { owner: row.owner } : {}),
-        baseUrl: row.baseUrl,
+        ...(select === "full" ? { owner: row.owner, baseUrl: row.baseUrl } : {}),
         collection: row.collection,
         fields: row.fields,
       })),

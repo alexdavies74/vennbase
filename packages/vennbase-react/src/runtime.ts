@@ -215,16 +215,16 @@ function snapshotSession(value: AuthSession): string {
 function snapshotQueryRows(value: Array<{
   id: string;
   collection: string;
-  ref: RowRef;
   fields: unknown;
   owner?: string;
+  ref?: RowRef;
 }>): string {
   return stableJsonStringify(
     value.map((row) => ({
       id: row.id,
       collection: row.collection,
       owner: row.owner,
-      ref: row.ref,
+      ...("ref" in row && row.ref ? { ref: row.ref } : {}),
       fields: row.fields,
     })),
   );

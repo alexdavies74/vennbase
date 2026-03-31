@@ -1,7 +1,7 @@
 import { createAdaptivePoller } from "./polling";
 import { OptimisticStore } from "./optimistic-store";
 import { RowHandle } from "./row-handle";
-import { normalizeParentRefs, normalizeRowRef } from "./row-reference";
+import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-reference";
 import type {
   CollectionName,
   DbFullQueryOptions,
@@ -19,16 +19,25 @@ import type { Transport } from "./transport";
 import { encodeFieldValue } from "./key-encoding";
 import type { JsonValue } from "./types";
 
-interface DbQueryRow {
+interface DbQueryBaseRow {
   rowId: string;
-  owner?: string;
-  baseUrl: string;
   collection: string;
   fields: Record<string, JsonValue>;
 }
 
-interface DbQueryResponse {
-  rows: DbQueryRow[];
+interface DbFullQueryRow extends DbQueryBaseRow {
+  owner?: string;
+  baseUrl: string;
+}
+
+interface DbKeyQueryRow extends DbQueryBaseRow {}
+
+interface DbFullQueryResponse {
+  rows: DbFullQueryRow[];
+}
+
+interface DbKeyQueryResponse {
+  rows: DbKeyQueryRow[];
 }
 
 function matchesWhere(
@@ -63,8 +72,8 @@ function compareFieldValue(left: JsonValue | undefined, right: JsonValue | undef
 }
 
 function compareQueriedRows(
-  left: DbQueryRow,
-  right: DbQueryRow,
+  left: DbFullQueryRow,
+  right: DbFullQueryRow,
   orderBy: string | undefined,
   order: "asc" | "desc",
 ): number {
@@ -84,18 +93,35 @@ function compareQueriedRows(
   return order === "desc" ? -rowIdComparison : rowIdComparison;
 }
 
+function compareProjectedRows(
+  left: DbKeyQueryRow,
+  right: DbKeyQueryRow,
+  orderBy: string | undefined,
+  order: "asc" | "desc",
+): number {
+  if (orderBy) {
+    const comparison = compareFieldValue(left.fields[orderBy], right.fields[orderBy]);
+    if (comparison !== 0) {
+      return order === "desc" ? -comparison : comparison;
+    }
+  }
+
+  const rowIdComparison = left.rowId.localeCompare(right.rowId);
+  return order === "desc" ? -rowIdComparison : rowIdComparison;
+}
+
 function snapshotRows(rows: Array<{
   id: string;
   collection: string;
-  ref: RowRef;
   fields: unknown;
   owner?: string;
+  ref?: RowRef;
 }>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
     collection: row.collection,
     owner: row.owner,
-    ref: row.ref,
+    ...("ref" in row && row.ref ? { ref: row.ref } : {}),
     fields: row.fields,
   }));
   return stableJsonStringify(snapshot);
@@ -178,19 +204,46 @@ export class Query<Schema extends DbSchema> {
       orderBy,
     );
 
+    if (select === "keys") {
+      return this.runKeyQuery(collection, parentRefs, {
+        orderBy,
+        order: resolvedOptions.order ?? "asc",
+        limit,
+        where: resolvedOptions.where as Record<string, JsonValue> | undefined,
+      });
+    }
+
+    return this.runFullQuery(collection, parentRefs, {
+      orderBy,
+      order: resolvedOptions.order ?? "asc",
+      limit,
+      where: resolvedOptions.where as Record<string, JsonValue> | undefined,
+    });
+  }
+
+  private async runFullQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    parentRefs: RowRef[],
+    options: {
+      orderBy: string | undefined;
+      order: "asc" | "desc";
+      limit: number;
+      where: Record<string, JsonValue> | undefined;
+    },
+  ): Promise<Array<RowHandle<Schema, TCollection>>> {
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
         if (this.optimisticStore.hasPendingCreate(parent)) {
           return [];
         }
 
-        const response = await this.transport.row(parent).request<DbQueryResponse>("db/query", {
+        const response = await this.transport.row(parent).request<DbFullQueryResponse>("db/query", {
           collection,
-          select,
-          orderBy,
-          order: resolvedOptions.order ?? "asc",
-          limit,
-          where: resolvedOptions.where,
+          select: "full",
+          orderBy: options.orderBy,
+          order: options.order,
+          limit: options.limit,
+          where: options.where,
         });
 
         return response.rows.filter((row) => {
@@ -203,7 +256,7 @@ export class Query<Schema extends DbSchema> {
       }),
     );
 
-    const deduped = new Map<string, DbQueryRow>();
+    const deduped = new Map<string, DbFullQueryRow>();
     for (const result of parentResults) {
       for (const row of result) {
         const key = `${row.baseUrl}:${row.rowId}`;
@@ -219,11 +272,9 @@ export class Query<Schema extends DbSchema> {
         owner: record.owner,
         baseUrl: record.row.baseUrl,
         collection,
-        fields: select === "keys"
-          ? pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {})
-          : (this.optimisticStore.getLogicalFields(record.row) ?? {}),
+        fields: this.optimisticStore.getLogicalFields(record.row) ?? {},
       }))
-      .filter((row) => matchesWhere(row.fields, resolvedOptions.where as Record<string, JsonValue> | undefined));
+      .filter((row) => matchesWhere(row.fields, options.where));
 
     for (const row of optimisticRows) {
       const key = `${row.baseUrl}:${row.rowId}`;
@@ -237,34 +288,19 @@ export class Query<Schema extends DbSchema> {
         id: row.rowId,
         baseUrl: row.baseUrl,
       });
-      const effectiveFields = select === "keys"
-        ? pickKeyFieldValues(collectionSpec, localFields ?? row.fields)
-        : (localFields ?? row.fields);
-      return matchesWhere(effectiveFields, resolvedOptions.where as Record<string, JsonValue> | undefined);
+      return matchesWhere(localFields ?? row.fields, options.where);
     });
 
-    if (orderBy) {
+    if (options.orderBy) {
       mergedRows.sort((left, right) => compareQueriedRows(
         left,
         right,
-        orderBy,
-        resolvedOptions.order ?? "asc",
+        options.orderBy,
+        options.order,
       ));
     }
 
-    const limitedRows = mergedRows.slice(0, limit);
-    if (select === "keys") {
-      return limitedRows.map((row) => ({
-        id: row.rowId,
-        ref: normalizeRowRef({
-          id: row.rowId,
-          collection,
-          baseUrl: row.baseUrl,
-        }),
-        collection,
-        fields: pickKeyFieldValues(collectionSpec, row.fields),
-      })) as Array<DbQueryProjectedRow<Schema, TCollection>>;
-    }
+    const limitedRows = mergedRows.slice(0, options.limit);
 
     const hydrated = await Promise.all(
       limitedRows.map(async (row) => {
@@ -279,6 +315,87 @@ export class Query<Schema extends DbSchema> {
     );
 
     return hydrated;
+  }
+
+  private async runKeyQuery<TCollection extends CollectionName<Schema>>(
+    collection: TCollection,
+    parentRefs: RowRef[],
+    options: {
+      orderBy: string | undefined;
+      order: "asc" | "desc";
+      limit: number;
+      where: Record<string, JsonValue> | undefined;
+    },
+  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>> {
+    const collectionSpec = getCollectionSpec(this.schema, collection);
+    const parentResults = await Promise.all(
+      parentRefs.map(async (parent) => {
+        if (this.optimisticStore.hasPendingCreate(parent)) {
+          return [];
+        }
+
+        const response = await this.transport.row(parent).request<DbKeyQueryResponse>("db/query", {
+          collection,
+          select: "keys",
+          orderBy: options.orderBy,
+          order: options.order,
+          limit: options.limit,
+          where: options.where,
+        });
+
+        return response.rows.filter((row) => {
+          const optimisticRow = this.optimisticStore.findAnonymousQueryRow(collection, row.rowId);
+          return !(optimisticRow?.pendingParentRemoves.some((candidate) => sameRowRef(candidate, parent)) ?? false);
+        });
+      }),
+    );
+
+    const deduped = new Map<string, DbKeyQueryRow>();
+    for (const result of parentResults) {
+      for (const row of result) {
+        if (!deduped.has(row.rowId)) {
+          deduped.set(row.rowId, row);
+        }
+      }
+    }
+
+    const optimisticRows = this.optimisticStore.getOptimisticQueryRows(collection, parentRefs)
+      .map((record) => ({
+        rowId: record.row.id,
+        collection,
+        fields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
+      }))
+      .filter((row) => matchesWhere(row.fields, options.where));
+
+    for (const row of optimisticRows) {
+      if (!deduped.has(row.rowId)) {
+        deduped.set(row.rowId, row);
+      }
+    }
+
+    const mergedRows = Array.from(deduped.values()).map((row) => {
+      const optimisticRow = this.optimisticStore.findAnonymousQueryRow(collection, row.rowId);
+      const localFields = optimisticRow ? this.optimisticStore.getLogicalFields(optimisticRow.row) : null;
+      return {
+        ...row,
+        fields: pickKeyFieldValues(collectionSpec, localFields ?? row.fields),
+      };
+    }).filter((row) => matchesWhere(row.fields, options.where));
+
+    if (options.orderBy) {
+      mergedRows.sort((left, right) => compareProjectedRows(
+        left,
+        right,
+        options.orderBy,
+        options.order,
+      ));
+    }
+
+    return mergedRows.slice(0, options.limit).map((row) => ({
+      id: row.rowId,
+      collection,
+      fields: pickKeyFieldValues(collectionSpec, row.fields),
+    })) as Array<DbQueryProjectedRow<Schema, TCollection>>;
   }
 
   watchQuery<TCollection extends CollectionName<Schema>>(
@@ -309,9 +426,9 @@ export class Query<Schema extends DbSchema> {
         const nextSnapshot = snapshotRows(result as unknown as Array<{
           id: string;
           collection: string;
-          ref: RowRef;
           fields: unknown;
           owner?: string;
+          ref?: RowRef;
         }>);
 
         if (lastSnapshot === nextSnapshot) {

@@ -282,6 +282,12 @@ export class OptimisticStore {
     });
   }
 
+  findAnonymousQueryRow(collection: string, rowId: string): OptimisticRowRecord | null {
+    return Array.from(this.rows.values()).find((record) => {
+      return record.collection === collection && record.row.id === rowId;
+    }) ?? null;
+  }
+
   shouldExcludeFromParent(row: RowRef, parent: RowRef): boolean {
     const record = this.rows.get(rowKey(row));
     return record?.pendingParentRemoves.some((candidate) => sameRowRef(candidate, parent)) ?? false;

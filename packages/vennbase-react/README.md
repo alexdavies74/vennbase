@@ -209,7 +209,7 @@ function SubmissionHandler() {
 }
 ```
 
-If a submitter needs anonymized sibling visibility, use `select: "keys"` so the hook returns projected rows containing only key fields:
+If a submitter needs anonymized sibling visibility, use `select: "keys"` so the hook returns anonymous projected rows containing only `id`, `collection`, and key fields:
 
 ```tsx
 function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {

@@ -224,7 +224,7 @@ const joined = await db.joinInvite(submissionLink);
 // joined.role === "submitter"
 ```
 
-`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "keys" })` to see only key fields from sibling rows. They still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
+`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "keys" })` to see only anonymous key-field projections from sibling rows. Key-query results expose `id`, `collection`, and key fields only; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
 
 ---
 
