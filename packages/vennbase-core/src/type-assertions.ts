@@ -104,11 +104,11 @@ void db.getRow(project).then((row) => {
   const collection: "projects" = row.collection;
   void collection;
 });
-void db.createInviteToken(project, { role: "editor" });
-void db.createInviteToken(project, { role: "contributor" });
-void db.createInviteToken(project, { role: "submitter" });
-void db.createShareLink(project, "invite_token");
-void db.createSubmissionLink(project);
+const editorShareToken = db.createShareToken(project, "editor").value;
+void db.createShareToken(project, "contributor");
+void db.createShareToken(project, "submitter");
+void db.createShareLink(project, editorShareToken);
+void db.createShareLink(project, "submitter");
 void db.joinInvite("https://example.com/?db=%7B%7D");
 void db.listMembers(project);
 void db.saveRow("recent-project", project);

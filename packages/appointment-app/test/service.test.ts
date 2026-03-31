@@ -179,7 +179,7 @@ describe("service flows", () => {
           },
         });
       }),
-      createSubmissionLink: vi.fn(() => {
+      createShareLink: vi.fn(() => {
         events.push("submission-link");
         return settledReceipt("invite://booking-root");
       }),
@@ -235,7 +235,7 @@ describe("service flows", () => {
     const query = vi.fn(async () => []);
     const service = new AppointmentService({
       create,
-      createSubmissionLink: vi.fn(),
+      createShareLink: vi.fn(),
       getRow: vi.fn(),
       joinInvite: vi.fn(),
       parseInvite: vi.fn(),
@@ -286,7 +286,7 @@ describe("service flows", () => {
     }));
     const service = new AppointmentService({
       create: vi.fn(),
-      createSubmissionLink: vi.fn(),
+      createShareLink: vi.fn(),
       getRow: vi.fn(async () => ({
         id: "booking_1",
         ref: makeRef("booking_1", "bookings"),

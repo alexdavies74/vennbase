@@ -80,11 +80,11 @@ function tagRef(id: string): RowRef<"tags"> {
   };
 }
 
-function inviteUrl(row: RowRef, inviteToken = "invite_1"): string {
+function inviteUrl(row: RowRef, shareToken = "invite_1"): string {
   const url = new URL("http://localhost:3000/");
   url.searchParams.set(VENNBASE_INVITE_TARGET_PARAM, JSON.stringify({
     ref: row,
-    inviteToken,
+    shareToken,
   }));
   return url.toString();
 }
@@ -125,8 +125,8 @@ class FakeDb {
   getRowCalls = 0;
   acceptInviteCalls = 0;
   lastInviteInput: string | null = null;
-  getExistingInviteTokenCallRoles: string[] = [];
-  createInviteTokenCallRoles: string[] = [];
+  getExistingShareTokenCallRoles: string[] = [];
+  createShareTokenCallRoles: string[] = [];
   ensureReadyCalls = 0;
   signInCalls = 0;
   failSession = false;
@@ -242,14 +242,13 @@ class FakeDb {
     return [{ username: "alex", role: "editor", via: "direct" }];
   }
 
-  async getExistingInviteToken(_row?: RowRef, options: { role: "editor" | "contributor" | "viewer" | "submitter" }): Promise<null> {
-    this.getExistingInviteTokenCallRoles.push(options.role);
+  async getExistingShareToken(_row?: RowRef, role: "editor" | "contributor" | "viewer" | "submitter" = "editor"): Promise<null> {
+    this.getExistingShareTokenCallRoles.push(role);
     return null;
   }
 
-  createInviteToken(_row?: RowRef, options: { role: "editor" | "contributor" | "viewer" | "submitter" }) {
-    const role = options.role;
-    this.createInviteTokenCallRoles.push(role);
+  createShareToken(_row?: RowRef, role: "editor" | "contributor" | "viewer" | "submitter") {
+    this.createShareTokenCallRoles.push(role);
     const value = {
       token: role === "submitter" ? "invite_submitter" : role === "contributor" ? "invite_contributor" : "invite_1",
       rowId: "dog_1",
@@ -265,8 +264,8 @@ class FakeDb {
     };
   }
 
-  createShareLink(row: RowRef, token: string): string {
-    return inviteUrl(row, token);
+  createShareLink(row: RowRef, shareToken: { token: string }): string {
+    return inviteUrl(row, shareToken.token);
   }
 
   async saveRow(key: string, row: RowRef): Promise<void> {
@@ -687,8 +686,8 @@ describe("@vennbase/react", () => {
       expect(submitterLink?.shareLink).toBe(inviteUrl(rowRef, "invite_submitter"));
     });
 
-    expect(db.getExistingInviteTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
-    expect(db.createInviteTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
+    expect(db.getExistingShareTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
+    expect(db.createShareTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
     await app.unmount();
   });
 

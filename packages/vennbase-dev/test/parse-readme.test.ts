@@ -32,10 +32,10 @@ describe("parseReadme", () => {
   });
 
   it("preserves nested API subsections when more are added", () => {
-    const readme = `${loadCoreReadme()}\n\n### \`InviteToken\`\n\n| Member | Description |\n|--------|-------------|\n| \`.token\` | Invite token string. |\n`;
+    const readme = `${loadCoreReadme()}\n\n### \`ShareToken\`\n\n| Member | Description |\n|--------|-------------|\n| \`.token\` | Share token string. |\n`;
     const parsed = parseReadme(readme);
 
-    expect(parsed.reference.sections.at(-1)?.heading).toBe("`InviteToken`");
-    expect(parsed.reference.sections.at(-1)?.markdown).toContain("Invite token string.");
+    expect(parsed.reference.sections.at(-1)?.heading).toBe("`ShareToken`");
+    expect(parsed.reference.sections.at(-1)?.markdown).toContain("Share token string.");
   });
 });

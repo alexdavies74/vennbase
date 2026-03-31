@@ -3,16 +3,16 @@ import type { VennbaseOptions } from "./vennbase";
 import type { Transport } from "./transport";
 import type { MemberRole, RowInput, RowRef } from "./schema";
 import { normalizeRowRef } from "./row-reference";
-import type { ParsedInvite, InviteToken } from "./types";
+import type { ParsedInvite, ShareToken } from "./types";
 
 export const VENNBASE_INVITE_TARGET_PARAM = "db";
 
 interface GetInviteResponse {
-  inviteToken: InviteToken | null;
+  inviteToken: ShareToken | null;
 }
 
 interface PostInviteResponse {
-  inviteToken: InviteToken;
+  inviteToken: ShareToken;
 }
 
 interface GetInvitePayload {
@@ -31,14 +31,14 @@ function isRowRefLike(value: unknown): value is RowRef {
 }
 
 function parseInvitePayload(input: string): ParsedInvite {
-  const parsed = JSON.parse(input) as { ref?: unknown; inviteToken?: unknown };
+  const parsed = JSON.parse(input) as { ref?: unknown; shareToken?: unknown };
   if (!isRowRefLike(parsed?.ref)) {
     throw new Error("Invite payload must include a row ref.");
   }
 
   return {
     ref: normalizeRowRef(parsed.ref),
-    inviteToken: typeof parsed.inviteToken === "string" ? parsed.inviteToken : undefined,
+    shareToken: typeof parsed.shareToken === "string" ? parsed.shareToken : undefined,
   };
 }
 
@@ -49,21 +49,21 @@ export class Invites {
     private readonly identity: Identity,
   ) {}
 
-  async getExistingInviteToken(row: RowInput, options: { role: MemberRole }): Promise<InviteToken | null> {
+  async getExistingShareToken(row: RowInput, role: MemberRole): Promise<ShareToken | null> {
     const response = await this.transport.row(normalizeRowRef(row)).request<GetInviteResponse, GetInvitePayload>(
       "invite-token/get",
-      { role: options.role },
+      { role },
     );
     return response.inviteToken;
   }
 
-  async createInviteTokenRemote(row: RowInput, payload: InviteToken): Promise<InviteToken> {
+  async createShareTokenRemote(row: RowInput, payload: ShareToken): Promise<ShareToken> {
     const response = await this.transport.row(normalizeRowRef(row)).request<PostInviteResponse>("invite-token/create", payload);
 
     return response.inviteToken;
   }
 
-  createShareLink(row: RowInput, inviteToken: string): string {
+  createShareLink(row: RowInput, shareToken: string): string {
     const appBaseUrl =
       this.options.appBaseUrl ??
       (typeof window !== "undefined" ? window.location.origin : "http://localhost:5173");
@@ -71,7 +71,7 @@ export class Invites {
     const url = new URL("/", appBaseUrl);
     url.searchParams.set(VENNBASE_INVITE_TARGET_PARAM, JSON.stringify({
       ref: normalizeRowRef(row),
-      inviteToken,
+      shareToken,
     } satisfies ParsedInvite));
     return url.toString();
   }

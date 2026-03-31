@@ -25,7 +25,7 @@ const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() 
 const bookingRoot = bookingRootWrite.value;
 await bookingRootWrite.committed;
 
-const bookingSubmitterLink = await this.db.createSubmissionLink(bookingRoot.ref).committed;
+const bookingSubmitterLink = await this.db.createShareLink(bookingRoot.ref, "submitter").committed;
 this.db.create("schedules", {
   ...draftToScheduleFields(draft),
   bookingSubmitterLink,  // stored as a plain string field on the readable row

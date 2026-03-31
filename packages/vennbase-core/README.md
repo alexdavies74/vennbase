@@ -204,22 +204,28 @@ In React, prefer `useShareLink(db, row, { role: "editor" })` for the sender and 
 
 ```ts
 // 1. Generate a token for the row you want to share
-const token = db.createInviteToken(board, { role: "editor" }).value;
+const shareToken = db.createShareToken(board, "editor").value;
 
 // 2. Build a link the recipient can open in their browser
-const link = db.createShareLink(board, token.token);
+const link = db.createShareLink(board, shareToken);
 // → "https://yourapp.com/?db=..."
 
 // 3. Recipient opens the link; your app calls acceptInvite
 const sharedBoard = await db.acceptInvite(link);
 ```
 
-`acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
+If you do not need the token separately, you can create the link directly from a role:
+
+```ts
+const editorLink = db.createShareLink(board, "editor").value;
+```
+
+`acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, shareToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
 
 For blind inbox workflows, create a submitter link instead:
 
 ```ts
-const submissionLink = db.createSubmissionLink(board).value;
+const submissionLink = db.createShareLink(board, "submitter").value;
 const joined = await db.joinInvite(submissionLink);
 // joined.role === "submitter"
 ```
@@ -311,11 +317,11 @@ pnpm --filter appointment-app dev
 | `getRow(row)` | Fetch a row by typed reference. |
 | `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. |
 | `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a handle with `.disconnect()`. |
-| `createInviteToken(row, options)` | Generate a new invite token for a row and return a `MutationReceipt<InviteToken>`. Pass an explicit role such as `{ role: "editor" }` or `{ role: "submitter" }`. |
-| `createSubmissionLink(row)` | Create a blind-inbox submitter link and return it as a `MutationReceipt<string>`. |
-| `getExistingInviteToken(row, options)` | Return the existing token for the requested role if one exists, or `null`. |
-| `createShareLink(row, token)` | Build a shareable URL containing a serialized row ref and token. |
-| `parseInvite(input)` | Parse an invite URL into `{ ref, inviteToken? }`. |
+| `createShareToken(row, role)` | Generate a new share token for a row and return a `MutationReceipt<ShareToken>`. Pass a role such as `"editor"` or `"submitter"`. |
+| `getExistingShareToken(row, role)` | Return the existing token for the requested role if one exists, or `null`. |
+| `createShareLink(row, shareToken)` | Build a shareable URL containing a serialized row ref and token. |
+| `createShareLink(row, role)` | Generate a new share token for that role and return the resulting share link as a `MutationReceipt<string>`. |
+| `parseInvite(input)` | Parse an invite URL into `{ ref, shareToken? }`. |
 | `joinInvite(input)` | Join a row via invite URL or parsed invite object without opening it, and return `{ ref, role }`. |
 | `acceptInvite(input)` | Join a readable invite and return its handle. Use it for `"editor"`, `"contributor"`, or `"viewer"` invites; `"submitter"` invites should use `joinInvite(...)`. |
 | `saveRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |

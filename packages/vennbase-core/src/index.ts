@@ -13,9 +13,9 @@ export type {
   CrdtConnectCallbacks,
   CrdtConnection,
   DeployWorkerArgs,
-  InviteToken,
   JsonValue,
   ParsedInvite,
+  ShareToken,
   VennbaseUser,
   SyncMessage,
 } from "./types";

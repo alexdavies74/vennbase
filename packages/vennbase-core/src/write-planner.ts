@@ -1,6 +1,6 @@
 import type { MemberRole, RowRef } from "./schema";
 import { normalizeBaseUrl } from "./transport";
-import type { InviteToken, VennbaseUser, Row } from "./types";
+import type { ShareToken, VennbaseUser, Row } from "./types";
 import type { Transport } from "./transport";
 
 export interface PlannedRow {
@@ -36,7 +36,7 @@ export class WritePlanner {
     };
   }
 
-  planInviteToken(args: { rowId: string; invitedBy: string; role: MemberRole }): InviteToken {
+  planShareToken(args: { rowId: string; invitedBy: string; role: MemberRole }): ShareToken {
     return {
       token: this.transport.createId("invite"),
       rowId: args.rowId,

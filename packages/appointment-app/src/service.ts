@@ -32,7 +32,7 @@ import type {
 type AppointmentDbPort = Pick<
   AppointmentDb,
   | "create"
-  | "createSubmissionLink"
+  | "createShareLink"
   | "getRow"
   | "joinInvite"
   | "parseInvite"
@@ -321,7 +321,7 @@ export class AppointmentService {
     const bookingRoot = bookingRootWrite.value;
     await bookingRootWrite.committed;
 
-    const bookingSubmitterLink = await this.db.createSubmissionLink(bookingRoot.ref).committed;
+    const bookingSubmitterLink = await this.db.createShareLink(bookingRoot.ref, "submitter").committed;
     const scheduleWrite = this.db.create("schedules", {
       ...draftToScheduleFields(draft),
       bookingSubmitterLink,

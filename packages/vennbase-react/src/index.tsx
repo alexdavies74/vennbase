@@ -639,9 +639,9 @@ export function useShareLink<Schema extends DbSchema>(
     () => runtime.getLoadOnce(
       resourceKey as string,
       async () => {
-        const existing = await runtime.client.getExistingInviteToken(rowRef as RowRef, { role: options.role });
-        const invite = existing ?? runtime.client.createInviteToken(rowRef as RowRef, { role: options.role }).value;
-        return runtime.client.createShareLink(rowRef as RowRef, invite.token);
+        const existing = await runtime.client.getExistingShareToken(rowRef as RowRef, options.role);
+        const shareToken = existing ?? runtime.client.createShareToken(rowRef as RowRef, options.role).value;
+        return runtime.client.createShareLink(rowRef as RowRef, shareToken);
       },
     ),
   );

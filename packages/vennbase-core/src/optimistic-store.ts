@@ -1,7 +1,7 @@
 import type { MutationReceipt } from "./mutation-receipt";
 import type { DbMemberInfo, DbSchema, MemberRole, RowRef } from "./schema";
 import { rowRefKey, sameRowRef } from "./row-reference";
-import type { InviteToken, JsonValue } from "./types";
+import type { JsonValue, ShareToken } from "./types";
 
 type RowKey = string;
 
@@ -19,7 +19,7 @@ export interface OptimisticRowRecord {
   directMembers: Array<{ username: string; role: MemberRole }> | null;
   pendingMemberAdds: Array<{ username: string; role: MemberRole }>;
   pendingMemberRemoves: string[];
-  pendingInviteTokens: InviteToken[];
+  pendingShareTokens: ShareToken[];
 }
 
 function rowKey(row: Pick<RowRef, "id" | "baseUrl">): RowKey {
@@ -86,7 +86,7 @@ export class OptimisticStore {
       directMembers: null,
       pendingMemberAdds: [],
       pendingMemberRemoves: [],
-      pendingInviteTokens: [],
+      pendingShareTokens: [],
     };
 
     this.rows.set(key, created);
@@ -369,29 +369,29 @@ export class OptimisticStore {
     return Array.from(byUsername.values());
   }
 
-  setInviteToken(row: RowRef, inviteToken: InviteToken): void {
+  setShareToken(row: RowRef, shareToken: ShareToken): void {
     const record = this.ensureRecord({ row, owner: "", collection: row.collection });
-    const existingIndex = record.pendingInviteTokens.findIndex((candidate) => candidate.role === inviteToken.role);
+    const existingIndex = record.pendingShareTokens.findIndex((candidate) => candidate.role === shareToken.role);
     if (existingIndex >= 0) {
-      record.pendingInviteTokens[existingIndex] = inviteToken;
+      record.pendingShareTokens[existingIndex] = shareToken;
       return;
     }
 
-    record.pendingInviteTokens.push(inviteToken);
+    record.pendingShareTokens.push(shareToken);
   }
 
-  clearInviteToken(row: RowRef, role: MemberRole): void {
+  clearShareToken(row: RowRef, role: MemberRole): void {
     const record = this.rows.get(rowKey(row));
     if (!record) {
       return;
     }
-    record.pendingInviteTokens = record.pendingInviteTokens.filter(
+    record.pendingShareTokens = record.pendingShareTokens.filter(
       (candidate) => candidate.role !== role,
     );
   }
 
-  getInviteToken(row: RowRef, role: MemberRole): InviteToken | null {
-    return this.rows.get(rowKey(row))?.pendingInviteTokens.find(
+  getShareToken(row: RowRef, role: MemberRole): ShareToken | null {
+    return this.rows.get(rowKey(row))?.pendingShareTokens.find(
       (candidate) => candidate.role === role,
     ) ?? null;
   }

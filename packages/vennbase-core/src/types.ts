@@ -56,7 +56,7 @@ export interface SyncMessage {
   sequence: number;
 }
 
-export interface InviteToken {
+export interface ShareToken {
   token: string;
   rowId: string;
   invitedBy: string;
@@ -122,7 +122,7 @@ export interface CrdtConnection {
 
 export interface ParsedInvite {
   ref: RowRef;
-  inviteToken?: string;
+  shareToken?: string;
 }
 
 export interface DeployWorkerArgs {

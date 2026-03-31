@@ -47,9 +47,9 @@ import type {
   CrdtConnectCallbacks,
   CrdtConnection,
   DeployWorkerArgs,
-  InviteToken,
   JsonValue,
   ParsedInvite,
+  ShareToken,
   VennbaseUser,
 } from "./types";
 import { Sync } from "./sync";
@@ -73,10 +73,6 @@ interface ReadyMutationState {
   user: VennbaseUser;
   federationWorkerUrl: string;
   userScopeRow: RowRef<typeof USER_SCOPE_COLLECTION> | null;
-}
-
-interface InviteTokenOptions {
-  role: MemberRole;
 }
 
 const INTERNAL_USER_SCOPE_ROW_KEY = "__vennbase_user_scope_v1__";
@@ -264,29 +260,29 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     return this.queryModule.watchQuery(collection, options, callbacks);
   }
 
-  async getExistingInviteToken(row: RowInput, options: InviteTokenOptions): Promise<InviteToken | null> {
+  async getExistingShareToken(row: RowInput, role: MemberRole): Promise<ShareToken | null> {
     const rowRef = normalizeRowRef(row);
-    return this.optimisticStore.getInviteToken(rowRef, options.role)
-      ?? this.invitesModule.getExistingInviteToken(rowRef, options);
+    return this.optimisticStore.getShareToken(rowRef, role)
+      ?? this.invitesModule.getExistingShareToken(rowRef, role);
   }
 
-  createInviteToken(row: RowInput, options: InviteTokenOptions): MutationReceipt<InviteToken> {
+  createShareToken(row: RowInput, role: MemberRole): MutationReceipt<ShareToken> {
     const state = this.assertReadyForMutation();
     const rowRef = normalizeRowRef(row);
-    const inviteToken = this.writePlanner.planInviteToken({
+    const shareToken = this.writePlanner.planShareToken({
       rowId: rowRef.id,
       invitedBy: state.user.username,
-      role: options.role,
+      role,
     });
-    const receipt = createMutationReceipt(inviteToken);
-    this.optimisticStore.setInviteToken(rowRef, inviteToken);
+    const receipt = createMutationReceipt(shareToken);
+    this.optimisticStore.setShareToken(rowRef, shareToken);
     this.notifyLocalMutation();
 
     this.scheduleConfirmableWrite({
       key: `invite:${rowRefKey(rowRef)}`,
-      operation: () => this.invitesModule.createInviteTokenRemote(rowRef, inviteToken),
-      confirm: () => this.optimisticStore.clearInviteToken(rowRef, inviteToken.role),
-      rollback: () => this.optimisticStore.clearInviteToken(rowRef, inviteToken.role),
+      operation: () => this.invitesModule.createShareTokenRemote(rowRef, shareToken),
+      confirm: () => this.optimisticStore.clearShareToken(rowRef, shareToken.role),
+      rollback: () => this.optimisticStore.clearShareToken(rowRef, shareToken.role),
       dependencies: [this.optimisticStore.getPendingCreateDependency(rowRef)].filter((value): value is Promise<unknown> => value !== null),
       receipt,
     });
@@ -294,15 +290,17 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     return receipt;
   }
 
-  createShareLink(row: RowInput, inviteToken: string): string {
-    return this.invitesModule.createShareLink(row, inviteToken);
-  }
+  createShareLink(row: RowInput, role: MemberRole): MutationReceipt<string>;
+  createShareLink(row: RowInput, shareToken: ShareToken): string;
+  createShareLink(row: RowInput, roleOrShareToken: MemberRole | ShareToken): MutationReceipt<string> | string {
+    if (typeof roleOrShareToken !== "string") {
+      return this.invitesModule.createShareLink(row, roleOrShareToken.token);
+    }
 
-  createSubmissionLink(row: RowInput): MutationReceipt<string> {
-    const inviteReceipt = this.createInviteToken(row, { role: "submitter" });
-    const shareLink = this.createShareLink(row, inviteReceipt.value.token);
+    const shareTokenReceipt = this.createShareToken(row, roleOrShareToken);
+    const shareLink = this.invitesModule.createShareLink(row, shareTokenReceipt.value.token);
     const receipt = createMutationReceipt(shareLink);
-    inviteReceipt.committed
+    shareTokenReceipt.committed
       .then(() => {
         receipt.resolve(shareLink);
       })
@@ -319,7 +317,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
   async joinInvite(input: string | ParsedInvite): Promise<{ ref: RowRef; role: MemberRole }> {
     const invite = typeof input === "string" ? this.parseInvite(input) : input;
     const role = await this.rowRuntime.joinMembership(invite.ref, {
-      inviteToken: invite.inviteToken,
+      inviteToken: invite.shareToken,
     });
 
     return {

@@ -93,7 +93,7 @@ function dogHistoryRef(id: string): RowRef<"dogHistory"> {
 function shareLink(rowId: string): string {
   return `https://woof.example/?${VENNBASE_INVITE_TARGET_PARAM}=${encodeURIComponent(JSON.stringify({
     ref: dogRef(rowId),
-    inviteToken: "invite_1",
+    shareToken: "invite_1",
   }))}`;
 }
 

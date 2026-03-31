@@ -4,7 +4,6 @@ import type { WorkersHandler } from "@heyputer/puter.js";
 import type { DbFieldValue, MemberRole, RowRef } from "../schema";
 import type {
   ApiError,
-  InviteToken,
   JsonValue,
   SyncMessage,
   PrincipalProof,
@@ -12,6 +11,7 @@ import type {
   RequestProof,
   Row,
   RowSnapshot,
+  ShareToken,
   VerifiedPrincipal,
 } from "../types";
 
@@ -52,7 +52,7 @@ interface MessagesRequest {
   sinceSequence: number;
 }
 
-type InvitePayload = Pick<InviteToken, "token" | "rowId" | "createdAt" | "invitedBy" | "role">;
+type InvitePayload = Pick<ShareToken, "token" | "rowId" | "createdAt" | "invitedBy" | "role">;
 
 interface GetInviteRequest {
   role: MemberRole;
@@ -912,7 +912,7 @@ export class RowWorker {
         error(401, "INVITE_REQUIRED", "Invite token is required for non-owner first join");
       }
 
-      const invite = await this.kv.get<InviteToken>(tokenKey(rowId, body.inviteToken));
+      const invite = await this.kv.get<ShareToken>(tokenKey(rowId, body.inviteToken));
       if (!invite || invite.rowId !== rowId) {
         error(401, "INVITE_REQUIRED", "Invite token is invalid");
       }
@@ -951,7 +951,7 @@ export class RowWorker {
 
     const entries = await this.kv.list(tokenKeyPrefix(rowId));
     const existing = entries
-      .map((e) => e.value as InviteToken)
+      .map((e) => e.value as ShareToken)
       .find((t) =>
         t.invitedBy === principal.username
         && t.rowId === rowId
@@ -980,7 +980,7 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
     }
 
-    const inviteToken: InviteToken = {
+    const inviteToken: ShareToken = {
       token: payload.token,
       rowId: payload.rowId,
       invitedBy: principal.username,

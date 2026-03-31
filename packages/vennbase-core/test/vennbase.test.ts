@@ -531,7 +531,13 @@ describe("Vennbase", () => {
       id: "row_1",
       collection: "rows",
       baseUrl: "https://workers.puter.site/owner-federation",
-    }, "invite_1"));
+    }, {
+      token: "invite_1",
+      rowId: "row_1",
+      invitedBy: "owner",
+      createdAt: 1,
+      role: "editor",
+    }));
 
     expect(row.id).toBe("row_1");
     expect(contexts.length).toBeGreaterThan(0);
@@ -574,7 +580,13 @@ describe("Vennbase", () => {
       },
     });
 
-    const invite = db.createShareLink(rowRef, "invite_submitter");
+    const invite = db.createShareLink(rowRef, {
+      token: "invite_submitter",
+      rowId: rowRef.id,
+      invitedBy: "owner",
+      createdAt: 1,
+      role: "submitter",
+    });
     await expect(db.acceptInvite(invite)).rejects.toThrow("submitter access only");
     await expect(db.joinInvite(invite)).resolves.toEqual({
       ref: rowRef,
