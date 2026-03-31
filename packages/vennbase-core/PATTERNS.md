@@ -1,14 +1,14 @@
-# appointment-app — Advanced patterns
+# Advanced patterns — appointment-app
 
-This app is a scheduling tool: an owner publishes available time slots and customers self-book. It is deliberately minimal so three access-control patterns stay visible.
+The `packages/appointment-app` example demonstrates three access-control patterns for booking and claiming shared resources. This is a recipe-style walkthrough of each.
 
-Run it with:
+Run the app with:
 
 ```bash
 pnpm --filter appointment-app dev
 ```
 
-The schema lives in `src/schema.ts`. The service layer lives in `src/service.ts`.
+The schema lives in `packages/appointment-app/src/schema.ts`. The service layer lives in `packages/appointment-app/src/service.ts`.
 
 ---
 
@@ -18,7 +18,7 @@ The schema lives in `src/schema.ts`. The service layer lives in `src/service.ts`
 
 **Trick.** Store the submitter link for the hidden `bookingRoots` row as a plain string field on the *readable* `schedules` row. Any viewer of the schedule calls `joinInvite(...)` on that embedded link to gain submitter access to the inbox — without ever getting readable access to it.
 
-**Owner side — create the inbox and embed its link in the schedule** (`src/service.ts`):
+**Owner side — create the inbox and embed its link in the schedule:**
 
 ```ts
 const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() });
@@ -32,7 +32,7 @@ this.db.create("schedules", {
 });
 ```
 
-**Customer side — claim submitter access from the embedded link** (`src/service.ts`):
+**Customer side — claim submitter access from the embedded link:**
 
 ```ts
 async ensureBookingRootAccess(schedule: ScheduleHandle): Promise<BookingRootRef> {
@@ -53,7 +53,7 @@ The customer never holds a viewer link to `bookingRoots` itself, so they cannot 
 
 **Trick.** Query with `select: "keys"`. Submitters can run this query against the inbox without needing read access to the parent. The response includes only fields declared `.key()` in the schema.
 
-**In the UI** (`src/App.tsx` — `CustomerScheduleView`):
+**In the UI** — reactive:
 
 ```ts
 const { rows: sharedBookings = [] } = useQuery(db, "bookings", {
@@ -63,7 +63,7 @@ const { rows: sharedBookings = [] } = useQuery(db, "bookings", {
 });
 ```
 
-**Imperatively before writing**, to detect a double-booking race (`src/service.ts`):
+**Imperatively before writing**, to detect a double-booking race:
 
 ```ts
 const existing = await this.db.query("bookings", {
@@ -85,7 +85,6 @@ if (existing.some((b) => b.fields.slotStartMs === args.slotStartMs && b.fields.s
 `select: "keys"` only exposes fields declared `.key()`. The `bookings` schema is designed so key-only results contain just enough to render an occupied-slots calendar — nothing more:
 
 ```ts
-// src/schema.ts
 bookings: collection({
   in: ["bookingRoots"],
   fields: {
