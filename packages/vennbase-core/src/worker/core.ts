@@ -432,6 +432,8 @@ function sameRowRef(left: RowRef, right: RowRef): boolean {
 function roleRank(role: MemberRole | null): number {
   switch (role) {
     case "editor":
+      return 3;
+    case "contributor":
       return 2;
     case "viewer":
       return 1;
@@ -451,6 +453,10 @@ function normalizeStoredMemberRole(role: unknown): MemberRole | null {
     return "editor";
   }
 
+  if (role === "contributor") {
+    return "contributor";
+  }
+
   if (role === "viewer") {
     return "viewer";
   }
@@ -460,6 +466,18 @@ function normalizeStoredMemberRole(role: unknown): MemberRole | null {
   }
 
   return null;
+}
+
+function normalizeInheritedMemberRole(role: MemberRole | null): MemberRole | null {
+  if (role === "submitter") {
+    return null;
+  }
+
+  if (role === "contributor") {
+    return "viewer";
+  }
+
+  return role;
 }
 
 function deepEqualJson(left: JsonValue, right: JsonValue): boolean {
@@ -908,7 +926,7 @@ export class RowWorker {
 
     const requestedRole = normalizeStoredMemberRole(payload.role);
     if (!requestedRole) {
-      error(400, "BAD_REQUEST", "role must be editor, viewer, or submitter");
+      error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
     }
 
     const entries = await this.kv.list(tokenKeyPrefix(rowId));
@@ -939,7 +957,7 @@ export class RowWorker {
     }
 
     if (!normalizeStoredMemberRole(payload.role)) {
-      error(400, "BAD_REQUEST", "role must be editor, viewer, or submitter");
+      error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
     }
 
     const inviteToken: InviteToken = {
@@ -1139,7 +1157,7 @@ export class RowWorker {
     parentRowId: string,
     ctx: WorkerRequestContext,
   ): Promise<Response> {
-    const { payload: body, principal } = await this.requireProtectedPayload<UnregisterChildRequest>(request, {
+    const { payload: body, principal, auth } = await this.requireProtectedPayload<UnregisterChildRequest>(request, {
       action: "parents/unregister-child",
       rowId: parentRowId,
     });
@@ -1149,10 +1167,16 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "childRef, childOwner, and collection are required");
     }
 
-    const requesterCanManageParent = await this.hasRole(parentRowId, principal, ctx, ["editor"]);
-    if (!requesterCanManageParent && principal.username !== body.childOwner) {
-      error(401, "UNAUTHORIZED", "Only child owner or parent editor can unregister child");
-    }
+    const parentBaseUrl = inferFederationWorkerBaseUrlFromRequest(request.url, this.config.workerUrl);
+    await this.assertCanMaintainParentIndex({
+      auth,
+      childOwner: body.childOwner,
+      childRef,
+      ctx,
+      parentRowId,
+      parentBaseUrl,
+      principal,
+    });
 
     const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
     const existing = await this.kv.get<ChildEntry>(childKey);
@@ -1344,7 +1368,7 @@ export class RowWorker {
     await this.assertWriter(rowId, principal, ctx);
     const username = body.username?.trim();
     const role = body.role;
-    if (!username || !role || (role !== "editor" && role !== "viewer" && role !== "submitter")) {
+    if (!username || !role || (role !== "editor" && role !== "contributor" && role !== "viewer" && role !== "submitter")) {
       error(400, "BAD_REQUEST", "username and valid role are required");
     }
 
@@ -1470,14 +1494,15 @@ export class RowWorker {
           }
 
           for (const member of payload?.members ?? []) {
-            if (member.role === "submitter") {
+            const inheritedRole = normalizeInheritedMemberRole(member.role);
+            if (!inheritedRole) {
               continue;
             }
             const existing = members.get(member.username);
-            if (!existing || roleRank(member.role) > roleRank(existing.role)) {
+            if (!existing || roleRank(inheritedRole) > roleRank(existing.role)) {
               members.set(member.username, {
                 username: member.username,
-                role: member.role,
+                role: inheritedRole,
                 via: parentRef,
               });
             }
@@ -1506,11 +1531,11 @@ export class RowWorker {
     const canWriteChild = await this.canWriteChildRow(args);
     const ownsChild = args.principal.username === args.childOwner;
 
-    if ((parentRole === "editor" || parentRole === "viewer") && canWriteChild) {
+    if (parentRole === "editor" && canWriteChild) {
       return;
     }
 
-    if (parentRole === "submitter" && ownsChild && canWriteChild) {
+    if ((parentRole === "contributor" || parentRole === "submitter") && ownsChild && canWriteChild) {
       return;
     }
 
@@ -1520,12 +1545,12 @@ export class RowWorker {
         id: args.parentRowId,
         baseUrl: args.parentBaseUrl,
       }, args.auth.principal, args.ctx)
-      && (parentRole !== "submitter" || ownsChild)
+      && (parentRole === "editor" || ((parentRole === "contributor" || parentRole === "submitter") && ownsChild))
     ) {
       return;
     }
 
-    error(401, "UNAUTHORIZED", "Must be a readable parent member or child owner on a linked child row");
+    error(401, "UNAUTHORIZED", "Must be a parent editor or an owning contributor/submitter on a linked child row");
   }
 
   private async canWriteChildRow(args: {
@@ -1905,8 +1930,8 @@ export class RowWorker {
             return null;
           }
 
-          const role = normalizeStoredMemberRole(payload?.role);
-          if (role && role !== "submitter") {
+          const role = normalizeInheritedMemberRole(normalizeStoredMemberRole(payload?.role));
+          if (role) {
             return role;
           }
 
@@ -1944,8 +1969,7 @@ export class RowWorker {
     }
 
     const roles = await this.getMemberRoles(rowId);
-    const role = roles[principal.username] ?? "viewer";
-    return role;
+    return roles[principal.username] ?? "viewer";
   }
 
   private async getMembers(rowId: string): Promise<string[]> {

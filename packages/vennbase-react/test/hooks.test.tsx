@@ -237,16 +237,16 @@ class FakeDb {
     return [{ username: "alex", role: "editor", via: "direct" }];
   }
 
-  async getExistingInviteToken(_row?: RowRef, options: { role: "editor" | "viewer" | "submitter" }): Promise<null> {
+  async getExistingInviteToken(_row?: RowRef, options: { role: "editor" | "contributor" | "viewer" | "submitter" }): Promise<null> {
     this.getExistingInviteTokenCallRoles.push(options.role);
     return null;
   }
 
-  createInviteToken(_row?: RowRef, options: { role: "editor" | "viewer" | "submitter" }) {
+  createInviteToken(_row?: RowRef, options: { role: "editor" | "contributor" | "viewer" | "submitter" }) {
     const role = options.role;
     this.createInviteTokenCallRoles.push(role);
     const value = {
-      token: role === "submitter" ? "invite_submitter" : "invite_1",
+      token: role === "submitter" ? "invite_submitter" : role === "contributor" ? "invite_contributor" : "invite_1",
       rowId: "dog_1",
       invitedBy: "alex",
       createdAt: 1,
@@ -663,27 +663,27 @@ describe("@vennbase/react", () => {
     await app.unmount();
   });
 
-  it("uses separate share-link cache entries for submitter invites", async () => {
+  it("uses separate share-link cache entries for contributor and submitter invites", async () => {
     const db = new FakeDb();
     const rowRef = dogRef();
-    let editorLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
+    let contributorLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
     let submitterLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      editorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "editor" });
+      contributorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "contributor" });
       submitterLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "submitter" });
-      return <div>{editorLink.status}:{submitterLink.status}</div>;
+      return <div>{contributorLink.status}:{submitterLink.status}</div>;
     }
 
     const app = await renderApp(<Probe />);
 
     await waitFor(() => {
-      expect(editorLink?.shareLink).toBe(inviteUrl(rowRef, "invite_1"));
+      expect(contributorLink?.shareLink).toBe(inviteUrl(rowRef, "invite_contributor"));
       expect(submitterLink?.shareLink).toBe(inviteUrl(rowRef, "invite_submitter"));
     });
 
-    expect(db.getExistingInviteTokenCallRoles.sort()).toEqual(["editor", "submitter"]);
-    expect(db.createInviteTokenCallRoles.sort()).toEqual(["editor", "submitter"]);
+    expect(db.getExistingInviteTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
+    expect(db.createInviteTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
     await app.unmount();
   });
 

@@ -172,7 +172,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useShareLink` lazily generates (or reuses) a share link for a row. Always pass an explicit role such as `{ role: "editor" }` or `{ role: "submitter" }`. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, calls `acceptInvite`, waits for `onOpen`, and then clears the invite params.
+`useShareLink` lazily generates (or reuses) a share link for a row. Always pass an explicit role such as `{ role: "editor" }`, `{ role: "contributor" }`, or `{ role: "submitter" }`. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, calls `acceptInvite`, waits for `onOpen`, and then clears the invite params.
 
 ```tsx
 import { useShareLink, useAcceptInviteFromUrl } from "@vennbase/react";
@@ -245,7 +245,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isRefreshing, error, refreshError, refresh }` |
-| `useShareLink(db, row, options)` | db, row handle or row ref, `{ role: "editor" \| "viewer" \| "submitter" }` | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
+| `useShareLink(db, row, options)` | db, row handle or row ref, `{ role: "editor" \| "contributor" \| "viewer" \| "submitter" }` | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
 | `useAcceptInviteFromUrl(db, options?)` | db, `{ url?, clearInviteParams?, onOpen?, accept? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, url?, clearInviteParams?, loadSavedRow?, acceptInvite?, getRow? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |

@@ -324,7 +324,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "viewer" }).committed;
+    await aliceProject.members.add("bob", { role: "contributor" }).committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -341,7 +341,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "viewer" }).committed;
+    await aliceProject.members.add("bob", { role: "contributor" }).committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -375,7 +375,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "viewer" }).committed;
+    await aliceProject.members.add("bob", { role: "contributor" }).committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -397,12 +397,13 @@ describe("Vennbase rows", () => {
     });
   });
 
-  it("lets invite-joined writers update shared child rows", async () => {
+  it("lets invite-joined writers update shared child rows when they can maintain parent indexes", async () => {
     const network = new TestWorkerNetwork();
     const aliceDb = await buildReadyDb({ username: "alice", network });
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
+    await project.members.add("bob", { role: "editor" }).committed;
     const task = await settle(aliceDb.create("tasks", { title: "Review" }, { in: project.ref }));
     const invite = aliceDb.createInviteToken(task.ref, { role: "editor" });
     await invite.committed;
@@ -470,6 +471,28 @@ describe("Vennbase rows", () => {
         via: project.ref,
       }),
     ]));
+  });
+
+  it("blocks viewers from linking child rows into shared parents", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = await buildReadyDb({ username: "alice", network });
+    const bobDb = await buildReadyDb({ username: "bob", network });
+
+    const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
+    await aliceProject.members.add("bob", { role: "viewer" }).committed;
+
+    const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
+    const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
+
+    const rejectedLink = bobTask.in.add(aliceProject.ref).committed;
+    await expect(rejectedLink).rejects.toBeInstanceOf(VennbaseError);
+    await expect(rejectedLink).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
+
+    const tasks = await aliceDb.query("tasks", { in: aliceProject.ref });
+    expect(tasks.some((task) => task.id === bobTask.id)).toBe(false);
   });
 
   it("rejects unknown and non-scalar field payloads", async () => {

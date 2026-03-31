@@ -224,8 +224,6 @@ const sharedBoard = await db.acceptInvite(link);
 
 `acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, inviteToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
 
-Users who join through an invite token are added as direct `"editor"` members by default. `"viewer"` members can view rows but cannot call `update()` or send CRDT messages.
-
 For blind inbox workflows, create a submitter link instead:
 
 ```ts
@@ -321,14 +319,14 @@ pnpm --filter woof-app dev
 | `createShareLink(row, token)` | Build a shareable URL containing a serialized row ref and token. |
 | `parseInvite(input)` | Parse an invite URL into `{ ref, inviteToken? }`. |
 | `joinInvite(input)` | Join a row via invite URL or parsed invite object without opening it, and return `{ ref, role }`. |
-| `acceptInvite(input)` | Join a readable invite and return its handle. Invite joins become direct `"editor"` members by default. Submitter invites should use `joinInvite(...)`. |
+| `acceptInvite(input)` | Join a readable invite and return its handle. Use it for `"editor"`, `"contributor"`, or `"viewer"` invites; `"submitter"` invites should use `joinInvite(...)`. |
 | `saveRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
 | `openSavedRow(key)` | Re-open the saved row for the signed-in user, or `null`. |
 | `clearSavedRow(key)` | Remove the saved row for the signed-in user. |
 | `listMembers(row)` | Returns `string[]` of all member usernames. |
 | `listDirectMembers(row)` | Returns `{ username, role }[]` for direct members. |
 | `listEffectiveMembers(row)` | Returns resolved membership including grants inherited from parents. |
-| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `"editor"`, `"viewer"`, and `"submitter"`. `"editor"` can update fields, manage members, manage parents, and send CRDT messages; `"viewer"` is read-only; `"submitter"` is write-only for child creation under the shared parent. |
+| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `"editor"`, `"contributor"`, `"viewer"`, and `"submitter"`. `"editor"` can update fields, manage members, manage parents, and send CRDT messages; `"contributor"` can read the row and submit only rows they own under it; `"viewer"` is read-only; `"submitter"` is write-only for child creation under the shared parent. Inherited `"contributor"` access becomes `"viewer"` on descendants. |
 | `removeMember(row, username)` | Revoke a user's access and return a `MutationReceipt<void>`. |
 | `addParent(child, parent)` | Link a row to an additional parent after creation and return a `MutationReceipt<void>`. |
 | `removeParent(child, parent)` | Unlink a row from a parent and return a `MutationReceipt<void>`. |

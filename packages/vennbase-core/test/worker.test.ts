@@ -386,6 +386,267 @@ describe("RowWorker", () => {
     ]);
   });
 
+  it("grants contributors readable access and owned-child submission only", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    await createRow(worker, "project_contributor", "Roadmap");
+    await createRow(worker, "task_foreign", "Foreign task");
+
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "row/join"),
+        action: "row/join",
+        rowId: "project_contributor",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("task_foreign", "row/join"),
+        action: "row/join",
+        rowId: "task_foreign",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "members/add"),
+        action: "members/add",
+        rowId: "project_contributor",
+        username: "owner",
+        body: {
+          username: "contributor",
+          role: "contributor",
+        },
+      }),
+    );
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("task_foreign", "members/add"),
+        action: "members/add",
+        rowId: "task_foreign",
+        username: "owner",
+        body: {
+          username: "contributor",
+          role: "editor",
+        },
+      }),
+    );
+
+    const contributorRole = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "members/role"),
+        action: "members/role",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {},
+      }),
+    );
+    expect(contributorRole.status).toBe(200);
+    expect((await jsonBody(contributorRole)).role).toBe("contributor");
+
+    const readableFields = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "fields/get"),
+        action: "fields/get",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {},
+      }),
+    );
+    expect(readableFields.status).toBe(200);
+
+    const syncSend = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "sync/send"),
+        action: "sync/send",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          id: "msg_contributor",
+          rowId: "project_contributor",
+          body: { hello: "world" },
+          createdAt: 100,
+        },
+      }),
+    );
+    expect(syncSend.status).toBe(401);
+    expect((await jsonBody(syncSend)).code).toBe("UNAUTHORIZED");
+
+    const registerOwned = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          childRef: {
+            id: "task_owned",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "contributor",
+          collection: "tasks",
+          fields: {
+            title: "Owned task",
+          },
+        },
+      }),
+    );
+    expect(registerOwned.status).toBe(200);
+
+    const updateOwned = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "parents/update-index"),
+        action: "parents/update-index",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          childRef: {
+            id: "task_owned",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "contributor",
+          collection: "tasks",
+          fields: {
+            title: "Owned task updated",
+          },
+        },
+      }),
+    );
+    expect(updateOwned.status).toBe(200);
+
+    const registerForeign = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          childRef: {
+            id: "task_foreign",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "owner",
+          collection: "tasks",
+          fields: {
+            title: "Foreign task",
+          },
+        },
+      }),
+    );
+    expect(registerForeign.status).toBe(401);
+    expect((await jsonBody(registerForeign)).code).toBe("UNAUTHORIZED");
+
+    const unregisterOwned = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "parents/unregister-child"),
+        action: "parents/unregister-child",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          childRef: {
+            id: "task_owned",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "contributor",
+          collection: "tasks",
+        },
+      }),
+    );
+    expect(unregisterOwned.status).toBe(200);
+
+    const unregisterForeign = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_contributor", "parents/unregister-child"),
+        action: "parents/unregister-child",
+        rowId: "project_contributor",
+        username: "contributor",
+        body: {
+          childRef: {
+            id: "task_foreign",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "owner",
+          collection: "tasks",
+        },
+      }),
+    );
+    expect(unregisterForeign.status).toBe(401);
+    expect((await jsonBody(unregisterForeign)).code).toBe("UNAUTHORIZED");
+  });
+
+  it("blocks viewers from maintaining parent indexes", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    await createRow(worker, "project_viewer", "Roadmap");
+
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_viewer", "row/join"),
+        action: "row/join",
+        rowId: "project_viewer",
+        username: "owner",
+        body: { username: "owner" },
+      }),
+    );
+    await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_viewer", "members/add"),
+        action: "members/add",
+        rowId: "project_viewer",
+        username: "owner",
+        body: {
+          username: "viewer",
+          role: "viewer",
+        },
+      }),
+    );
+
+    const registerChild = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_viewer", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_viewer",
+        username: "viewer",
+        body: {
+          childRef: {
+            id: "task_viewer",
+            collection: "tasks",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "viewer",
+          collection: "tasks",
+          fields: {
+            title: "New task",
+          },
+        },
+      }),
+    );
+
+    expect(registerChild.status).toBe(401);
+    expect((await jsonBody(registerChild)).code).toBe("UNAUTHORIZED");
+  });
+
   it("does not inherit submitter membership onto child rows", async () => {
     const worker = new RowWorker(
       {
@@ -489,6 +750,133 @@ describe("RowWorker", () => {
     expect((await jsonBody(effective)).members).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ username: "submitter" })]),
     );
+  });
+
+  it("downgrades inherited contributor access to viewer on child rows", async () => {
+    const network = new WorkerNetwork();
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+    network.register("https://worker.example", worker);
+
+    const run = async (args: Parameters<typeof authedRequest>[0]) =>
+      network.dispatch("full", await authedRequest(args));
+
+    await run({
+      url: "https://worker.example/rows",
+      action: "rows/create",
+      rowId: "project_contributor_parent",
+      username: "owner",
+      body: {
+        rowId: "project_contributor_parent",
+        rowName: "Roadmap",
+      },
+    });
+    await run({
+      url: "https://worker.example/rows",
+      action: "rows/create",
+      rowId: "task_contributor_child",
+      username: "owner",
+      body: {
+        rowId: "task_contributor_child",
+        rowName: "Task",
+      },
+    });
+
+    await run({
+      url: rowEndpoint("project_contributor_parent", "row/join"),
+      action: "row/join",
+      rowId: "project_contributor_parent",
+      username: "owner",
+      body: { username: "owner" },
+    });
+    await run({
+      url: rowEndpoint("task_contributor_child", "row/join"),
+      action: "row/join",
+      rowId: "task_contributor_child",
+      username: "owner",
+      body: { username: "owner" },
+    });
+
+    await run({
+      url: rowEndpoint("task_contributor_child", "parents/link-parent"),
+      action: "parents/link-parent",
+      rowId: "task_contributor_child",
+      username: "owner",
+      body: {
+        parentRef: {
+          id: "project_contributor_parent",
+          collection: "projects",
+          baseUrl: "https://worker.example",
+        },
+      },
+    });
+
+    await run({
+      url: rowEndpoint("project_contributor_parent", "members/add"),
+      action: "members/add",
+      rowId: "project_contributor_parent",
+      username: "owner",
+      body: {
+        username: "contributor",
+        role: "contributor",
+      },
+    });
+
+    const inheritedRole = await run({
+      url: rowEndpoint("task_contributor_child", "members/role"),
+      action: "members/role",
+      rowId: "task_contributor_child",
+      username: "contributor",
+      body: {},
+    });
+    expect(inheritedRole.status).toBe(200);
+    expect((await jsonBody(inheritedRole)).role).toBe("viewer");
+
+    const effective = await run({
+      url: rowEndpoint("task_contributor_child", "members/effective"),
+      action: "members/effective",
+      rowId: "task_contributor_child",
+      username: "owner",
+      body: {},
+    });
+    expect(effective.status).toBe(200);
+    expect((await jsonBody(effective)).members).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        username: "contributor",
+        role: "viewer",
+        via: {
+          id: "project_contributor_parent",
+          collection: "projects",
+          baseUrl: "https://worker.example",
+        },
+      }),
+    ]));
+
+    const registerGrandchild = await run({
+      url: rowEndpoint("task_contributor_child", "parents/register-child"),
+      action: "parents/register-child",
+      rowId: "task_contributor_child",
+      username: "contributor",
+      body: {
+        childRef: {
+          id: "subtask_contributor",
+          collection: "tasks",
+          baseUrl: "https://worker.example",
+        },
+        childOwner: "contributor",
+        collection: "tasks",
+        fields: {
+          title: "Nested task",
+        },
+      },
+    });
+    expect(registerGrandchild.status).toBe(401);
+    expect((await jsonBody(registerGrandchild)).code).toBe("UNAUTHORIZED");
   });
 
   it("requires owner auth for row creation", async () => {

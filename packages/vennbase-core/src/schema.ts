@@ -410,7 +410,7 @@ export interface DbQueryWatchHandle {
   refresh(): Promise<void>;
 }
 
-export type MemberRole = "editor" | "viewer" | "submitter";
+export type MemberRole = "editor" | "contributor" | "viewer" | "submitter";
 
 export interface DbMemberInfo<Schema extends DbSchema = DbSchema> {
   username: string;

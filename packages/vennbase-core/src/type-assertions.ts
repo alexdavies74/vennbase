@@ -105,6 +105,7 @@ void db.getRow(project).then((row) => {
   void collection;
 });
 void db.createInviteToken(project, { role: "editor" });
+void db.createInviteToken(project, { role: "contributor" });
 void db.createInviteToken(project, { role: "submitter" });
 void db.createShareLink(project, "invite_token");
 void db.createSubmissionLink(project);

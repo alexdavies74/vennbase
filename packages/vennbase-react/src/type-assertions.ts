@@ -80,6 +80,7 @@ if (firstTag) {
 
   void useRow(anyClient, firstTag);
   void useShareLink(anyClient, firstTag, { role: "editor" });
+  void useShareLink(anyClient, firstTag, { role: "contributor" });
   void useShareLink(anyClient, firstTag, { role: "submitter" });
 }
 
