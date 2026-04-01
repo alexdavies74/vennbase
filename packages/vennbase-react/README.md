@@ -1,6 +1,6 @@
 # @vennbase/react
 
-React hooks and provider for [Vennbase](https://www.npmjs.com/package/@vennbase/core) — a multi-user database for apps that have no backend. Users sign in with their [Puter](https://puter.com) accounts. Their data lives in their Puter storage.
+React hooks and provider for [Vennbase](https://vennbase.dev) — a multi-user database for apps that have no backend. Users sign in with their [Puter](https://puter.com) accounts. Their data lives in their Puter storage.
 
 See [`@vennbase/core`](https://www.npmjs.com/package/@vennbase/core) for the full API and schema documentation.
 

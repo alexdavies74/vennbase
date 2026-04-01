@@ -9,7 +9,7 @@
     "url": "https://github.com/alexdavies74/vennbase.git",
     "directory": "packages/vennbase-react"
   },
-  "homepage": "https://github.com/alexdavies74/vennbase/tree/main/packages/vennbase-react#readme",
+  "homepage": "https://vennbase.dev",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
