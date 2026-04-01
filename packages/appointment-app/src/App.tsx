@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { service } from "./db";
 import {
+  BOOKING_COOLOFF_MS,
   buildCustomerSlotDays,
   buildOwnerBookingDays,
   createInitialDraft,
@@ -35,6 +36,22 @@ function logAppError(context: string, error: unknown, details?: Record<string, u
 
 function copyToClipboard(value: string): Promise<void> {
   return navigator.clipboard.writeText(value);
+}
+
+function useNow(tickMs = 1_000): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, tickMs);
+
+    return () => {
+      window.clearInterval(handle);
+    };
+  }, [tickMs]);
+
+  return nowMs;
 }
 
 export default function App() {
@@ -366,6 +383,7 @@ function OwnerScheduleView(props: {
   bookingRootRef: BookingRootRef;
 }) {
   const db = useVennbase<Schema>();
+  const nowMs = useNow();
   const [draft, setDraft] = useState(() => service.createDraftFromSchedule(props.schedule));
   const [copyStatus, setCopyStatus] = useState("");
   const updateSchedule = useMutation(async (nextDraft: ScheduleDraft) => service.updateSchedule(props.schedule, nextDraft));
@@ -383,8 +401,8 @@ function OwnerScheduleView(props: {
   }, [props.schedule.fields]);
 
   const groupedBookings = useMemo(
-    () => buildOwnerBookingDays(props.schedule, bookings as BookingHandle[]),
-    [bookings, props.schedule],
+    () => buildOwnerBookingDays(props.schedule, bookings as BookingHandle[], nowMs),
+    [bookings, nowMs, props.schedule],
   );
 
   return (
@@ -472,7 +490,9 @@ function OwnerScheduleView(props: {
                   {day.entries.map((entry) => (
                     <li key={entry.id} className="list-item booking-item">
                       <span>{entry.label}</span>
-                      <span className="booking-owner">@{entry.owner}</span>
+                      <span className="booking-owner">
+                        @{entry.owner} {entry.status === "pending" ? "(pending)" : ""}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -491,6 +511,7 @@ function CustomerScheduleView(props: {
   bookingRootRef: BookingRootRef;
 }) {
   const db = useVennbase<Schema>();
+  const nowMs = useNow();
   const [pendingAction, setPendingAction] = useState<{ key: string; type: "book" | "cancel" } | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const {
@@ -535,8 +556,8 @@ function CustomerScheduleView(props: {
   });
 
   const slotDays = useMemo(
-    () => buildCustomerSlotDays(props.schedule, sharedBookings, visibleSavedBookings),
-    [props.schedule, sharedBookings, visibleSavedBookings],
+    () => buildCustomerSlotDays(props.schedule, sharedBookings, visibleSavedBookings, nowMs),
+    [nowMs, props.schedule, sharedBookings, visibleSavedBookings],
   );
 
   return (
@@ -548,7 +569,7 @@ function CustomerScheduleView(props: {
         </div>
       </div>
       <p className="muted">
-        Available slots are shown for the next 14 days. Booking is immediate and other customers will see the slot become unavailable on their next poll.
+        Available slots are shown for the next 14 days. New claims stay pending for about {Math.round(BOOKING_COOLOFF_MS / 1_000)} seconds, then all clients agree on the earliest visible claim for that slot.
       </p>
       {slotDays.length === 0 ? (
         <p className="muted">No slots are available in the next 14 days.</p>
@@ -571,7 +592,7 @@ function CustomerScheduleView(props: {
                           setActionMessage("");
                           void reserve.mutate(slot)
                             .then(() => {
-                              setActionMessage("Slot booked.");
+                              setActionMessage("Claim submitted. Waiting for confirmation.");
                             })
                             .catch((error) => {
                               logAppError("book slot failed", error, {
@@ -591,9 +612,15 @@ function CustomerScheduleView(props: {
                       >
                         {pendingAction?.key === slot.key && pendingAction.type === "book" ? "Booking..." : "Book"}
                       </button>
-                    ) : slot.status === "owned" && slot.savedBooking ? (
+                    ) : slot.savedBooking ? (
                       <div className="slot-actions">
-                        <span className="slot-status">Booked</span>
+                        <span className="slot-status">
+                          {slot.status === "pending"
+                            ? "Pending"
+                            : slot.status === "confirmed"
+                              ? "Booked"
+                              : "Not confirmed"}
+                        </span>
                         <button
                           className="secondary small"
                           type="button"
@@ -624,7 +651,7 @@ function CustomerScheduleView(props: {
                         </button>
                       </div>
                     ) : (
-                      <span className="slot-status">Taken</span>
+                      <span className="slot-status">{slot.status === "pending" ? "Pending" : "Taken"}</span>
                     )}
                   </li>
                 ))}

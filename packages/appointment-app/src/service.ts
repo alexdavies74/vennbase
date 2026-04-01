@@ -51,7 +51,7 @@ export interface SlotOccurrence {
 }
 
 export interface CustomerSlot extends SlotOccurrence {
-  status: "available" | "taken" | "owned";
+  status: "available" | "pending" | "confirmed" | "superseded";
   savedBooking: SavedBookingHandle | null;
 }
 
@@ -67,6 +67,7 @@ export interface OwnerBookingEntry {
   dayKey: string;
   dayLabel: string;
   label: string;
+  status: "pending" | "confirmed";
 }
 
 export interface OwnerBookingDay {
@@ -75,8 +76,50 @@ export interface OwnerBookingDay {
   entries: OwnerBookingEntry[];
 }
 
+export const BOOKING_COOLOFF_MS = 5_000;
+
 function slotKey(startMs: number, endMs: number): string {
   return `${startMs}:${endMs}`;
+}
+
+interface BookingClaim {
+  id: string;
+  slotStartMs: number;
+  slotEndMs: number;
+  claimedAtMs: number;
+}
+
+function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
+  if (left.claimedAtMs !== right.claimedAtMs) {
+    return left.claimedAtMs - right.claimedAtMs;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function groupBookingClaims(
+  bookings: Array<Pick<BookingKeyRow, "id" | "fields">>,
+): Map<string, BookingClaim[]> {
+  const grouped = new Map<string, BookingClaim[]>();
+
+  for (const booking of bookings) {
+    const claim: BookingClaim = {
+      id: booking.id,
+      slotStartMs: booking.fields.slotStartMs,
+      slotEndMs: booking.fields.slotEndMs,
+      claimedAtMs: booking.fields.claimedAtMs,
+    };
+    const key = slotKey(claim.slotStartMs, claim.slotEndMs);
+    const claims = grouped.get(key) ?? [];
+    claims.push(claim);
+    grouped.set(key, claims);
+  }
+
+  for (const claims of grouped.values()) {
+    claims.sort(compareBookingClaims);
+  }
+
+  return grouped;
 }
 
 function sameRef(
@@ -188,31 +231,43 @@ export function generateSlotOccurrences(
 
 export function buildCustomerSlotDays(
   schedule: Pick<ScheduleHandle, "fields"> | { fields: Record<string, unknown> },
-  sharedBookings: Array<Pick<BookingKeyRow, "fields">>,
+  sharedBookings: Array<Pick<BookingKeyRow, "id" | "fields">>,
   savedBookings: Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
   nowMs = Date.now(),
 ): SlotDay[] {
-  const activeOwnedBookings = new Map<string, Pick<SavedBookingHandle, "fields" | "id" | "ref">>();
+  const activeOwnedBookings = new Map<string, Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>>();
   for (const saved of savedBookings) {
     if (saved.fields.status !== "active") {
       continue;
     }
 
-    activeOwnedBookings.set(slotKey(saved.fields.slotStartMs, saved.fields.slotEndMs), saved);
+    const key = slotKey(saved.fields.slotStartMs, saved.fields.slotEndMs);
+    const claims = activeOwnedBookings.get(key) ?? [];
+    claims.push(saved);
+    activeOwnedBookings.set(key, claims);
   }
 
-  const sharedKeys = new Set(
-    sharedBookings.map((booking) => slotKey(booking.fields.slotStartMs, booking.fields.slotEndMs)),
-  );
+  const sharedClaimsBySlot = groupBookingClaims(sharedBookings);
 
   const grouped = new Map<string, SlotDay>();
   for (const occurrence of generateSlotOccurrences(schedule, nowMs)) {
-    const ownedBooking = activeOwnedBookings.get(occurrence.key) ?? null;
-    const status = ownedBooking
-      ? "owned"
-      : sharedKeys.has(occurrence.key)
-        ? "taken"
-        : "available";
+    const ownedClaims = activeOwnedBookings.get(occurrence.key) ?? [];
+    const winningClaim = sharedClaimsBySlot.get(occurrence.key)?.[0] ?? null;
+    const matchingOwnedWinner = winningClaim
+      ? ownedClaims.find((saved) => saved.fields.bookingRef.id === winningClaim.id) ?? null
+      : null;
+    const representativeOwnedClaim = matchingOwnedWinner ?? ownedClaims[0] ?? null;
+    const status: CustomerSlot["status"] = !winningClaim
+      ? representativeOwnedClaim
+        ? "pending"
+        : "available"
+      : winningClaim.claimedAtMs + BOOKING_COOLOFF_MS > nowMs
+        ? "pending"
+        : matchingOwnedWinner
+          ? "confirmed"
+          : representativeOwnedClaim
+            ? "superseded"
+            : "confirmed";
 
     const existingDay = grouped.get(occurrence.dayKey) ?? {
       key: occurrence.dayKey,
@@ -223,7 +278,7 @@ export function buildCustomerSlotDays(
     existingDay.slots.push({
       ...occurrence,
       status,
-      savedBooking: ownedBooking as SavedBookingHandle | null,
+      savedBooking: representativeOwnedClaim as SavedBookingHandle | null,
     });
     grouped.set(occurrence.dayKey, existingDay);
   }
@@ -234,11 +289,19 @@ export function buildCustomerSlotDays(
 export function buildOwnerBookingDays(
   schedule: Pick<ScheduleHandle, "fields"> | { fields: Record<string, unknown> },
   bookings: Array<Pick<BookingHandle, "id" | "owner" | "fields">>,
+  nowMs = Date.now(),
 ): OwnerBookingDay[] {
   const timeZone = String(schedule.fields.timezone ?? "UTC");
+  const claimWinners = groupBookingClaims(bookings);
   const grouped = new Map<string, OwnerBookingDay>();
 
   for (const booking of bookings) {
+    const key = slotKey(booking.fields.slotStartMs, booking.fields.slotEndMs);
+    const winningClaim = claimWinners.get(key)?.[0] ?? null;
+    if (!winningClaim || winningClaim.id !== booking.id) {
+      continue;
+    }
+
     const startMs = booking.fields.slotStartMs;
     const endMs = booking.fields.slotEndMs;
     const day = getZonedDateTime(startMs, timeZone);
@@ -261,6 +324,7 @@ export function buildOwnerBookingDays(
       dayKey,
       dayLabel,
       label,
+      status: winningClaim.claimedAtMs + BOOKING_COOLOFF_MS > nowMs ? "pending" : "confirmed",
     });
     grouped.set(dayKey, existing);
   }
@@ -370,23 +434,10 @@ export class AppointmentService {
     slotStartMs: number;
     slotEndMs: number;
   }): Promise<BookingHandle> {
-    const existing = await this.db.query("bookings", {
-      in: args.bookingRootRef,
-      where: {
-        slotStartMs: args.slotStartMs,
-        slotEndMs: args.slotEndMs,
-      },
-      select: "keys",
-      limit: 1,
-    });
-    if (existing.length > 0) {
-      throw new Error("This slot is no longer available.");
-    }
-
     const bookingWrite = this.db.create("bookings", {
       slotStartMs: args.slotStartMs,
       slotEndMs: args.slotEndMs,
-      createdAt: Date.now(),
+      claimedAtMs: Date.now(),
     }, {
       in: args.bookingRootRef,
     });

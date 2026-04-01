@@ -33,7 +33,7 @@ export const schema = defineSchema({
     fields: {
       slotStartMs: field.number().key(),
       slotEndMs: field.number().key(),
-      createdAt: field.number(),
+      claimedAtMs: field.number().key(),
     },
   }),
   recentSchedules: collection({

@@ -63,20 +63,30 @@ const { rows: sharedBookings = [] } = useQuery(db, "bookings", {
 });
 ```
 
-**Imperatively before writing**, to detect a double-booking race:
+For capacity-limited booking, the recommended pattern is **write first, then arbitrate on the read path**:
 
 ```ts
-const existing = await this.db.query("bookings", {
+await this.db.create("bookings", {
+  slotStartMs: args.slotStartMs,
+  slotEndMs: args.slotEndMs,
+  claimedAtMs: Date.now(),
+}, {
   in: args.bookingRootRef,
-  select: "keys",
-  limit: 500,
-});
-if (existing.some((b) => b.fields.slotStartMs === args.slotStartMs && b.fields.slotEndMs === args.slotEndMs)) {
-  throw new Error("This slot is no longer available.");
-}
+}).committed;
 ```
 
+Then derive the active booking from the visible rows:
+
+1. group claims by `{ slotStartMs, slotEndMs }`
+2. sort each group by `(claimedAtMs, id)`
+3. use a fixed app-level cooloff window such as 5 seconds
+4. before `firstClaim.claimedAtMs + cooloffMs`, treat the slot as `pending`
+5. after cooloff, treat only the first claim as active
+6. if that claim disappears later, recompute from the remaining rows and the next claim becomes active
+
 `select: "keys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows key-only sibling queries. These projected rows are not locatable row refs; use a full query if you need to reopen a row later.
+
+This gives **honest convergence**, not fairness against malicious writers. All well-behaved clients will compute the same winner from the same visible rows, but a malicious writer can still bias the outcome by choosing favorable visible tiebreak values.
 
 ---
 
@@ -90,12 +100,12 @@ bookings: collection({
   fields: {
     slotStartMs: field.number().key(),  // exposed by select: "keys"
     slotEndMs:   field.number().key(),  // exposed by select: "keys"
-    createdAt:   field.number(),        // NOT a key — hidden from submitters
+    claimedAtMs: field.number().key(),  // visible tiebreak for read-side arbitration
   },
 }),
 ```
 
-**Design rule:** before marking a field `.key()`, ask whether it is safe for submitters to read. If not, leave `.key()` off and it will never appear in key-only queries, regardless of what is added to the schema later.
+**Design rule:** before marking a field `.key()`, ask whether it is safe for submitters to read. If not, leave `.key()` off and it will never appear in key-only queries, regardless of what is added to the schema later. For this pattern, `claimedAtMs` is intentionally visible so all clients can run the same deterministic tiebreak.
 
 ---
 
@@ -106,7 +116,8 @@ The app wires all three together into a single access-control surface the owner 
 1. **Owner creates a schedule.** During creation, a hidden `bookingRoots` row is created and its submitter link is stored in `schedule.fields.bookingSubmitterLink`.
 2. **Owner shares the schedule** using a viewer share link. Customers open it.
 3. **Customer joins the inbox** — Pattern 1. `ensureBookingRootAccess` calls `joinInvite` on the embedded link, returning a `BookingRootRef` with submitter access.
-4. **Customer queries occupied slots** — Patterns 2 and 3. `select: "keys"` returns `{ slotStartMs, slotEndMs }` from sibling bookings. `createdAt` and any future private fields are invisible.
-5. **Customer creates a booking** under the `BookingRootRef`. Only the owner (with full access) can read the complete booking records.
+4. **Customer creates a claim** under the `BookingRootRef`. No preflight race check is needed.
+5. **Customer queries visible claims** — Patterns 2 and 3. `select: "keys"` returns `{ slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which claim is active.
+6. **Owner and customers converge** on the same active booking from the same visible rows. Only the owner (with full access) can read the complete booking records.
 
 The owner never manually grants or revokes customer access. The submitter link embedded in the schedule is the entire access-control surface.

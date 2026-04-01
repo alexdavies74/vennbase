@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { CURRENT_USER } from "@vennbase/core";
 
-import { AppointmentService, buildCustomerSlotDays, createInitialDraft, generateSlotOccurrences } from "../src/service";
-import type { BookingHandle, SavedBookingHandle, ScheduleHandle } from "../src/schema";
+import {
+  AppointmentService,
+  BOOKING_COOLOFF_MS,
+  buildCustomerSlotDays,
+  buildOwnerBookingDays,
+  createInitialDraft,
+  generateSlotOccurrences,
+} from "../src/service";
+import type { BookingHandle, BookingKeyRow, SavedBookingHandle, ScheduleHandle } from "../src/schema";
 
 function settledReceipt<T>(value: T) {
   return {
@@ -65,6 +72,22 @@ function makeSchedule(fields: Partial<ScheduleHandle["fields"]> = {}): ScheduleH
   } as unknown as ScheduleHandle;
 }
 
+function makeBookingKeyRow(args: {
+  id: string;
+  slotStartMs: number;
+  slotEndMs: number;
+  claimedAtMs: number;
+}): Pick<BookingKeyRow, "id" | "fields"> {
+  return {
+    id: args.id,
+    fields: {
+      slotStartMs: args.slotStartMs,
+      slotEndMs: args.slotEndMs,
+      claimedAtMs: args.claimedAtMs,
+    },
+  };
+}
+
 describe("slot generation", () => {
   it("produces slots for open days and skips closed ones", () => {
     const schedule = makeSchedule({
@@ -98,39 +121,63 @@ describe("slot generation", () => {
 });
 
 describe("booking state", () => {
-  it("marks shared bookings as taken and active saved bookings as owned", () => {
+  it("marks shared bookings as pending during cooloff", () => {
     const schedule = makeSchedule();
     const nowMs = Date.UTC(2026, 2, 30, 8, 0, 0);
     const slots = generateSlotOccurrences(schedule, nowMs);
-    const ownedSlot = slots[0];
-    const takenSlot = slots[1];
+    const slot = slots[0];
 
     const slotDays = buildCustomerSlotDays(
       schedule,
       [
-        {
-          fields: {
-            slotStartMs: ownedSlot.startMs,
-            slotEndMs: ownedSlot.endMs,
-          },
-        },
-        {
-          fields: {
-            slotStartMs: takenSlot.startMs,
-            slotEndMs: takenSlot.endMs,
-          },
-        },
+        makeBookingKeyRow({
+          id: "booking_1",
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs: nowMs,
+        }),
+      ],
+      [],
+      nowMs,
+    );
+
+    const flattened = slotDays.flatMap((day) => day.slots);
+    expect(flattened.find((candidate) => candidate.key === slot.key)?.status).toBe("pending");
+  });
+
+  it("confirms the earliest claim after cooloff and supersedes later owned claims", () => {
+    const schedule = makeSchedule();
+    const nowMs = Date.UTC(2026, 2, 30, 8, 0, 0);
+    const slots = generateSlotOccurrences(schedule, nowMs);
+    const slot = slots[0];
+    const claimedAtMs = nowMs - BOOKING_COOLOFF_MS - 1_000;
+
+    const slotDays = buildCustomerSlotDays(
+      schedule,
+      [
+        makeBookingKeyRow({
+          id: "booking_1",
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs,
+        }),
+        makeBookingKeyRow({
+          id: "booking_2",
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs,
+        }),
       ],
       [
         {
-          id: "saved_1",
-          ref: makeRef("saved_1", "savedBookings"),
+          id: "saved_2",
+          ref: makeRef("saved_2", "savedBookings"),
           fields: {
             scheduleRef: schedule.ref,
-            bookingRef: makeRef("booking_1", "bookings"),
+            bookingRef: makeRef("booking_2", "bookings"),
             status: "active",
-            slotStartMs: ownedSlot.startMs,
-            slotEndMs: ownedSlot.endMs,
+            slotStartMs: slot.startMs,
+            slotEndMs: slot.endMs,
           },
         },
       ] as Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
@@ -138,8 +185,83 @@ describe("booking state", () => {
     );
 
     const flattened = slotDays.flatMap((day) => day.slots);
-    expect(flattened.find((slot) => slot.key === ownedSlot.key)?.status).toBe("owned");
-    expect(flattened.find((slot) => slot.key === takenSlot.key)?.status).toBe("taken");
+    expect(flattened.find((candidate) => candidate.key === slot.key)?.status).toBe("superseded");
+  });
+
+  it("promotes the next claim when the earlier one disappears", () => {
+    const schedule = makeSchedule();
+    const nowMs = Date.UTC(2026, 2, 30, 8, 0, 0);
+    const slots = generateSlotOccurrences(schedule, nowMs);
+    const slot = slots[0];
+    const claimedAtMs = nowMs - BOOKING_COOLOFF_MS - 1_000;
+
+    const slotDays = buildCustomerSlotDays(
+      schedule,
+      [
+        makeBookingKeyRow({
+          id: "booking_2",
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs,
+        }),
+      ],
+      [
+        {
+          id: "saved_2",
+          ref: makeRef("saved_2", "savedBookings"),
+          fields: {
+            scheduleRef: schedule.ref,
+            bookingRef: makeRef("booking_2", "bookings"),
+            status: "active",
+            slotStartMs: slot.startMs,
+            slotEndMs: slot.endMs,
+          },
+        },
+      ] as Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
+      nowMs,
+    );
+
+    const flattened = slotDays.flatMap((day) => day.slots);
+    expect(flattened.find((candidate) => candidate.key === slot.key)?.status).toBe("confirmed");
+  });
+});
+
+describe("owner booking state", () => {
+  it("shows only the active claim per slot and marks it pending during cooloff", () => {
+    const schedule = makeSchedule();
+    const nowMs = Date.UTC(2026, 2, 30, 8, 0, 0);
+    const slots = generateSlotOccurrences(schedule, nowMs);
+    const slot = slots[0];
+    const bookings = [
+      {
+        id: "booking_1",
+        owner: "alice",
+        fields: {
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs: nowMs,
+        },
+      },
+      {
+        id: "booking_2",
+        owner: "bob",
+        fields: {
+          slotStartMs: slot.startMs,
+          slotEndMs: slot.endMs,
+          claimedAtMs: nowMs + 1,
+        },
+      },
+    ] as Array<Pick<BookingHandle, "id" | "owner" | "fields">>;
+
+    const days = buildOwnerBookingDays(schedule, bookings, nowMs);
+
+    expect(days).toHaveLength(1);
+    expect(days[0]?.entries).toHaveLength(1);
+    expect(days[0]?.entries[0]).toMatchObject({
+      id: "booking_1",
+      owner: "alice",
+      status: "pending",
+    });
   });
 });
 
@@ -218,7 +340,7 @@ describe("service flows", () => {
       fields: {
         slotStartMs: 1,
         slotEndMs: 2,
-        createdAt: 3,
+        claimedAtMs: 3,
       },
     } as unknown as BookingHandle;
     const create = vi.fn((collection: string) => {
@@ -234,14 +356,13 @@ describe("service flows", () => {
         fields: {},
       });
     });
-    const query = vi.fn(async () => []);
     const service = new AppointmentService({
       create,
       createShareLink: vi.fn(),
       getRow: vi.fn(),
       joinInvite: vi.fn(),
       parseInvite: vi.fn(),
-      query,
+      query: vi.fn(),
       update: vi.fn(),
     } as never);
 
@@ -252,18 +373,10 @@ describe("service flows", () => {
       slotEndMs: 2,
     });
 
-    expect(query).toHaveBeenCalledWith("bookings", {
-      in: makeRef("root_1", "bookingRoots"),
-      where: {
-        slotStartMs: 1,
-        slotEndMs: 2,
-      },
-      select: "keys",
-      limit: 1,
-    });
     expect(create).toHaveBeenNthCalledWith(1, "bookings", expect.objectContaining({
       slotStartMs: 1,
       slotEndMs: 2,
+      claimedAtMs: expect.any(Number),
     }), {
       in: makeRef("root_1", "bookingRoots"),
     });
@@ -299,7 +412,7 @@ describe("service flows", () => {
         fields: {
           slotStartMs: 1,
           slotEndMs: 2,
-          createdAt: 3,
+          claimedAtMs: 3,
         },
         in: {
           add: vi.fn(),
