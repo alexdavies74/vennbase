@@ -1,9 +1,7 @@
 import type { KV, Puter } from "@heyputer/puter.js";
 import type { MemberRole, RowRef } from "./schema";
 
-export interface BackendKv extends Pick<KV, "get" | "set"> {
-  delete(key: string): Promise<unknown>;
-}
+export interface BackendKv extends Pick<KV, "get" | "set" | "del"> {}
 
 export type BackendClient = Pick<Puter, "auth" | "getUser" | "fs" | "workers"> & {
   kv?: BackendKv;

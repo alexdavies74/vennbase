@@ -34,7 +34,7 @@ async function deleteStoredRow(
     return;
   }
 
-  await kv.delete(entryKey).catch(() => undefined);
+  await kv.del(entryKey).catch(() => undefined);
 }
 
 export async function loadSavedRow(

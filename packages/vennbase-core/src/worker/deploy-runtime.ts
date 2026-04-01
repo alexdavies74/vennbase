@@ -1,9 +1,7 @@
 import { RowWorker, type WorkerKv } from "./core";
 import type { Auth, KV, Puter, WorkersHandler } from "@heyputer/puter.js";
 
-type DeployRuntimeKv = Pick<KV, "get" | "set" | "incr" | "list"> & {
-  delete?: (key: string) => Promise<void>;
-};
+type DeployRuntimeKv = Pick<KV, "get" | "set" | "incr" | "list" | "del">;
 
 type DeployRuntimeWorkers = Pick<WorkersHandler, "exec">;
 
@@ -58,11 +56,7 @@ const kv: WorkerKv = {
     return me.puter.kv.incr(key, amount);
   },
   delete(key: string): Promise<void> {
-    if (typeof me.puter.kv.delete !== "function") {
-      return Promise.resolve();
-    }
-
-    return me.puter.kv.delete(key);
+    return me.puter.kv.del(key).then(() => undefined);
   },
   async list(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
     const entries = await me.puter.kv.list(prefix, true);

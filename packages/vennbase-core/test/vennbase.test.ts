@@ -43,16 +43,17 @@ function scopedWorkerBase(hostHash: string): string {
 class MapKv {
   private readonly store = new Map<string, unknown>();
 
-  async get<T = unknown>(key: string): Promise<T | null> {
-    return this.store.has(key) ? (this.store.get(key) as T) : null;
+  async get<T = unknown>(key: string): Promise<T | undefined> {
+    return this.store.has(key) ? (this.store.get(key) as T) : undefined;
   }
 
-  async set<T = unknown>(key: string, value: T): Promise<void> {
+  async set<T = unknown>(key: string, value: T): Promise<boolean> {
     this.store.set(key, value);
+    return true;
   }
 
-  async delete(key: string): Promise<void> {
-    this.store.delete(key);
+  async del(key: string): Promise<boolean> {
+    return this.store.delete(key);
   }
 }
 
