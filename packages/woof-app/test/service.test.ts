@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { createYjsAdapter } from "@vennbase/yjs";
 
 import {
+  CURRENT_USER,
   RowHandle,
   CrdtConnectCallbacks,
   CrdtConnection,
@@ -104,7 +105,7 @@ class MockDb implements WoofDbPort {
   public createCalls: Array<{
     collection: string;
     fields: Record<string, unknown>;
-    options?: { in?: RowRef<"dogs"> };
+    options?: { in?: RowRef<"dogs"> | typeof CURRENT_USER };
   }> = [];
 
   private readonly rowFields = new Map<string, Record<string, unknown>>();
@@ -215,7 +216,11 @@ class MockDb implements WoofDbPort {
   }
 
   create(collection: "dogs", fields: DogRowHandle["fields"]): MutationReceipt<DogRowHandle>;
-  create(collection: "dogHistory", fields: DogHistoryRowHandle["fields"]): MutationReceipt<DogHistoryRowHandle>;
+  create(
+    collection: "dogHistory",
+    fields: DogHistoryRowHandle["fields"],
+    options: { in: typeof CURRENT_USER },
+  ): MutationReceipt<DogHistoryRowHandle>;
   create(
     collection: "tags",
     fields: TagRowHandle["fields"],
@@ -224,7 +229,7 @@ class MockDb implements WoofDbPort {
   create(
     collection: "dogs" | "dogHistory" | "tags",
     fields: Record<string, unknown>,
-    options?: { in?: RowRef<"dogs"> },
+    options?: { in?: RowRef<"dogs"> | typeof CURRENT_USER },
   ): MutationReceipt<DogRowHandle> | MutationReceipt<DogHistoryRowHandle> | MutationReceipt<TagRowHandle> {
     this.createCalls.push({ collection, fields, options });
     if (collection === "dogs") {
@@ -242,7 +247,7 @@ class MockDb implements WoofDbPort {
 
   async query(
     collection: "dogHistory",
-    options: { where?: { status?: string }; index?: "byDogRef"; value?: RowRef<"dogs">; limit?: number },
+    options: { in?: typeof CURRENT_USER; where?: { status?: string }; index?: "byDogRef"; value?: RowRef<"dogs">; limit?: number },
   ): Promise<DogHistoryRowHandle[]> {
     const rows = Array.from(this.historyRows.values());
     const filtered = options.index === "byDogRef"

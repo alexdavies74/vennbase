@@ -184,15 +184,19 @@ export class Query<Schema extends DbSchema> {
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
   ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
+    const collectionSpec = getCollectionSpec(this.schema, collection);
     const resolvedOptions = this.resolveOptions
       ? await this.resolveOptions(collection, options)
       : options;
     const parentRefs = normalizeParentRefs(resolvedOptions.in);
     if (parentRefs.length === 0) {
-      throw new Error("query requires at least one parent in scope");
+      throw new Error(
+        (collectionSpec.in ?? []).length === 0
+          ? `Collection ${String(collection)} cannot be queried because queries always require in and this collection has no parent scope.`
+          : `Collection ${String(collection)} query requires in.`,
+      );
     }
 
-    const collectionSpec = getCollectionSpec(this.schema, collection);
     const keyFields = getCollectionKeyFieldNames(collectionSpec);
     const orderBy = resolvedOptions.orderBy;
     const limit = Math.max(1, Math.min(200, resolvedOptions.limit ?? 50));

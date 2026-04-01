@@ -38,7 +38,7 @@ import type {
 } from "./schema";
 import { resolveBackend } from "./backend";
 import { missingPuterProvisioningMessage } from "./errors";
-import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, getCollectionSpec, hasImplicitUserScope, resolveCollectionName } from "./schema";
+import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, collectionAllowsCurrentUser, isCurrentUser, resolveCollectionName } from "./schema";
 import { stableJsonStringify } from "./stable-json";
 import { Transport } from "./transport";
 import type {
@@ -93,7 +93,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
   private readonly optimisticStore = new OptimisticStore();
   private readonly writeSettler = new WriteSettler();
   private readonly writePlanner: WritePlanner;
-  private readonly requiresImplicitUserScope: boolean;
+  private readonly requiresCurrentUserScope: boolean;
   private ready = false;
   private readinessPromise: Promise<void> | null = null;
   private pendingReadinessError: unknown | null = null;
@@ -108,7 +108,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     this.provisioning = new Provisioning(options, this.transport, this.identity, this.auth);
     this.syncRuntime();
     this.writePlanner = new WritePlanner(this.transport);
-    this.requiresImplicitUserScope = Object.values(options.schema).some((collectionSpec) => hasImplicitUserScope(collectionSpec));
+    this.requiresCurrentUserScope = Object.values(options.schema).some((collectionSpec) => collectionAllowsCurrentUser(collectionSpec));
     this.rowRuntime = new RowRuntime(
       this.transport,
       this.identity,
@@ -139,7 +139,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
       { getRow: (row) => this.rowsModule.getRow(row) },
       this.optimisticStore,
       options.schema,
-      (collection, queryOptions) => this.resolveImplicitQueryOptions(collection, queryOptions),
+      (collection, queryOptions) => this.resolveCurrentUserQueryOptions(collection, queryOptions),
     );
     this.startPrewarmIfSignedIn();
   }
@@ -193,7 +193,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     ...args: DbCreateArgs<Schema, TCollection>
   ): MutationReceipt<RowHandle<Schema, TCollection>> {
     const options = args[0];
-    const row = this.rowsModule.create(collection, fields, this.resolveImplicitCreateOptionsSync(collection, options));
+    const row = this.rowsModule.create(collection, fields, this.resolveCurrentUserCreateOptionsSync(collection, options));
     this.notifyLocalMutation();
     return row;
   }
@@ -550,7 +550,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
           user,
           federationWorkerUrl,
         });
-        const userScopeRow = this.requiresImplicitUserScope
+        const userScopeRow = this.requiresCurrentUserScope
           ? await this.ensureCurrentUserScopeRow(user.username, true)
           : null;
         this.readyMutationState = {
@@ -670,53 +670,73 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     ).catch(() => undefined);
   }
 
-  private resolveImplicitCreateOptionsSync<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
+  private resolveCurrentUserCreateOptionsSync<TCollection extends CollectionName<Schema>>(
+    _collection: TCollection,
     options: DbCreateOptions<Schema, TCollection> | undefined,
   ): DbCreateOptions<Schema, TCollection> | undefined {
-    if (options?.in !== undefined) {
+    if (options?.in === undefined) {
       return options;
     }
 
-    const collectionSpec = getCollectionSpec(this.options.schema, collection);
-    if (!hasImplicitUserScope(collectionSpec)) {
+    return {
+      ...options,
+      in: this.resolveCurrentUserParentInputSync(options.in),
+    } as DbCreateOptions<Schema, TCollection>;
+  }
+
+  private async resolveCurrentUserQueryOptions<TCollection extends CollectionName<Schema>>(
+    _collection: TCollection,
+    options: DbQueryOptions<Schema, TCollection>,
+  ): Promise<DbQueryOptions<Schema, TCollection>> {
+    if (options.in === undefined) {
       return options;
+    }
+
+    return {
+      ...options,
+      in: await this.resolveCurrentUserParentInput(options.in),
+    } as DbQueryOptions<Schema, TCollection>;
+  }
+
+  private resolveCurrentUserParentInputSync<TParentInput>(input: TParentInput): TParentInput {
+    if (Array.isArray(input)) {
+      return input.map((parent) => this.resolveCurrentUserParentSync(parent)) as TParentInput;
+    }
+
+    return this.resolveCurrentUserParentSync(input) as TParentInput;
+  }
+
+  private async resolveCurrentUserParentInput<TParentInput>(input: TParentInput): Promise<TParentInput> {
+    if (Array.isArray(input)) {
+      return Promise.all(input.map((parent) => this.resolveCurrentUserParent(parent))) as Promise<TParentInput>;
+    }
+
+    return this.resolveCurrentUserParent(input) as Promise<TParentInput>;
+  }
+
+  private resolveCurrentUserParentSync<TParentInput>(input: TParentInput): TParentInput | RowRef<typeof USER_SCOPE_COLLECTION> {
+    if (!isCurrentUser(input)) {
+      return input;
     }
 
     const state = this.assertReadyForMutation();
     if (!state.userScopeRow) {
-      throw new Error(`Collection ${String(collection)} requires implicit user scope, but the client has no user scope row.`);
+      throw new Error("CURRENT_USER requires a ready user scope row, but the client has no user scope row.");
     }
-    return {
-      ...options,
-      in: state.userScopeRow,
-    } as DbCreateOptions<Schema, TCollection>;
+
+    return state.userScopeRow;
   }
 
-  private async resolveImplicitQueryOptions<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<DbQueryOptions<Schema, TCollection>> {
-    if (options.in !== undefined) {
-      return options;
-    }
-
-    const collectionSpec = getCollectionSpec(this.options.schema, collection);
-    if (!hasImplicitUserScope(collectionSpec)) {
-      return options;
+  private async resolveCurrentUserParent<TParentInput>(input: TParentInput): Promise<TParentInput | RowRef<typeof USER_SCOPE_COLLECTION>> {
+    if (!isCurrentUser(input)) {
+      return input;
     }
 
     if (this.readyMutationState?.userScopeRow) {
-      return {
-        ...options,
-        in: this.readyMutationState.userScopeRow,
-      } as DbQueryOptions<Schema, TCollection>;
+      return this.readyMutationState.userScopeRow;
     }
 
-    return {
-      ...options,
-      in: await this.ensureCurrentUserScopeRow(),
-    } as DbQueryOptions<Schema, TCollection>;
+    return this.ensureCurrentUserScopeRow();
   }
 
   private async ensureCurrentUserScopeRow(

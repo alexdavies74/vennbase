@@ -1,3 +1,4 @@
+import { CURRENT_USER } from "@vennbase/core";
 import {
   createDefaultScheduleDraft,
   draftToScheduleFields,
@@ -282,6 +283,7 @@ export class AppointmentService {
 
   async rememberRecentSchedule(schedule: ScheduleHandle): Promise<void> {
     const existing = await this.db.query("recentSchedules", {
+      in: CURRENT_USER,
       where: { scheduleRef: schedule.ref },
       orderBy: "openedAt",
       order: "desc",
@@ -298,6 +300,8 @@ export class AppointmentService {
     await this.db.create("recentSchedules", {
       scheduleRef: schedule.ref,
       openedAt: now,
+    }, {
+      in: CURRENT_USER,
     }).committed;
   }
 
@@ -395,6 +399,8 @@ export class AppointmentService {
       status: "active",
       slotStartMs: args.slotStartMs,
       slotEndMs: args.slotEndMs,
+    }, {
+      in: CURRENT_USER,
     }).committed;
 
     return booking;

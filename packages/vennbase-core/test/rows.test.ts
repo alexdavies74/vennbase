@@ -6,7 +6,7 @@ import { loadSavedRow, saveRow } from "../src/saved-rows";
 import { VennbaseError } from "../src/errors";
 import { Vennbase } from "../src/vennbase";
 import { Query } from "../src/query";
-import { collection, defineSchema, field } from "../src/schema";
+import { CURRENT_USER, collection, defineSchema, field } from "../src/schema";
 import type { BackendClient } from "../src/types";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
 import { RowWorker } from "../src/worker/core";
@@ -225,7 +225,7 @@ describe("Vennbase rows", () => {
     expect(shareLink).toContain("db=");
   });
 
-  it("puts and queries user-scoped rows without explicit parents", async () => {
+  it("puts and queries user-scoped rows with CURRENT_USER", async () => {
     const network = new TestWorkerNetwork();
     const db = await buildReadyDb({ username: "alice", network });
     const project = await settle(db.create("projects", { name: "Game 1" }));
@@ -233,9 +233,12 @@ describe("Vennbase rows", () => {
     const record = await settle(db.create("gameRecords", {
       gameRef: project.ref,
       role: "owner",
+    }, {
+      in: CURRENT_USER,
     }));
 
     const records = await db.query("gameRecords", {
+      in: CURRENT_USER,
       where: { gameRef: project.ref },
     });
     const parents = await record.in.list();
@@ -255,6 +258,7 @@ describe("Vennbase rows", () => {
     const project = await settle(db.create("projects", { name: "Game 1" }));
 
     const records = await db.query("gameRecords", {
+      in: CURRENT_USER,
       where: { gameRef: project.ref },
       orderBy: "role",
       order: "asc",
@@ -335,12 +339,14 @@ describe("Vennbase rows", () => {
     await settle(db.create("gameRecords", {
       gameRef: firstProject.ref,
       role: "owner",
+    }, {
+      in: CURRENT_USER,
     }));
 
     const rememberedBefore = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
     expect(rememberedBefore).toBeTruthy();
 
-    await db.query("gameRecords", { where: { role: "owner" } });
+    await db.query("gameRecords", { in: CURRENT_USER, where: { role: "owner" } });
     const rememberedAfterReuse = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
     expect(rememberedAfterReuse).toEqual(rememberedBefore);
 
@@ -354,9 +360,11 @@ describe("Vennbase rows", () => {
     await settle(db.create("gameRecords", {
       gameRef: secondProject.ref,
       role: "viewer",
+    }, {
+      in: CURRENT_USER,
     }));
 
-    const recreated = await db.query("gameRecords", { where: { role: "viewer" } });
+    const recreated = await db.query("gameRecords", { in: CURRENT_USER, where: { role: "viewer" } });
     const rememberedAfterRecreate = await loadSavedRow(backend, INTERNAL_USER_SCOPE_ROW_KEY);
 
     expect(recreated).toHaveLength(1);
@@ -691,6 +699,29 @@ describe("Vennbase rows", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("rejects parentless collection queries locally", async () => {
+    const request = vi.fn();
+    const transport = {
+      row: vi.fn(() => ({
+        request,
+      })),
+    };
+    const optimisticStore = new OptimisticStore();
+    const query = new Query(
+      transport as never,
+      { getRow: vi.fn() } as never,
+      optimisticStore,
+      schema,
+    );
+
+    await expect(query.query("projects", {} as never)).rejects.toThrow(
+      "Collection projects cannot be queried because queries always require in and this collection has no parent scope.",
+    );
+
+    expect(transport.row).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("globally sorts indexed multi-parent queries before applying the final limit", async () => {
     const multiParentSchema = defineSchema({
       shelves: collection({
@@ -936,6 +967,34 @@ describe("Vennbase rows", () => {
 
     await vi.waitFor(() => {
       expect(changes).toContainEqual([task.id]);
+    });
+
+    watcher.disconnect();
+  });
+
+  it("watchQuery resolves CURRENT_USER end-to-end through Vennbase", async () => {
+    const network = new TestWorkerNetwork();
+    const db = await buildReadyDb({ username: "alice", network });
+    const project = await settle(db.create("projects", { name: "Game 1" }));
+    const record = await settle(db.create("gameRecords", {
+      gameRef: project.ref,
+      role: "owner",
+    }, {
+      in: CURRENT_USER,
+    }));
+
+    const changes: string[][] = [];
+    const watcher = db.watchQuery("gameRecords", {
+      in: CURRENT_USER,
+      where: { role: "owner" },
+    }, {
+      onChange: (rows) => {
+        changes.push(rows.map((row) => row.id));
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(changes).toContainEqual([record.id]);
     });
 
     watcher.disconnect();

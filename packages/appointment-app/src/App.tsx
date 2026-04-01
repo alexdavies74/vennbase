@@ -1,3 +1,4 @@
+import { CURRENT_USER } from "@vennbase/core";
 import { useAcceptInviteFromUrl, useMutation, useQuery, useRow, useSession, useShareLink, useVennbase } from "@vennbase/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -136,6 +137,7 @@ function LandingView(props: {
     rows: recentSchedules = [],
     error: recentSchedulesError,
   } = useQuery(db, "recentSchedules", {
+    in: CURRENT_USER,
     orderBy: "openedAt",
     order: "desc",
     limit: 100,
@@ -503,6 +505,7 @@ function CustomerScheduleView(props: {
     rows: savedBookings = [],
     error: savedBookingsError,
   } = useQuery(db, "savedBookings", {
+    in: CURRENT_USER,
     where: { scheduleRef: props.schedule.ref },
     orderBy: "slotStartMs",
     order: "asc",

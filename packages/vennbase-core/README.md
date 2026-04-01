@@ -154,15 +154,17 @@ db.update("cards", card, { done: true });
 
 ## Querying
 
-Vennbase queries always run within a known scope. For `cards`, that scope is a `board`, so you pass `in: board`. For collections declared as `in: ["user"]`, omitting `in` means "use the current signed-in user's built-in `user` row."
+Vennbase queries always run within a known scope. For `cards`, that scope is a `board`, so you pass `in: board`. For collections declared as `in: ["user"]`, pass `in: CURRENT_USER`.
 
-Queries never mean "all accessible rows". If a collection is not declared as `in: ["user"]`, omitting `in` is an error.
+Queries never mean "all accessible rows". `in` is always required, and collections not declared `in` another cannot be queried.
 
 ### Imperative
 
 ```ts
-// `recentBoards` is declared as `in: ["user"]`, so the current user scope is implicit.
+import { CURRENT_USER } from "@vennbase/core";
+
 const recentBoards = await db.query("recentBoards", {
+  in: CURRENT_USER,
   orderBy: "openedAt",
   order: "desc",
   limit: 10,
@@ -312,11 +314,11 @@ pnpm --filter appointment-app dev
 | `signIn()` | Start the Puter sign-in flow. Call this from a user gesture such as a button click. |
 | `ensureReady()` | Explicitly await authentication and provisioning before mutations. Most useful in imperative startup flows and before imperative writes. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
-| `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`; for collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Most apps use `.value`; await `.committed` when you need remote confirmation. |
+| `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`. For user-scoped collections, pass `{ in: CURRENT_USER }`. Most apps use `.value`; await `.committed` when you need remote confirmation. |
 | `update(collection, row, fields)` | Merge field updates onto a row optimistically and return a `MutationReceipt<RowHandle>` immediately. `row` can be a `RowHandle` or `RowRef`. |
 | `getRow(row)` | Fetch a row by typed reference. |
-| `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. |
-| `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. For collections declared as `in: ["user"]`, omitting `in` uses the current signed-in user's built-in `user` row. Returns a handle with `.disconnect()`. |
+| `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. Pass `in`, including `CURRENT_USER` for user-scoped collections. |
+| `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. Pass `in`, including `CURRENT_USER` for user-scoped collections. Returns a handle with `.disconnect()`. |
 | `createShareToken(row, role)` | Generate a new share token for a row and return a `MutationReceipt<ShareToken>`. Pass a role such as `"editor"` or `"submitter"`. |
 | `getExistingShareToken(row, role)` | Return the existing token for the requested role if one exists, or `null`. |
 | `createShareLink(row, shareToken)` | Build a shareable URL containing a serialized row ref and token. |

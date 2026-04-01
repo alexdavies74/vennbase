@@ -1,4 +1,4 @@
-import type { RowInput, RowRef } from "./schema";
+import { isCurrentUser, type CurrentUser, type RowInput, type RowRef } from "./schema";
 import { normalizeBaseUrl } from "./transport";
 
 function hasEmbeddedRowRef<TCollection extends string>(
@@ -19,13 +19,19 @@ export function normalizeRowRef<TCollection extends string>(
 }
 
 export function normalizeParentRefs<TCollection extends string>(
-  input: RowInput<TCollection> | RowInput<TCollection>[] | undefined,
+  input: RowInput<TCollection> | CurrentUser | Array<RowInput<TCollection> | CurrentUser> | undefined,
 ): RowRef<TCollection>[] {
   if (!input) {
     return [];
   }
 
-  return (Array.isArray(input) ? input : [input]).map((row) => normalizeRowRef(row));
+  return (Array.isArray(input) ? input : [input]).map((row) => {
+    if (isCurrentUser(row)) {
+      throw new Error("CURRENT_USER must be resolved before normalizing parent refs.");
+    }
+
+    return normalizeRowRef(row);
+  });
 }
 
 export function sameRowRef(

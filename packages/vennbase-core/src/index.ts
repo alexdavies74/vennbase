@@ -3,7 +3,7 @@ export { RowHandle } from "./row-handle";
 export type { AnyRowHandle } from "./row-handle";
 export { VennbaseError } from "./errors";
 export { VENNBASE_INVITE_TARGET_PARAM } from "./invites";
-export { collection, defineSchema, field } from "./schema";
+export { CURRENT_USER, collection, defineSchema, field } from "./schema";
 export type { VennbaseOptions } from "./vennbase";
 export type { MutationReceipt, MutationStatus } from "./mutation-receipt";
 export type {
@@ -25,6 +25,7 @@ export type {
   AnyRow,
   AnyRowRef,
   CollectionName,
+  CurrentUser,
   DbCreateOptions,
   DbFieldValue,
   DbFullQueryOptions,

@@ -1,4 +1,5 @@
 import {
+  CURRENT_USER,
   type Vennbase,
   collection,
   defineSchema,
@@ -22,6 +23,13 @@ const schema = defineSchema({
     fields: {
       label: field.string(),
       createdAt: field.number().key(),
+    },
+  }),
+  recentDogs: collection({
+    in: ["user"],
+    fields: {
+      dogRef: field.ref("dogs").key(),
+      openedAt: field.number().key(),
     },
   }),
 });
@@ -51,14 +59,28 @@ const projectedTags = useQuery(anyClient, "tags", {
   select: "keys",
   orderBy: "createdAt",
 });
+const recentDogs = useQuery(anyClient, "recentDogs", {
+  in: CURRENT_USER,
+  orderBy: "openedAt",
+});
 const projectedTag: DbQueryProjectedRow<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
+const recentDog: RowHandle<TestSchema, "recentDogs"> | undefined = recentDogs.rows?.[0];
 const dogName: string = dogHandle.fields.name;
 void maybeAnyRowHandle;
 void maybeDogHandle;
 void maybeTagHandle;
 void fallbackTagRows;
 void projectedTag;
+void recentDog;
 void dogName;
+
+// @ts-expect-error queries always require an explicit in option
+void useQuery(anyClient, "recentDogs", {
+  orderBy: "openedAt",
+});
+
+// @ts-expect-error parentless collections cannot be queried
+void useQuery(anyClient, "dogs", {});
 
 if (inviteResult?.kind === "opened") {
   const openedRow: AnyRowHandle<TestSchema> = inviteResult.row;

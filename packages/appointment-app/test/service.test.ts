@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { CURRENT_USER } from "@vennbase/core";
 
 import { AppointmentService, buildCustomerSlotDays, createInitialDraft, generateSlotOccurrences } from "../src/service";
 import type { BookingHandle, SavedBookingHandle, ScheduleHandle } from "../src/schema";
@@ -200,6 +201,7 @@ describe("service flows", () => {
       "create:recentSchedules",
     ]);
     expect(query).toHaveBeenCalledWith("recentSchedules", {
+      in: CURRENT_USER,
       where: { scheduleRef: schedule.ref },
       orderBy: "openedAt",
       order: "desc",
@@ -269,7 +271,9 @@ describe("service flows", () => {
       slotStartMs: 1,
       slotEndMs: 2,
       status: "active",
-    }));
+    }), {
+      in: CURRENT_USER,
+    });
   });
 
   it("unlinks the shared booking and marks the private record canceled", async () => {

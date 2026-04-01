@@ -1,5 +1,5 @@
 import { puter } from "@heyputer/puter.js";
-import type { CrdtAdapter, RowRef } from "@vennbase/core";
+import { CURRENT_USER, type CrdtAdapter, type RowRef } from "@vennbase/core";
 import { useCrdt, useAcceptInviteFromUrl, useShareLink, useMutation, useVennbase, useQuery, useRow, useSession } from "@vennbase/react";
 import { createYjsAdapter } from "@vennbase/yjs";
 import { useEffect, useRef, useState } from "react";
@@ -269,6 +269,7 @@ export function App() {
     "dogHistory",
     signedInUser
       ? {
+        in: CURRENT_USER,
         where: { status: "active" },
         limit: 1,
       }

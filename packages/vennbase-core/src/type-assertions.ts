@@ -1,5 +1,6 @@
 import { Vennbase } from "./vennbase";
 import {
+  CURRENT_USER,
   collection,
   defineSchema,
   field,
@@ -53,7 +54,9 @@ const db = new Vennbase({
 // @ts-expect-error tasks require an explicit project scope on insert
 void db.create("tasks", { title: "Ship v2" });
 void db.create("tasks", { title: "Ship v2", points: 3 }, { in: projectRef });
+// @ts-expect-error gameRecords require an explicit current-user scope on insert
 void db.create("gameRecords", { gameRef: projectRef, role: "owner" });
+void db.create("gameRecords", { gameRef: projectRef, role: "owner" }, { in: CURRENT_USER });
 void db.create("gameRecords", { gameRef: projectRef, role: "owner" }, { in: userRef });
 
 // @ts-expect-error tasks.title is required on insert
@@ -64,8 +67,10 @@ void db.create("tasks", { title: "Ship v2" }, { in: teamRef });
 
 void db.query("tasks", { in: projectRef, where: { status: "done" } });
 void db.query("tasks", { in: projectRef, orderBy: "status", order: "asc" });
+// @ts-expect-error gameRecords require an explicit current-user scope on query
 void db.query("gameRecords", { where: { role: "owner" } });
-void db.query("gameRecords", { where: { gameRef: projectRef } });
+void db.query("gameRecords", { in: CURRENT_USER, where: { role: "owner" } });
+void db.query("gameRecords", { in: CURRENT_USER, where: { gameRef: projectRef } });
 void db.query("tasks", { in: projectRef, select: "keys", orderBy: "status" }).then((rows) => {
   const first = rows[0] as DbQueryProjectedRow<typeof typeTestSchema, "tasks"> | undefined;
   const projectedStatus: string | undefined = first?.fields.status;
@@ -87,11 +92,18 @@ void db.query("tasks", { in: projectRef, orderBy: "title" });
 // @ts-expect-error tasks can only be queried under projects
 void db.query("tasks", { in: teamRef });
 
+// @ts-expect-error parentless collections cannot be queried because queries always require in
+void db.query("projects", {});
+
 // @ts-expect-error mixed parent collections still require an explicit scope
 void db.query("mixedRecords", { where: { label: "x" } });
+void db.query("mixedRecords", { in: CURRENT_USER, where: { label: "x" } });
+void db.query("mixedRecords", { in: [CURRENT_USER, projectRef], where: { label: "x" } });
 
 // @ts-expect-error mixed parent collections still require an explicit scope on insert
 void db.create("mixedRecords", { label: "x" });
+void db.create("mixedRecords", { label: "x" }, { in: CURRENT_USER });
+void db.create("mixedRecords", { label: "x" }, { in: [CURRENT_USER, projectRef] });
 
 const projectWrite = db.create("projects", { name: "Website" });
 const project = projectWrite.value;
@@ -114,7 +126,7 @@ void db.listMembers(project);
 void db.saveRow("recent-project", project);
 
 // @ts-expect-error ref fields still require a serializable RowRef
-void db.create("gameRecords", { gameRef: project, role: "owner" });
+void db.create("gameRecords", { gameRef: project, role: "owner" }, { in: CURRENT_USER });
 
 const taskWrite = db.create("tasks", { title: "Ship v2" }, { in: projectRef });
 const task = taskWrite.value;

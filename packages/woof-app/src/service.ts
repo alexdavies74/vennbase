@@ -3,6 +3,7 @@ import type {
   AnyRowHandle,
   VennbaseUser,
 } from "@vennbase/core";
+import { CURRENT_USER } from "@vennbase/core";
 import type { AI, ChatMessage, ChatResponse } from "@heyputer/puter.js";
 
 import type { DogRowHandle, TagRowHandle, WoofDb, WoofSchema } from "./schema";
@@ -140,6 +141,8 @@ export class WoofService {
     const historyRow = this.db.create("dogHistory", {
       dogRef: row.ref,
       status: "active",
+    }, {
+      in: CURRENT_USER,
     }).value;
     void this.clearActiveHistory(historyRow.id).catch((error) => {
       console.error("[woof-app] failed to clear prior active dog history rows", {
@@ -151,6 +154,7 @@ export class WoofService {
 
   private async clearActiveHistory(keepHistoryRowId?: string): Promise<void> {
     const activeHistoryRows = await this.db.query("dogHistory", {
+      in: CURRENT_USER,
       where: { status: "active" },
       limit: 20,
     });

@@ -1,6 +1,6 @@
 import { useAcceptInviteFromUrl, useMutation, useQuery, useRow, useSession, useShareLink } from "@vennbase/react";
 import { useState } from "react";
-import type { RowHandle } from "@vennbase/core";
+import { CURRENT_USER, type RowHandle } from "@vennbase/core";
 import { db } from "./db";
 import type { Schema } from "./schema";
 
@@ -10,9 +10,8 @@ export type RecentBoardHandle = RowHandle<Schema, "recentBoards">;
 export type CardHandle = RowHandle<Schema, "cards">;
 
 async function rememberRecentBoard(board: BoardHandle): Promise<void> {
-  // `recentBoards` is declared as `in: ["user"]`, so omitting `in` uses the
-  // current signed-in user's built-in user row.
   const existingRecentBoards = await db.query("recentBoards", {
+    in: CURRENT_USER,
     where: { boardRef: board.ref },
     limit: 1,
   });
@@ -29,6 +28,8 @@ async function rememberRecentBoard(board: BoardHandle): Promise<void> {
   const recentBoardWrite = db.create("recentBoards", {
     boardRef: board.ref,
     openedAt: Date.now(),
+  }, {
+    in: CURRENT_USER,
   });
   await recentBoardWrite.committed;
 }
@@ -111,6 +112,7 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
   });
   const openRecent = useMutation(async (recentBoard: RecentBoardHandle) => openRecentBoard(recentBoard));
   const { rows: recentBoards = [], error: recentBoardsError } = useQuery(db, "recentBoards", {
+    in: CURRENT_USER,
     orderBy: "openedAt",
     order: "desc",
     limit: 10,

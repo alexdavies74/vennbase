@@ -15,9 +15,23 @@ export type FieldType = "string" | "number" | "boolean" | "date" | "ref";
 export type DbRowFields = { [key: string]: DbFieldValue | undefined };
 
 export const BUILTIN_USER_SCOPE = "user" as const;
+export interface CurrentUser {
+  readonly __vennbase: "CURRENT_USER";
+}
+
+export const CURRENT_USER = Object.freeze({
+  __vennbase: "CURRENT_USER",
+}) as CurrentUser;
 
 type BuiltInUserScope = typeof BUILTIN_USER_SCOPE;
 type ReservedCollectionName = BuiltInUserScope;
+
+export function isCurrentUser(value: unknown): value is CurrentUser {
+  return typeof value === "object"
+    && value !== null
+    && "__vennbase" in value
+    && value.__vennbase === "CURRENT_USER";
+}
 
 export interface DbFieldBuilder<
   TValue extends DbFieldValue = DbFieldValue,
@@ -238,11 +252,6 @@ type HasDeclaredParents<
   TCollection extends CollectionName<Schema>,
 > = [DeclaredParentCollections<Schema, TCollection>] extends [never] ? false : true;
 
-type IsUserOnlyCollection<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
-> = [DeclaredParentCollections<Schema, TCollection>] extends [readonly [BuiltInUserScope]] ? true : false;
-
 export type CollectionName<Schema extends DbSchema> = keyof Schema & string;
 
 export type RowFields<
@@ -273,7 +282,11 @@ export type AnyRowRef<Schema extends DbSchema> = {
 }[CollectionName<Schema>];
 
 type ParentInput<TCollection extends string> =
-  [TCollection] extends [never] ? never : RowInput<TCollection> | RowInput<TCollection>[];
+  [TCollection] extends [never]
+    ? never
+    : Array<RowInput<TCollection> | (BuiltInUserScope extends TCollection ? CurrentUser : never)>
+      | RowInput<TCollection>
+      | (BuiltInUserScope extends TCollection ? CurrentUser : never);
 
 export type AllowedParentRef<
   Schema extends DbSchema,
@@ -295,30 +308,23 @@ export type DbCreateOptions<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > =
-  IsUserOnlyCollection<Schema, TCollection> extends true
+  HasDeclaredParents<Schema, TCollection> extends true
     ? {
-      in?: ParentInput<AllowedParentCollections<Schema, TCollection>>;
+      in: ParentInput<AllowedParentCollections<Schema, TCollection>>;
       name?: string;
     }
-    : HasDeclaredParents<Schema, TCollection> extends true
-      ? {
-        in: ParentInput<AllowedParentCollections<Schema, TCollection>>;
-        name?: string;
-      }
-      : {
-        in?: never;
-        name?: string;
-      };
+    : {
+      in?: never;
+      name?: string;
+    };
 
 export type DbCreateArgs<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > =
-  IsUserOnlyCollection<Schema, TCollection> extends true
-    ? [options?: DbCreateOptions<Schema, TCollection>]
-    : HasDeclaredParents<Schema, TCollection> extends true
-      ? [options: DbCreateOptions<Schema, TCollection>]
-      : [options?: DbCreateOptions<Schema, TCollection>];
+  HasDeclaredParents<Schema, TCollection> extends true
+    ? [options: DbCreateOptions<Schema, TCollection>]
+    : [options?: DbCreateOptions<Schema, TCollection>];
 
 type QueryFieldValue<TField extends AnyDbFieldBuilder> = Exclude<InferFieldValue<TField>, undefined>;
 
@@ -340,20 +346,13 @@ export type QueryWhere<
 type QueryBaseOptions<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-> = (
-  IsUserOnlyCollection<Schema, TCollection> extends true
-    ? {
-      in?: ParentInput<AllowedParentCollections<Schema, TCollection>>;
-    }
-    : {
-      in: ParentInput<AllowedParentCollections<Schema, TCollection>>;
-    }
-) & {
+> = HasDeclaredParents<Schema, TCollection> extends true ? {
+  in: ParentInput<AllowedParentCollections<Schema, TCollection>>;
   where?: QueryWhere<Schema, TCollection>;
   orderBy?: KeyFieldNames<Schema, TCollection>;
   order?: "asc" | "desc";
   limit?: number;
-};
+} : never;
 
 export type DbQuerySelect = "full" | "keys";
 
@@ -424,9 +423,9 @@ export function getCollectionSpec<
   return spec;
 }
 
-export function hasImplicitUserScope(collectionSpec: AnyDbCollectionDefinition): boolean {
+export function collectionAllowsCurrentUser(collectionSpec: AnyDbCollectionDefinition): boolean {
   const parents = collectionSpec.in ?? [];
-  return parents.length === 1 && parents[0] === BUILTIN_USER_SCOPE;
+  return parents.includes(BUILTIN_USER_SCOPE);
 }
 
 export function resolveCollectionName<Schema extends DbSchema>(

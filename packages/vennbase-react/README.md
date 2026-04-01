@@ -66,9 +66,10 @@ function AppShell() {
 
 `useQuery` polls for changes and re-renders automatically.
 
-`useQuery(db, "games", ...)` never means "all accessible games". If a collection is not declared as `in: ["user"]`, omitting `in` is an error.
+`useQuery(db, "games", ...)` never means "all accessible games". `in` is always required. User-scoped collections use `in: CURRENT_USER`.
 
 ```tsx
+import { CURRENT_USER } from "@vennbase/core";
 import { useQuery } from "@vennbase/react";
 import { db } from "./db";
 
@@ -89,11 +90,10 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
-Collections declared as `in: ["user"]` keep the same ergonomics in React: if you omit `in`, Vennbase queries inside the current signed-in user's built-in `user` row.
-
 ```tsx
 function RecentBoards() {
   const { rows: recentBoards = [] } = useQuery(db, "recentBoards", {
+    in: CURRENT_USER,
     orderBy: "openedAt",
     order: "desc",
     limit: 10,
@@ -255,7 +255,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useCurrentUser(db)` | `Vennbase` instance | `{ data: VennbaseUser, status, isRefreshing, error, refreshError, refresh }` |
 | `useVennbase()` | — | `Vennbase` instance from context |
 | `useVennbaseReady(db)` | `Vennbase` instance | `{ status, isRefreshing, error, refreshError, refresh }` — resolves when auth + provisioning complete |
-| `useQuery(db, collection, options)` | db, collection name, query options | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` |
+| `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` |
 | `useRow(db, row)` | db, row handle or row ref | `{ data: RowHandle, status, isRefreshing, error, refreshError, refresh }` |
 | `useParents(db, row)` | db, row handle or row ref | `{ data: RowRef[], status, isRefreshing, error, refreshError, refresh }` |
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |
