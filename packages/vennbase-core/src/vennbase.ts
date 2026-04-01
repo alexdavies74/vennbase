@@ -20,13 +20,13 @@ import { WriteSettler } from "./write-settler";
 import type {
   AllowedParentCollections,
   CollectionName,
+  DbAnonymousProjection,
+  DbAnonymousQueryOptions,
   DbCreateArgs,
   DbCreateOptions,
   DbFullQueryOptions,
-  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
-  DbQueryProjectedRow,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
@@ -220,8 +220,8 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbKeyQueryOptions<Schema, TCollection>,
-  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>>;
+    options: DbAnonymousQueryOptions<Schema, TCollection>,
+  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>>;
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbFullQueryOptions<Schema, TCollection>,
@@ -229,18 +229,18 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>>;
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
     return this.queryModule.query(collection, options);
   }
 
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbKeyQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<DbQueryProjectedRow<Schema, TCollection>>,
+    options: DbAnonymousQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle;
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
@@ -250,12 +250,12 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle;
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);
   }

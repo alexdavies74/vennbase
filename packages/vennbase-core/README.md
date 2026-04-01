@@ -93,7 +93,11 @@ export type Schema = typeof schema;
 - `collection({ in: [...] })` — `in` lists the allowed parent collections.
 - `field.string()` / `.number()` / `.boolean()` / `.date()` / `.ref(collection)` — typed fields; chain `.key()`, `.optional()`, or `.default(value)` as needed
 
-Fields are for metadata that you want to query. Mark structural/queryable fields with `.key()`. The canonical CRDT pattern is: row fields hold metadata and row refs, while the CRDT document holds the collaborative value state for that row.
+Fields are for metadata that you want to query. Mark structural/queryable fields with `.key()`.
+
+Important: `.key()` is also a visibility boundary. Fields marked `.key()` can appear in anonymous projections from `db.query(..., { select: "anonymous" })`. Before adding `.key()`, assume submitters with anonymous-query access may read that field.
+
+The canonical CRDT pattern is: row fields hold metadata and row refs, while the CRDT document holds the collaborative value state for that row.
 
 ---
 
@@ -195,6 +199,22 @@ const { rows: cards = [], status } = useQuery(db, "cards", {
 });
 ```
 
+### Full rows vs anonymous projections
+
+The default query result is a full row handle. Full rows are locatable and reusable: they expose `ref`, `owner`, `fields`, row membership APIs, parent-link APIs, and can be passed back into row workflows.
+
+Anonymous queries are intentionally weaker:
+
+```ts
+const slots = await db.query("bookings", {
+  in: bookingRoot,
+  select: "anonymous",
+  orderBy: "slotStartMs",
+});
+```
+
+They return objects shaped like `{ kind: "anonymous-projection", id, collection, keyFields }`. These are for anonymous visibility only. They are not row refs, cannot be reopened, and cannot be passed to row-handle APIs.
+
 
 ---
 
@@ -234,7 +254,7 @@ const joined = await db.joinInvite(submissionLink);
 
 `joinInvite` is idempotent, so call it whenever you need it.
 
-`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "keys" })` to see only anonymous key-field projections from sibling rows. Key-query results expose `id`, `collection`, and key fields only; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
+`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "anonymous" })` to see only anonymous projections from sibling rows. Anonymous projections expose `kind`, `id`, `collection`, and `keyFields` only; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
 
 ---
 
@@ -297,7 +317,7 @@ For a fuller picture of how the pieces fit together in a real app, read `package
 pnpm --filter woof-app dev
 ```
 
-`packages/appointment-app` goes further into access-control territory: a blind booking inbox where customers can add rows without seeing each other, run anonymous key-only queries using `select: "keys"`, and resolve capacity conflicts with a deterministic read-side cooloff pattern. Read [`PATTERNS.md`](./PATTERNS.md) for a recipe-style walkthrough of each pattern.
+`packages/appointment-app` goes further into access-control territory: a blind booking inbox where customers can add rows without seeing each other, run anonymous projection queries using `select: "anonymous"`, and resolve capacity conflicts with a deterministic read-side cooloff pattern. Read [`PATTERNS.md`](./PATTERNS.md) for a recipe-style walkthrough of each pattern.
 
 ```bash
 pnpm --filter appointment-app dev
@@ -319,8 +339,8 @@ pnpm --filter appointment-app dev
 | `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`. For user-scoped collections, pass `{ in: CURRENT_USER }`. Most apps use `.value`; await `.committed` when you need remote confirmation. |
 | `update(collection, row, fields)` | Merge field updates onto a row optimistically and return a `MutationReceipt<RowHandle>` immediately. `row` can be a `RowHandle` or `RowRef`. |
 | `getRow(row)` | Fetch a row by typed reference. |
-| `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. Pass `in`, including `CURRENT_USER` for user-scoped collections. |
-| `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. Pass `in`, including `CURRENT_USER` for user-scoped collections. Returns a handle with `.disconnect()`. |
+| `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. Pass `in`, including `CURRENT_USER` for user-scoped collections. Default queries return locatable `RowHandle` values; `select: "anonymous"` returns non-reopenable anonymous projections. |
+| `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. Pass `in`, including `CURRENT_USER` for user-scoped collections. Returns a handle with `.disconnect()`. The callback receives either full `RowHandle` values or anonymous projections depending on `select`. |
 | `createShareToken(row, role)` | Generate a new share token for a row and return a `MutationReceipt<ShareToken>`. Pass a role such as `"editor"` or `"submitter"`. |
 | `getExistingShareToken(row, role)` | Return the existing token for the requested role if one exists, or `null`. |
 | `createShareLink(row, shareToken)` | Build a shareable URL containing a serialized row ref and token. |

@@ -4,10 +4,10 @@ import { RowHandle } from "./row-handle";
 import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-reference";
 import type {
   CollectionName,
+  DbAnonymousProjection,
+  DbAnonymousQueryOptions,
   DbFullQueryOptions,
-  DbKeyQueryOptions,
   DbQueryOptions,
-  DbQueryProjectedRow,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
@@ -30,14 +30,18 @@ interface DbFullQueryRow extends DbQueryBaseRow {
   baseUrl: string;
 }
 
-interface DbKeyQueryRow extends DbQueryBaseRow {}
+interface DbAnonymousQueryRow {
+  rowId: string;
+  collection: string;
+  keyFields: Record<string, JsonValue>;
+}
 
 interface DbFullQueryResponse {
   rows: DbFullQueryRow[];
 }
 
-interface DbKeyQueryResponse {
-  rows: DbKeyQueryRow[];
+interface DbAnonymousQueryResponse {
+  rows: DbAnonymousQueryRow[];
 }
 
 function matchesWhere(
@@ -93,14 +97,14 @@ function compareQueriedRows(
   return order === "desc" ? -rowIdComparison : rowIdComparison;
 }
 
-function compareProjectedRows(
-  left: DbKeyQueryRow,
-  right: DbKeyQueryRow,
+function compareAnonymousRows(
+  left: DbAnonymousQueryRow,
+  right: DbAnonymousQueryRow,
   orderBy: string | undefined,
   order: "asc" | "desc",
 ): number {
   if (orderBy) {
-    const comparison = compareFieldValue(left.fields[orderBy], right.fields[orderBy]);
+    const comparison = compareFieldValue(left.keyFields[orderBy], right.keyFields[orderBy]);
     if (comparison !== 0) {
       return order === "desc" ? -comparison : comparison;
     }
@@ -113,16 +117,19 @@ function compareProjectedRows(
 function snapshotRows(rows: Array<{
   id: string;
   collection: string;
-  fields: unknown;
+  fields?: unknown;
+  kind?: "anonymous-projection";
+  keyFields?: unknown;
   owner?: string;
   ref?: RowRef;
 }>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
     collection: row.collection,
+    ...(row.kind ? { kind: row.kind, keyFields: row.keyFields } : {}),
     owner: row.owner,
     ...("ref" in row && row.ref ? { ref: row.ref } : {}),
-    fields: row.fields,
+    ...("fields" in row ? { fields: row.fields } : {}),
   }));
   return stableJsonStringify(snapshot);
 }
@@ -163,8 +170,8 @@ export class Query<Schema extends DbSchema> {
 
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbKeyQueryOptions<Schema, TCollection>,
-  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>>;
+    options: DbAnonymousQueryOptions<Schema, TCollection>,
+  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>>;
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbFullQueryOptions<Schema, TCollection>,
@@ -172,18 +179,18 @@ export class Query<Schema extends DbSchema> {
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>>;
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>>;
   async query<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
     return this.runQuery(collection, options);
   }
 
   private async runQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbQueryProjectedRow<Schema, TCollection>>> {
+  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const resolvedOptions = this.resolveOptions
       ? await this.resolveOptions(collection, options)
@@ -208,8 +215,8 @@ export class Query<Schema extends DbSchema> {
       orderBy,
     );
 
-    if (select === "keys") {
-      return this.runKeyQuery(collection, parentRefs, {
+    if (select === "anonymous") {
+      return this.runAnonymousQuery(collection, parentRefs, {
         orderBy,
         order: resolvedOptions.order ?? "asc",
         limit,
@@ -321,7 +328,7 @@ export class Query<Schema extends DbSchema> {
     return hydrated;
   }
 
-  private async runKeyQuery<TCollection extends CollectionName<Schema>>(
+  private async runAnonymousQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     parentRefs: RowRef[],
     options: {
@@ -330,7 +337,7 @@ export class Query<Schema extends DbSchema> {
       limit: number;
       where: Record<string, JsonValue> | undefined;
     },
-  ): Promise<Array<DbQueryProjectedRow<Schema, TCollection>>> {
+  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
@@ -338,9 +345,9 @@ export class Query<Schema extends DbSchema> {
           return [];
         }
 
-        const response = await this.transport.row(parent).request<DbKeyQueryResponse>("db/query", {
+        const response = await this.transport.row(parent).request<DbAnonymousQueryResponse>("db/query", {
           collection,
-          select: "keys",
+          select: "anonymous",
           orderBy: options.orderBy,
           order: options.order,
           limit: options.limit,
@@ -354,7 +361,7 @@ export class Query<Schema extends DbSchema> {
       }),
     );
 
-    const deduped = new Map<string, DbKeyQueryRow>();
+    const deduped = new Map<string, DbAnonymousQueryRow>();
     for (const result of parentResults) {
       for (const row of result) {
         if (!deduped.has(row.rowId)) {
@@ -367,9 +374,9 @@ export class Query<Schema extends DbSchema> {
       .map((record) => ({
         rowId: record.row.id,
         collection,
-        fields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
+        keyFields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
       }))
-      .filter((row) => matchesWhere(row.fields, options.where));
+      .filter((row) => matchesWhere(row.keyFields, options.where));
 
     for (const row of optimisticRows) {
       if (!deduped.has(row.rowId)) {
@@ -382,12 +389,12 @@ export class Query<Schema extends DbSchema> {
       const localFields = optimisticRow ? this.optimisticStore.getLogicalFields(optimisticRow.row) : null;
       return {
         ...row,
-        fields: pickKeyFieldValues(collectionSpec, localFields ?? row.fields),
+        keyFields: pickKeyFieldValues(collectionSpec, localFields ?? row.keyFields),
       };
-    }).filter((row) => matchesWhere(row.fields, options.where));
+    }).filter((row) => matchesWhere(row.keyFields, options.where));
 
     if (options.orderBy) {
-      mergedRows.sort((left, right) => compareProjectedRows(
+      mergedRows.sort((left, right) => compareAnonymousRows(
         left,
         right,
         options.orderBy,
@@ -396,16 +403,17 @@ export class Query<Schema extends DbSchema> {
     }
 
     return mergedRows.slice(0, options.limit).map((row) => ({
+      kind: "anonymous-projection",
       id: row.rowId,
       collection,
-      fields: pickKeyFieldValues(collectionSpec, row.fields),
-    })) as Array<DbQueryProjectedRow<Schema, TCollection>>;
+      keyFields: pickKeyFieldValues(collectionSpec, row.keyFields),
+    })) as Array<DbAnonymousProjection<Schema, TCollection>>;
   }
 
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbKeyQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<DbQueryProjectedRow<Schema, TCollection>>,
+    options: DbAnonymousQueryOptions<Schema, TCollection>,
+    callbacks: DbQueryWatchCallbacks<DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle;
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
@@ -415,12 +423,12 @@ export class Query<Schema extends DbSchema> {
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle;
   watchQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>,
+    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;
 
@@ -430,7 +438,9 @@ export class Query<Schema extends DbSchema> {
         const nextSnapshot = snapshotRows(result as unknown as Array<{
           id: string;
           collection: string;
-          fields: unknown;
+          fields?: unknown;
+          kind?: "anonymous-projection";
+          keyFields?: unknown;
           owner?: string;
           ref?: RowRef;
         }>);

@@ -530,12 +530,13 @@ describe("Vennbase rows", () => {
 
     const task = await settle(bobDb.create("tasks", { title: "Need review" }, { in: joined.ref }));
 
-    const submitterRows = await bobDb.query("tasks", { in: joined.ref, select: "keys" });
+    const submitterRows = await bobDb.query("tasks", { in: joined.ref, select: "anonymous" });
     expect(submitterRows).toEqual([
       expect.objectContaining({
+        kind: "anonymous-projection",
         id: task.id,
         collection: "tasks",
-        fields: { status: "todo" },
+        keyFields: { status: "todo" },
       }),
     ]);
     expect(submitterRows[0]).not.toHaveProperty("owner");
@@ -819,7 +820,7 @@ describe("Vennbase rows", () => {
     expect(getRow.mock.calls.map(([row]) => row.id)).toEqual(["card_1", "card_2"]);
   });
 
-  it("returns anonymous projected rows for key queries and dedupes multi-parent results by id", async () => {
+  it("returns anonymous projections for anonymous queries and dedupes multi-parent results by id", async () => {
     const multiParentSchema = defineSchema({
       shelves: collection({
         fields: {
@@ -841,12 +842,12 @@ describe("Vennbase rows", () => {
           {
             rowId: "card_2",
             collection: "cards",
-            fields: { rank: 2 },
+            keyFields: { rank: 2 },
           },
           {
             rowId: "card_3",
             collection: "cards",
-            fields: { rank: 3 },
+            keyFields: { rank: 3 },
           },
         ],
       }],
@@ -855,12 +856,12 @@ describe("Vennbase rows", () => {
           {
             rowId: "card_1",
             collection: "cards",
-            fields: { rank: 1 },
+            keyFields: { rank: 1 },
           },
           {
             rowId: "card_2",
             collection: "cards",
-            fields: { rank: 2 },
+            keyFields: { rank: 2 },
           },
         ],
       }],
@@ -893,7 +894,7 @@ describe("Vennbase rows", () => {
           baseUrl: "https://worker.example",
         },
       ],
-      select: "keys",
+      select: "anonymous",
       orderBy: "rank",
       order: "asc",
       limit: 2,
@@ -901,14 +902,16 @@ describe("Vennbase rows", () => {
 
     expect(rows).toEqual([
       {
+        kind: "anonymous-projection",
         id: "card_1",
         collection: "cards",
-        fields: { rank: 1 },
+        keyFields: { rank: 1 },
       },
       {
+        kind: "anonymous-projection",
         id: "card_2",
         collection: "cards",
-        fields: { rank: 2 },
+        keyFields: { rank: 2 },
       },
     ]);
     expect(rows[0]).not.toHaveProperty("ref");

@@ -5,7 +5,7 @@ import {
   defineSchema,
   field,
   type AnyRowHandle,
-  type DbQueryProjectedRow,
+  type DbAnonymousProjection,
   type RowHandle,
   type RowRef,
 } from "@vennbase/core";
@@ -56,14 +56,14 @@ const fallbackTagRows: TagHandle[] = tagRows ?? [];
 const maybeTagHandle: TagHandle | undefined = tagRows?.[0];
 const projectedTags = useQuery(anyClient, "tags", {
   in: dogHandle,
-  select: "keys",
+  select: "anonymous",
   orderBy: "createdAt",
 });
 const recentDogs = useQuery(anyClient, "recentDogs", {
   in: CURRENT_USER,
   orderBy: "openedAt",
 });
-const projectedTag: DbQueryProjectedRow<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
+const projectedTag: DbAnonymousProjection<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
 const recentDog: RowHandle<TestSchema, "recentDogs"> | undefined = recentDogs.rows?.[0];
 const dogName: string = dogHandle.fields.name;
 void maybeAnyRowHandle;
@@ -87,8 +87,14 @@ if (inviteResult?.kind === "opened") {
   void openedRow;
 }
 
-// @ts-expect-error key-query projections are anonymous and do not expose row refs
+// @ts-expect-error anonymous projections do not expose row refs
 void projectedTag?.ref;
+
+// @ts-expect-error anonymous projections are not row inputs
+void useRow(anyClient, projectedTag);
+
+// @ts-expect-error anonymous projections are not row handles
+void useShareLink(anyClient, projectedTag, { role: "editor" });
 
 if (dogResult.data) {
   // @ts-expect-error parentless rows should not accept parent refs

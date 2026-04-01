@@ -3,11 +3,11 @@ import type {
   AuthSession,
   AnyRowHandle,
   CollectionName,
+  DbAnonymousProjection,
+  DbAnonymousQueryOptions,
   DbFullQueryOptions,
-  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
-  DbQueryProjectedRow,
   DbSchema,
   MemberRole,
   VennbaseUser,
@@ -215,7 +215,9 @@ function snapshotSession(value: AuthSession): string {
 function snapshotQueryRows(value: Array<{
   id: string;
   collection: string;
-  fields: unknown;
+  fields?: unknown;
+  kind?: "anonymous-projection";
+  keyFields?: unknown;
   owner?: string;
   ref?: RowRef;
 }>): string {
@@ -223,9 +225,10 @@ function snapshotQueryRows(value: Array<{
     value.map((row) => ({
       id: row.id,
       collection: row.collection,
+      ...(row.kind ? { kind: row.kind, keyFields: row.keyFields } : {}),
       owner: row.owner,
       ...("ref" in row && row.ref ? { ref: row.ref } : {}),
-      fields: row.fields,
+      ...("fields" in row ? { fields: row.fields } : {}),
     })),
   );
 }
@@ -544,8 +547,8 @@ export const snapshots = {
 export type QueryRows<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-  TOptions extends DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection> =
+  TOptions extends DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection> =
     DbFullQueryOptions<Schema, TCollection>,
-> = TOptions extends DbKeyQueryOptions<Schema, TCollection>
-  ? Array<DbQueryProjectedRow<Schema, TCollection>>
+> = TOptions extends DbAnonymousQueryOptions<Schema, TCollection>
+  ? Array<DbAnonymousProjection<Schema, TCollection>>
   : Array<RowHandle<Schema, TCollection>>;

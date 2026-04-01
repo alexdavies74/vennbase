@@ -4,7 +4,7 @@ import {
   collection,
   defineSchema,
   field,
-  type DbQueryProjectedRow,
+  type DbAnonymousProjection,
   type RowRef,
 } from "./schema";
 
@@ -71,13 +71,16 @@ void db.query("tasks", { in: projectRef, orderBy: "status", order: "asc" });
 void db.query("gameRecords", { where: { role: "owner" } });
 void db.query("gameRecords", { in: CURRENT_USER, where: { role: "owner" } });
 void db.query("gameRecords", { in: CURRENT_USER, where: { gameRef: projectRef } });
-void db.query("tasks", { in: projectRef, select: "keys", orderBy: "status" }).then((rows) => {
-  const first = rows[0] as DbQueryProjectedRow<typeof typeTestSchema, "tasks"> | undefined;
-  const projectedStatus: string | undefined = first?.fields.status;
+void db.query("tasks", { in: projectRef, select: "anonymous", orderBy: "status" }).then((rows) => {
+  const first = rows[0] as DbAnonymousProjection<typeof typeTestSchema, "tasks"> | undefined;
+  const projectedStatus: string | undefined = first?.keyFields.status;
   void projectedStatus;
 
-  // @ts-expect-error key-query projections are anonymous and do not expose row refs
+  // @ts-expect-error anonymous projections do not expose row refs
   void first?.ref;
+
+  // @ts-expect-error anonymous projections are not row inputs
+  void db.getRow(first);
 });
 
 // @ts-expect-error invalid where field

@@ -107,7 +107,7 @@ interface MemberMutationRequest {
 
 interface QueryRequest {
   collection: string;
-  select?: "full" | "keys";
+  select?: "full" | "anonymous";
   orderBy?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -1295,11 +1295,11 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "collection is required");
     }
 
-    const select = payload.select === "keys" ? "keys" : "full";
-    if (role === "submitter" && select !== "keys") {
-      error(401, "UNAUTHORIZED", "Submitters may only query key fields");
+    const select = payload.select === "anonymous" ? "anonymous" : "full";
+    if (role === "submitter" && select !== "anonymous") {
+      error(401, "UNAUTHORIZED", "Submitters may only run anonymous projection queries");
     }
-    if (role === "submitter" && select === "keys") {
+    if (role === "submitter" && select === "anonymous") {
       // allowed
     } else if (role === "submitter") {
       error(401, "UNAUTHORIZED", "Readable members only");
@@ -1318,9 +1318,10 @@ export class RowWorker {
     return jsonResponse(200, {
       rows: rows.map((row) => ({
         rowId: row.rowId,
-        ...(select === "full" ? { owner: row.owner, baseUrl: row.baseUrl } : {}),
+        ...(select === "full"
+          ? { owner: row.owner, baseUrl: row.baseUrl, fields: row.fields }
+          : { keyFields: row.fields }),
         collection: row.collection,
-        fields: row.fields,
       })),
     });
   }

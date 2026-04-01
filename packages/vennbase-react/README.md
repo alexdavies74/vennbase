@@ -90,6 +90,12 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
+### Full rows vs anonymous projections
+
+By default, `useQuery` returns full `RowHandle` values. Those handles are locatable and can be passed to row-scoped hooks and helpers.
+
+If you pass `select: "anonymous"`, `useQuery` returns anonymous projections shaped like `{ kind: "anonymous-projection", id, collection, keyFields }`. They are for anonymous visibility only and cannot be reopened or reused as row handles.
+
 ```tsx
 function RecentBoards() {
   const { rows: recentBoards = [] } = useQuery(db, "recentBoards", {
@@ -231,18 +237,18 @@ function AppRoot() {
 }
 ```
 
-If a submitter needs anonymized sibling visibility, use `select: "keys"` so the hook returns anonymous projected rows containing only `id`, `collection`, and key fields:
+If a submitter needs anonymized sibling visibility, use `select: "anonymous"` so the hook returns anonymous projections containing only `kind`, `id`, `collection`, and `keyFields`:
 
 ```tsx
 function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {
   const { rows: bookings = [] } = useQuery(db, "bookings", {
     in: availability,
-    select: "keys",
+    select: "anonymous",
     orderBy: "startTime",
     order: "asc",
   });
 
-  return <pre>{JSON.stringify(bookings.map((row) => row.fields))}</pre>;
+  return <pre>{JSON.stringify(bookings.map((row) => row.keyFields))}</pre>;
 }
 ```
 
@@ -276,7 +282,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useCurrentUser(db)` | `Vennbase` instance | `{ data: VennbaseUser, status, isRefreshing, error, refreshError, refresh }` |
 | `useVennbase()` | — | `Vennbase` instance from context |
 | `useVennbaseReady(db)` | `Vennbase` instance | `{ status, isRefreshing, error, refreshError, refresh }` — resolves when auth + provisioning complete |
-| `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` |
+| `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` where `rows` is `RowHandle[]` by default or anonymous projections when `select: "anonymous"` is used |
 | `useRow(db, row)` | db, row handle or row ref | `{ data: RowHandle, status, isRefreshing, error, refreshError, refresh }` |
 | `useParents(db, row)` | db, row handle or row ref | `{ data: RowRef[], status, isRefreshing, error, refreshError, refresh }` |
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |

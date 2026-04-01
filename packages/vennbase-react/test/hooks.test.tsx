@@ -12,8 +12,8 @@ import {
   type CrdtAdapter,
   type CrdtConnectCallbacks,
   type CrdtConnection,
+  type DbAnonymousProjection,
   type DbMemberInfo,
-  type DbQueryProjectedRow,
   type Vennbase,
   type RowRef,
 } from "@vennbase/core";
@@ -107,11 +107,12 @@ function makeTagRow(id: string, label: string) {
   );
 }
 
-function makeProjectedTagRow(id: string, createdAt: number): DbQueryProjectedRow<TestSchema, "tags"> {
+function makeProjectedTagRow(id: string, createdAt: number): DbAnonymousProjection<TestSchema, "tags"> {
   return {
+    kind: "anonymous-projection",
     id,
     collection: "tags",
-    fields: { createdAt },
+    keyFields: { createdAt },
   };
 }
 
@@ -133,7 +134,7 @@ class FakeDb {
   failSession = false;
   dogName = "Rex";
   inviteDogName = "Buddy";
-  queryRows: Array<ReturnType<typeof makeTagRow> | DbQueryProjectedRow<TestSchema, "tags">> = [makeTagRow("tag_1", "friendly")];
+  queryRows: Array<ReturnType<typeof makeTagRow> | DbAnonymousProjection<TestSchema, "tags">> = [makeTagRow("tag_1", "friendly")];
   nextQueryError: Error | null = null;
   nextQueryPromise: Promise<typeof this.queryRows> | null = null;
   activitySubscriber: (() => void) | null = null;
@@ -1229,18 +1230,18 @@ describe("@vennbase/react", () => {
     await app.unmount();
   });
 
-  it("supports live key queries with anonymous projected rows", async () => {
+  it("supports live anonymous queries with anonymous projections", async () => {
     const db = new FakeDb();
     db.queryRows = [makeProjectedTagRow("tag_1", 1), makeProjectedTagRow("tag_2", 2)];
 
     function Probe() {
       const result = useQuery(db as unknown as Vennbase<TestSchema>, "tags", {
         in: dogRef(),
-        select: "keys",
+        select: "anonymous",
         orderBy: "createdAt",
         order: "asc",
       });
-      return <div>{(result.rows ?? []).map((row) => `${row.id}:${row.fields.createdAt}`).join(",")}</div>;
+      return <div>{(result.rows ?? []).map((row) => `${row.id}:${row.keyFields.createdAt}`).join(",")}</div>;
     }
 
     const app = await renderApp(<Probe />);

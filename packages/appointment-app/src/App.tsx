@@ -519,7 +519,7 @@ function CustomerScheduleView(props: {
     error: sharedBookingsError,
   } = useQuery(db, "bookings", {
     in: props.bookingRootRef,
-    select: "keys",
+    select: "anonymous",
     limit: 500,
   });
   const {

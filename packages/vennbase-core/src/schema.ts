@@ -354,7 +354,7 @@ type QueryBaseOptions<
   limit?: number;
 } : never;
 
-export type DbQuerySelect = "full" | "keys";
+export type DbQuerySelect = "full" | "anonymous";
 
 export type KeyRowFields<
   Schema extends DbSchema,
@@ -366,13 +366,14 @@ export type KeyRowFields<
       InferFieldValue<FieldDefinitions<Schema, TCollection>[K]> }
 >;
 
-export interface DbQueryProjectedRow<
+export interface DbAnonymousProjection<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
 > {
+  kind: "anonymous-projection";
   id: string;
   collection: TCollection;
-  fields: KeyRowFields<Schema, TCollection>;
+  keyFields: KeyRowFields<Schema, TCollection>;
 }
 
 export type DbFullQueryOptions<
@@ -382,17 +383,17 @@ export type DbFullQueryOptions<
   select?: "full" | undefined;
 };
 
-export type DbKeyQueryOptions<
+export type DbAnonymousQueryOptions<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
 > = QueryBaseOptions<Schema, TCollection> & {
-  select: "keys";
+  select: "anonymous";
 };
 
 export type DbQueryOptions<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
-> = DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection>;
+> = DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection>;
 
 export interface DbQueryWatchCallbacks<TRow> {
   onChange(rows: TRow[]): void;

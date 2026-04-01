@@ -17,11 +17,11 @@ import type {
   CrdtAdapter,
   CrdtConnectCallbacks,
   CrdtConnection,
+  DbAnonymousProjection,
+  DbAnonymousQueryOptions,
   DbFullQueryOptions,
-  DbKeyQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
-  DbQueryProjectedRow,
   DbSchema,
   MemberRole,
   VennbaseUser,
@@ -495,10 +495,10 @@ export function useQuery<
 >(
   db: Vennbase<Schema>,
   collection: TCollection,
-  options: DbKeyQueryOptions<Schema, TCollection> | null | undefined,
+  options: DbAnonymousQueryOptions<Schema, TCollection> | null | undefined,
   hookOptions?: UseHookOptions,
 ): UseQueryResult<
-  DbQueryProjectedRow<Schema, TCollection>
+  DbAnonymousProjection<Schema, TCollection>
 >;
 export function useQuery<
   Schema extends DbSchema,
@@ -520,12 +520,12 @@ export function useQuery<
   options: DbQueryOptions<Schema, TCollection> | null | undefined,
   hookOptions: UseHookOptions = {},
 ): UseQueryResult<
-  RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>
+  RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>
 > {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
   const resourceKey = options ? makeQueryKey(collection, options) : null;
-  const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>>(session);
+  const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>>(session);
   const resource = useOptionalResource(
     (hookOptions.enabled ?? true) && !!options && !blocked,
     resourceKey,
@@ -534,8 +534,8 @@ export function useQuery<
       resourceKey as string,
       () => runtime.client.query(
         collection,
-        options as DbFullQueryOptions<Schema, TCollection> | DbKeyQueryOptions<Schema, TCollection>,
-      ) as Promise<Array<RowHandle<Schema, TCollection> | DbQueryProjectedRow<Schema, TCollection>>>,
+        options as DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection>,
+      ) as Promise<Array<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>>,
       snapshots.queryRows,
     ),
   );

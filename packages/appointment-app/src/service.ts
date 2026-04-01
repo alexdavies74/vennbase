@@ -23,7 +23,7 @@ import {
 import type {
   AppointmentDb,
   BookingHandle,
-  BookingKeyRow,
+  BookingAnonymousProjection,
   BookingRootRef,
   RecentScheduleHandle,
   SavedBookingHandle,
@@ -98,16 +98,16 @@ function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
 }
 
 function groupBookingClaims(
-  bookings: Array<Pick<BookingKeyRow, "id" | "fields">>,
+  bookings: Array<Pick<BookingAnonymousProjection, "id" | "keyFields">>,
 ): Map<string, BookingClaim[]> {
   const grouped = new Map<string, BookingClaim[]>();
 
   for (const booking of bookings) {
     const claim: BookingClaim = {
       id: booking.id,
-      slotStartMs: booking.fields.slotStartMs,
-      slotEndMs: booking.fields.slotEndMs,
-      claimedAtMs: booking.fields.claimedAtMs,
+      slotStartMs: booking.keyFields.slotStartMs,
+      slotEndMs: booking.keyFields.slotEndMs,
+      claimedAtMs: booking.keyFields.claimedAtMs,
     };
     const key = slotKey(claim.slotStartMs, claim.slotEndMs);
     const claims = grouped.get(key) ?? [];
@@ -231,7 +231,7 @@ export function generateSlotOccurrences(
 
 export function buildCustomerSlotDays(
   schedule: Pick<ScheduleHandle, "fields"> | { fields: Record<string, unknown> },
-  sharedBookings: Array<Pick<BookingKeyRow, "id" | "fields">>,
+  sharedBookings: Array<Pick<BookingAnonymousProjection, "id" | "keyFields">>,
   savedBookings: Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
   nowMs = Date.now(),
 ): SlotDay[] {
