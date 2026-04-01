@@ -22,7 +22,8 @@
   "files": [
     "dist",
     "assets",
-    "README.md"
+    "README.md",
+    "PATTERNS.md"
   ],
   "publishConfig": {
     "access": "public"
