@@ -89,6 +89,9 @@ interface BookingClaim {
   claimedAtMs: number;
 }
 
+type BookingClaimSource = Pick<BookingAnonymousProjection, "id" | "keyFields">
+  | Pick<BookingHandle, "id" | "fields">;
+
 function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
   if (left.claimedAtMs !== right.claimedAtMs) {
     return left.claimedAtMs - right.claimedAtMs;
@@ -97,18 +100,23 @@ function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
   return left.id.localeCompare(right.id);
 }
 
+function readBookingClaim(source: BookingClaimSource): BookingClaim {
+  const values = "keyFields" in source ? source.keyFields : source.fields;
+  return {
+    id: source.id,
+    slotStartMs: values.slotStartMs,
+    slotEndMs: values.slotEndMs,
+    claimedAtMs: values.claimedAtMs,
+  };
+}
+
 function groupBookingClaims(
-  bookings: Array<Pick<BookingAnonymousProjection, "id" | "keyFields">>,
+  bookings: BookingClaimSource[],
 ): Map<string, BookingClaim[]> {
   const grouped = new Map<string, BookingClaim[]>();
 
   for (const booking of bookings) {
-    const claim: BookingClaim = {
-      id: booking.id,
-      slotStartMs: booking.keyFields.slotStartMs,
-      slotEndMs: booking.keyFields.slotEndMs,
-      claimedAtMs: booking.keyFields.claimedAtMs,
-    };
+    const claim = readBookingClaim(booking);
     const key = slotKey(claim.slotStartMs, claim.slotEndMs);
     const claims = grouped.get(key) ?? [];
     claims.push(claim);
@@ -393,19 +401,11 @@ export class AppointmentService {
       ...draftToScheduleFields(draft),
       bookingSubmitterLink,
     });
-    const schedule = scheduleWrite.value;
+    const schedule = await scheduleWrite.committed;
 
-    void (async () => {
-      try {
-        await bookingRootWrite.committed;
-        await bookingSubmitterLinkWrite.committed;
-        await scheduleWrite.committed;
-        await this.rememberRecentSchedule(schedule);
-      } catch (error) {
-        console.error(error);
-      }
-    })();
-
+    await bookingRootWrite.committed;
+    await bookingSubmitterLinkWrite.committed;
+    await this.rememberRecentSchedule(schedule);
     return schedule;
   }
 

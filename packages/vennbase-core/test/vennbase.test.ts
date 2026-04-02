@@ -252,6 +252,7 @@ describe("Vennbase", () => {
   it("signs in explicitly and resolves the authenticated user", async () => {
     let signedIn = false;
     let signInCalls = 0;
+    const deployedWorkerBase = "https://workers.example/owner-1234abcd-federation";
     const db = new Vennbase({
       schema: MINIMAL_SCHEMA,
       backend: {
@@ -264,7 +265,13 @@ describe("Vennbase", () => {
             return null;
           },
         },
-        workers: {},
+        fs: {
+          mkdir: async () => undefined,
+          write: async () => undefined,
+        },
+        workers: {
+          create: async () => ({ success: true, url: deployedWorkerBase }),
+        },
         kv: new MapKv(),
       } as BackendClient,
     });
@@ -401,11 +408,11 @@ describe("Vennbase", () => {
       } as BackendClient,
     });
 
-    await expect(db.ensureReady()).rejects.toThrow("default Puter browser client");
-    await expect(db.ensureReady()).rejects.toThrow("workers.create");
+    await expect(db.getSession()).rejects.toThrow("default Puter browser client");
+    await expect(db.getSession()).rejects.toThrow("workers.create");
   });
 
-  it("waits for ambient backend availability once ensureReady is called", async () => {
+  it("waits for ambient backend availability once getSession is called", async () => {
     const kv = new MapKv();
     const appHost = "late-backend.example";
     const hostHash = hashHostname(appHost);
@@ -437,9 +444,12 @@ describe("Vennbase", () => {
       kv,
     } as BackendClient;
 
-    const readyPromise = db.ensureReady();
+    const sessionPromise = db.getSession();
+    await expect(sessionPromise).resolves.toEqual({
+      signedIn: true,
+      user: { username: "owner" },
+    });
     await createStarted.promise;
-    await expect(readyPromise).resolves.toBeUndefined();
 
     expect(createCalls).toBe(1);
     await expect(kv.get(workerMetadataKey("url", hostHash))).resolves.toBe(deployedWorkerBase);
@@ -634,11 +644,11 @@ describe("Vennbase", () => {
       identityProvider: async () => ({ username: "owner" }),
       appBaseUrl: `https://${appHost}`,
       backend,
-      fetchFn: (() => Promise.reject(new Error("fetch should not be used in ensureReady"))) as typeof fetch,
+      fetchFn: (() => Promise.reject(new Error("fetch should not be used in getSession"))) as typeof fetch,
     });
 
     await createStarted.promise;
-    await db.ensureReady();
+    await db.getSession();
 
     expect(createdName).toBe(expectedWorkerName);
     await expect(kv.get(workerMetadataKey("url", hostHash))).resolves.toBe(deployedWorkerBase);
@@ -652,7 +662,7 @@ describe("Vennbase", () => {
     consoleInfo.mockRestore();
   });
 
-  it("shares constructor prewarm with ensureReady", async () => {
+  it("shares constructor prewarm with getSession", async () => {
     const releaseCreate = deferred<{ url: string }>();
     const createStarted = deferred<void>();
     let deployCalls = 0;
@@ -674,20 +684,23 @@ describe("Vennbase", () => {
       },
     });
 
-    const readyPromise = db.ensureReady();
+    const sessionPromise = db.getSession();
     await createStarted.promise;
     expect(deployCalls).toBe(1);
 
     releaseCreate.resolve({ url: "https://workers.example/owner-1234abcd-federation" });
-    await expect(readyPromise).resolves.toBeUndefined();
+    await expect(sessionPromise).resolves.toEqual({
+      signedIn: true,
+      user: { username: "owner" },
+    });
     expect(deployCalls).toBe(1);
   });
 
   it("uses distinct federation workers for localhost apps on different ports", async () => {
     const kv = new MapKv();
     const createdNames: string[] = [];
-    const firstHost = "localhost:5173";
-    const secondHost = "localhost:4173";
+    const firstHost = "localhost:5174";
+    const secondHost = "localhost:4174";
     const firstHash = hashHostname(firstHost);
     const secondHash = hashHostname(secondHost);
 
@@ -716,7 +729,7 @@ describe("Vennbase", () => {
       backend,
     });
 
-    await Promise.all([firstDb.ensureReady(), secondDb.ensureReady()]);
+    await Promise.all([firstDb.getSession(), secondDb.getSession()]);
 
     expect(createdNames).toEqual(expect.arrayContaining([
       scopedWorkerName(firstHash),
@@ -811,7 +824,7 @@ describe("Vennbase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    await db.ensureReady();
+    await db.getSession();
     const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(row.ref.baseUrl).toBe(deployedWorkerBase);
@@ -820,7 +833,7 @@ describe("Vennbase", () => {
     expect(requestedUrls.some((url) => url.endsWith("/row/get"))).toBe(true);
   });
 
-  it("shares constructor prewarm with ensureReady before put", async () => {
+  it("shares constructor prewarm with getSession before put", async () => {
     const requestedUrls: string[] = [];
     const deployedWorkerBase = "https://workers.example/owner-1234abcd-federation";
     const releaseCreate = deferred<{ url: string }>();
@@ -907,12 +920,12 @@ describe("Vennbase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    const readyPromise = db.ensureReady();
+    const sessionPromise = db.getSession();
     await createStarted.promise;
     expect(deployCalls).toBe(1);
 
     releaseCreate.resolve({ url: deployedWorkerBase });
-    await readyPromise;
+    await sessionPromise;
     const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(deployCalls).toBe(1);
@@ -963,7 +976,7 @@ describe("Vennbase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    await Promise.all([firstDb.ensureReady(), secondDb.ensureReady()]);
+    await Promise.all([firstDb.getSession(), secondDb.getSession()]);
     const firstRow = await settle(firstDb.create("rows", { name: "Rex" }));
     const secondRow = await settle(secondDb.create("rows", { name: "Spot" }));
 
@@ -1014,7 +1027,7 @@ describe("Vennbase", () => {
       fetchFn: fetchFn as typeof fetch,
     });
 
-    await db.ensureReady();
+    await db.getSession();
     const row = await settle(db.create("rows", { name: "Rex" }));
 
     expect(getCalls).toBeGreaterThan(0);
@@ -1022,16 +1035,45 @@ describe("Vennbase", () => {
     expect(row.ref.baseUrl).toBe(existingWorkerBase);
   });
 
-  it("redeploys when stored metadata has no current runtime id", async () => {
+  it("accepts stale stored worker metadata for the current session and reconciles in the background", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const kv = new MapKv();
+    const staleWorkerKv = new InMemoryKv();
+    const upgradedWorkerKv = new InMemoryKv();
     const appHost = "runtime-metadata.example";
     const hostHash = hashHostname(appHost);
     const workerName = scopedWorkerName(hostHash);
     const staleWorkerBase = `https://workers.example/owner-${hostHash}-federation`;
     const upgradedWorkerBase = scopedWorkerBase(hostHash);
-    let getCalls = 0;
-    let createCalls = 0;
+    const createStarted = deferred<void>();
+    const releaseCreate = deferred<{ url: string }>();
+
+    const staleWorker = new RowWorker(
+      { owner: "owner", workerUrl: staleWorkerBase },
+      { kv: staleWorkerKv },
+    );
+    const upgradedWorker = new RowWorker(
+      { owner: "owner", workerUrl: upgradedWorkerBase },
+      { kv: upgradedWorkerKv },
+    );
+
+    const fetchFn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = asUrl(input);
+      const request = new Request(url, init);
+
+      if (url.startsWith(staleWorkerBase)) {
+        return staleWorker.handle(request);
+      }
+
+      if (url.startsWith(upgradedWorkerBase)) {
+        return upgradedWorker.handle(request);
+      }
+
+      return new Response(JSON.stringify({ code: "BAD_REQUEST", message: "Unexpected URL" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    };
 
     await kv.set(workerMetadataKey("url", hostHash), staleWorkerBase);
 
@@ -1042,25 +1084,51 @@ describe("Vennbase", () => {
       backend: {
         fs: { mkdir: async () => undefined, write: async () => undefined },
         workers: {
-          get: async () => {
-            getCalls += 1;
-            return null;
-          },
+          get: async () => null,
           create: async () => {
-            createCalls += 1;
-            return { url: upgradedWorkerBase };
+            createStarted.resolve();
+            return releaseCreate.promise;
           },
         },
         kv,
       },
+      fetchFn: fetchFn as typeof fetch,
     });
 
-    await db.ensureReady();
+    const sessionPromise = db.getSession();
+    await createStarted.promise;
+    await expect(sessionPromise).resolves.toEqual({
+      signedIn: true,
+      user: { username: "owner" },
+    });
 
-    expect(getCalls).toBe(1);
-    expect(createCalls).toBe(1);
+    releaseCreate.resolve({ url: upgradedWorkerBase });
+    await flushMicrotasks();
+    await flushMicrotasks();
     await expect(kv.get(workerMetadataKey("url", hostHash))).resolves.toBe(upgradedWorkerBase);
     await expect(kv.get(workerMetadataKey("runtime", hostHash))).resolves.toBe(CLASSIC_WORKER_RUNTIME_ID);
+
+    const currentSessionRow = await settle(db.create("rows", { name: "Rex" }));
+    expect(currentSessionRow.ref.baseUrl).toBe(staleWorkerBase);
+
+    const freshDb = new Vennbase({
+      schema: MINIMAL_SCHEMA,
+      identityProvider: async () => ({ username: "owner" }),
+      appBaseUrl: `https://${appHost}`,
+      backend: {
+        fs: { mkdir: async () => undefined, write: async () => undefined },
+        workers: {
+          get: async () => null,
+          create: async () => ({ url: upgradedWorkerBase }),
+        },
+        kv,
+      },
+      fetchFn: fetchFn as typeof fetch,
+    });
+
+    await freshDb.getSession();
+    const freshSessionRow = await settle(freshDb.create("rows", { name: "Spot" }));
+    expect(freshSessionRow.ref.baseUrl).toBe(upgradedWorkerBase);
     expect(consoleInfo).toHaveBeenCalledWith(
       `[vennbase] upgrading federation worker ${workerName} for owner on ${appHost} from runtime missing-runtime-id to ${CLASSIC_WORKER_RUNTIME_ID}`,
     );
@@ -1090,10 +1158,10 @@ describe("Vennbase", () => {
       fetchFn: (() => Promise.reject(new Error("fetch should not be used"))) as typeof fetch,
     });
 
-    await expect(db.ensureReady()).rejects.toThrow("Federation worker name collision");
+    await expect(db.getSession()).rejects.toThrow("Federation worker name collision");
   });
 
-  it("surfaces prewarm failures through ensureReady and retries on a later call", async () => {
+  it("surfaces prewarm failures through getSession and retries on a later call", async () => {
     const firstAttemptStarted = deferred<void>();
     let deployCalls = 0;
 
@@ -1124,10 +1192,13 @@ describe("Vennbase", () => {
     await firstAttemptStarted.promise;
     await flushMicrotasks();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await expect(db.ensureReady()).rejects.toThrow("Federation worker name collision");
+    await expect(db.getSession()).rejects.toThrow("Federation worker name collision");
     expect(deployCalls).toBe(1);
 
-    await expect(db.ensureReady()).resolves.toBeUndefined();
+    await expect(db.getSession()).resolves.toEqual({
+      signedIn: true,
+      user: { username: "owner" },
+    });
     expect(deployCalls).toBe(2);
   });
 

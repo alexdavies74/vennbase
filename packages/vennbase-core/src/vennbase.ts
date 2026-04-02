@@ -37,7 +37,6 @@ import type {
   RowFields,
 } from "./schema";
 import { resolveBackend } from "./backend";
-import { missingPuterProvisioningMessage } from "./errors";
 import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, collectionAllowsCurrentUser, isCurrentUser, resolveCollectionName } from "./schema";
 import { stableJsonStringify } from "./stable-json";
 import { Transport } from "./transport";
@@ -105,7 +104,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     this.identity = new Identity(options);
     this.auth = new AuthManager(resolveBackend(options.backend), () => this.identity.whoAmI().then((u) => u.username));
     this.transport = new Transport(options, this.auth);
-    this.provisioning = new Provisioning(options, this.transport, this.identity, this.auth);
+    this.provisioning = new Provisioning(options, this.transport, this.auth);
     this.syncRuntime();
     this.writePlanner = new WritePlanner(this.transport);
     this.requiresCurrentUserScope = Object.values(options.schema).some((collectionSpec) => collectionAllowsCurrentUser(collectionSpec));
@@ -148,18 +147,25 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     this.startPrewarmIfSignedIn();
   }
 
-  async ensureReady(): Promise<void> {
-    await this.awaitSharedReadiness();
-  }
-
   async getSession(): Promise<AuthSession> {
-    return this.identity.getSession();
+    let session = await this.identity.getSession();
+    if (!session.signedIn && !this.options.backend && resolveBackend()) {
+      this.identity.clear();
+      session = await this.identity.getSession();
+    }
+
+    if (!session.signedIn) {
+      return session;
+    }
+
+    await this.awaitSharedReadiness();
+    return session;
   }
 
   async signIn(): Promise<VennbaseUser> {
     this.resetSessionState();
     const user = await this.identity.signIn();
-    void this.startReadiness().catch(() => undefined);
+    await this.awaitSharedReadiness();
     return user;
   }
 
@@ -546,14 +552,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     const promise = (async () => {
       try {
         const user = await this.identity.whoAmI();
-        const prewarmed = await this.provisioning.ensureFederationWorkerForCurrentUser();
-        if (!prewarmed) {
-          throw new Error(
-            missingPuterProvisioningMessage(),
-          );
-        }
-
-        const federationWorkerUrl = await this.provisioning.getFederationWorkerUrl(user.username);
+        const federationWorkerUrl = await this.provisioning.getUsableFederationWorkerUrl(user.username);
         this.rowRuntime.setPlannedState({
           user,
           federationWorkerUrl,
@@ -847,7 +846,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   private assertReadyForMutation(): ReadyMutationState {
     if (!this.readyMutationState) {
-      throw new Error("Vennbase client is not ready. Call ensureReady() before mutating.");
+      throw new Error("Vennbase client is not ready for synchronous mutations.");
     }
 
     return this.readyMutationState;

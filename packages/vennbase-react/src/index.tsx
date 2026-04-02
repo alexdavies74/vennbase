@@ -435,19 +435,6 @@ export function useCrdt<TValue>(
   };
 }
 
-export function useVennbaseReady<Schema extends DbSchema>(
-  db: Vennbase<Schema>,
-  options: UseHookOptions = {},
-): UseResourceResult<void> {
-  const runtime = useRuntime(db);
-  const session = useSessionResource(runtime, options.enabled ?? true);
-  const blocked = blockedResourceResult<void>(session);
-  const resource = useOptionalResource((options.enabled ?? true) && !blocked, "ready", runtime, () =>
-    runtime.getLoadOnce("ready", () => runtime.client.ensureReady()),
-  );
-  return blocked ?? resource;
-}
-
 export function useSession<Schema extends DbSchema>(
   db: Vennbase<Schema>,
   options: UseHookOptions = {},

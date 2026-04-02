@@ -334,7 +334,6 @@ pnpm --filter appointment-app dev
 | `new Vennbase({ schema, appBaseUrl? })` | Create a Vennbase instance. Pass `appBaseUrl` so share links point back to your app. |
 | `getSession()` | Check whether the current browser already has a Puter session. |
 | `signIn()` | Start the Puter sign-in flow. Call this from a user gesture such as a button click. |
-| `ensureReady()` | Explicitly await authentication and provisioning before mutations. Most useful in imperative startup flows and before imperative writes. |
 | `whoAmI()` | Returns `{ username }` for the signed-in Puter user. |
 | `create(collection, fields, options?)` | Create a row optimistically and return a `MutationReceipt<RowHandle>` immediately. Pass `{ in: parent }` for child rows, where `parent` can be a `RowHandle` or `RowRef`. For user-scoped collections, pass `{ in: CURRENT_USER }`. Most apps use `.value`; await `.committed` when you need remote confirmation. |
 | `update(collection, row, fields)` | Merge field updates onto a row optimistically and return a `MutationReceipt<RowHandle>` immediately. `row` can be a `RowHandle` or `RowRef`. |

@@ -131,7 +131,6 @@ class FakeDb {
   lastInviteInput: string | null = null;
   getExistingShareTokenCallRoles: string[] = [];
   createShareTokenCallRoles: string[] = [];
-  ensureReadyCalls = 0;
   signInCalls = 0;
   failSession = false;
   dogName = "Rex";
@@ -192,10 +191,6 @@ class FakeDb {
     this.signInCalls += 1;
     this.signedIn = true;
     return { username: this.username };
-  }
-
-  async ensureReady(): Promise<void> {
-    this.ensureReadyCalls += 1;
   }
 
   async whoAmI(): Promise<{ username: string }> {

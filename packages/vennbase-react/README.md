@@ -43,7 +43,7 @@ function AppShell() {
 
 ## Auth
 
-Use `useSession` to gate your UI on the auth state:
+Use `useSession` to gate your UI on the auth state. It stays `loading` until a signed-in user is ready for synchronous Vennbase mutations:
 
 ```tsx
 import { useSession } from "@vennbase/react";
@@ -281,7 +281,6 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useSession(db)` | `Vennbase` instance | `{ session, status, isRefreshing, error, refreshError, signIn, refresh }` |
 | `useCurrentUser(db)` | `Vennbase` instance | `{ data: VennbaseUser, status, isRefreshing, error, refreshError, refresh }` |
 | `useVennbase()` | — | `Vennbase` instance from context |
-| `useVennbaseReady(db)` | `Vennbase` instance | `{ status, isRefreshing, error, refreshError, refresh }` — resolves when auth + provisioning complete |
 | `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isRefreshing, error, refreshError, refresh }` where `rows` is `RowHandle[]` by default or anonymous projections when `select: "anonymous"` is used |
 | `useRow(db, row)` | db, row handle or row ref | `{ data: RowHandle, status, isRefreshing, error, refreshError, refresh }` |
 | `useParents(db, row)` | db, row handle or row ref | `{ data: RowRef[], status, isRefreshing, error, refreshError, refresh }` |

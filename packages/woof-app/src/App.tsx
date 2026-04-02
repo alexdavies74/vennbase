@@ -245,8 +245,6 @@ export function App() {
       : null;
   const [loginError, setLoginError] = useState("");
   const [loginStatus, setLoginStatus] = useState<"idle" | "loading">("idle");
-  const [readyStatus, setReadyStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [readyError, setReadyError] = useState("");
   const [dismissedDogRef, setDismissedDogRef] = useState<RowRef<"dogs"> | null>(null);
   const invite = useAcceptInviteFromUrl<WoofSchema>(db, {
     clearInviteParams: (url) => {
@@ -258,7 +256,6 @@ export function App() {
     onOpen: async (nextRow) => {
       const dogRow = service.expectDogRow(nextRow);
       setDismissedDogRef(null);
-      await db.ensureReady();
       service.activateHistory(dogRow);
     },
   });
@@ -296,44 +293,11 @@ export function App() {
       ? getErrorMessage(dogHistory.error, "Could not restore saved room.")
       : openedActiveRow.status === "error"
         ? getErrorMessage(openedActiveRow.error, "Could not reopen saved room.")
-        : readyStatus === "error"
-          ? readyError
-          : "";
+        : "";
   const bootLoading =
     invite.status === "loading"
     || dogHistory.status === "loading"
-    || (!!activeRowRef && openedActiveRow.status === "loading")
-    || (session.status === "success" && session.data?.signedIn && readyStatus !== "ready" && readyStatus !== "error");
-
-  useEffect(() => {
-    if (session.status !== "success" || !session.data?.signedIn) {
-      setReadyStatus("idle");
-      setReadyError("");
-      return;
-    }
-
-    let cancelled = false;
-    setReadyStatus("loading");
-    setReadyError("");
-    void db.ensureReady()
-      .then(() => {
-        if (cancelled) {
-          return;
-        }
-        setReadyStatus("ready");
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        setReadyStatus("error");
-        setReadyError(getErrorMessage(error, "Could not initialize write access."));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [db, session.data, session.status]);
+    || (!!activeRowRef && openedActiveRow.status === "loading");
 
   if (session.status === "loading") {
     return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;

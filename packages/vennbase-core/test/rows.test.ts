@@ -138,7 +138,7 @@ async function buildReadyDb(args: {
   backend?: BackendClient;
 }): Promise<Vennbase<typeof schema>> {
   const db = buildDb(args);
-  await db.ensureReady();
+  await db.getSession();
   return db;
 }
 

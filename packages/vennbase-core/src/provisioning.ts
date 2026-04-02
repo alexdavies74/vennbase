@@ -3,7 +3,6 @@ import { CLASSIC_WORKER_RUNTIME_ID, buildClassicWorkerScript } from "./worker/te
 import { resolveBackend, resolveBackendAsync } from "./backend";
 import { missingPuterProvisioningMessage } from "./errors";
 import type { WorkerDeployment } from "@heyputer/puter.js";
-import type { Identity } from "./identity";
 import type { VennbaseOptions } from "./vennbase";
 import type { Transport } from "./transport";
 import { stripTrailingSlash } from "./transport";
@@ -16,6 +15,7 @@ const FEDERATION_WORKER_RUNTIME_KV_PREFIX = `${WORKER_METADATA_NAMESPACE}:federa
 const FEDERATION_WORKER_DIR = `${WORKER_METADATA_NAMESPACE}/workers`;
 const sharedFederationWorkerPromises = new Map<string, Promise<string>>();
 const sharedFederationWorkerUrls = new Map<string, string>();
+const sharedFederationWorkerReconciliationPromises = new Map<string, Promise<void>>();
 
 export class Provisioning {
   private federationWorkerUrl: string | null = null;
@@ -25,7 +25,6 @@ export class Provisioning {
   constructor(
     private readonly options: Pick<VennbaseOptions, "appBaseUrl" | "backend" | "deployWorker">,
     private readonly transport: Transport,
-    private readonly identity: Identity,
     private readonly auth: AuthManager,
   ) {
     this.backend = resolveBackend(options.backend);
@@ -40,18 +39,7 @@ export class Provisioning {
     this.federationWorkerPromise = null;
   }
 
-  async ensureFederationWorkerForCurrentUser(): Promise<boolean> {
-    this.backend = await resolveBackendAsync(this.backend);
-    if (!this.canDeployFederationWorker()) {
-      return false;
-    }
-
-    const user = await this.identity.whoAmI();
-    await this.getFederationWorkerUrl(user.username);
-    return true;
-  }
-
-  async getFederationWorkerUrl(username: string): Promise<string> {
+  async getUsableFederationWorkerUrl(username: string): Promise<string> {
     this.backend = await resolveBackendAsync(this.backend);
     if (this.federationWorkerUrl) {
       return this.federationWorkerUrl;
@@ -71,11 +59,7 @@ export class Provisioning {
       return this.federationWorkerPromise;
     }
 
-    const sharedPromise =
-      sharedFederationWorkerPromises.get(cacheKey) ??
-      this.createSharedFederationWorkerPromise(username, appHostname, appHostHash, cacheKey);
-
-    const promise = sharedPromise
+    const promise = this.resolveUsableFederationWorkerUrl(username, appHostname, appHostHash, cacheKey)
       .then((workerUrl) => {
         this.federationWorkerUrl = workerUrl;
         return workerUrl;
@@ -95,8 +79,9 @@ export class Provisioning {
     appHostname: string,
     appHostHash: string,
     cacheKey: string,
+    priorRuntimeId?: string | null,
   ): Promise<string> {
-    const sharedPromise = this.ensureFederationWorkerUrl(username, appHostname, appHostHash)
+    const sharedPromise = this.resolveCurrentFederationWorkerUrl(username, appHostname, appHostHash, priorRuntimeId)
       .then((workerUrl) => {
         sharedFederationWorkerUrls.set(cacheKey, workerUrl);
         return workerUrl;
@@ -111,20 +96,58 @@ export class Provisioning {
     return sharedPromise;
   }
 
-  private async ensureFederationWorkerUrl(
+  private async resolveUsableFederationWorkerUrl(
     username: string,
     appHostname: string,
     appHostHash: string,
+    cacheKey: string,
   ): Promise<string> {
-    const workerName = this.federationWorkerName(username, appHostHash);
-
     const storedUrl = await this.loadFederationWorkerUrl(username, appHostHash);
     const storedRuntimeId = await this.loadFederationWorkerRuntimeId(username, appHostHash);
     if (storedUrl && storedRuntimeId === CLASSIC_WORKER_RUNTIME_ID) {
-      await this.saveFederationWorkerMetadata(username, appHostHash, storedUrl);
+      const normalizedStoredUrl = stripTrailingSlash(storedUrl);
+      await this.saveFederationWorkerMetadata(username, appHostHash, normalizedStoredUrl);
+      sharedFederationWorkerUrls.set(cacheKey, normalizedStoredUrl);
+      return normalizedStoredUrl;
+    }
+
+    if (storedUrl) {
+      this.startBackgroundRuntimeReconciliation(username, appHostname, appHostHash, cacheKey, storedRuntimeId);
       return stripTrailingSlash(storedUrl);
     }
 
+    return this.ensureCurrentFederationWorkerUrl(
+      username,
+      appHostname,
+      appHostHash,
+      cacheKey,
+      storedRuntimeId ?? undefined,
+    );
+  }
+
+  private ensureCurrentFederationWorkerUrl(
+    username: string,
+    appHostname: string,
+    appHostHash: string,
+    cacheKey: string,
+    priorRuntimeId?: string | null,
+  ): Promise<string> {
+    const sharedWorkerUrl = sharedFederationWorkerUrls.get(cacheKey);
+    if (sharedWorkerUrl) {
+      return Promise.resolve(sharedWorkerUrl);
+    }
+
+    return sharedFederationWorkerPromises.get(cacheKey)
+      ?? this.createSharedFederationWorkerPromise(username, appHostname, appHostHash, cacheKey, priorRuntimeId);
+  }
+
+  private async resolveCurrentFederationWorkerUrl(
+    username: string,
+    appHostname: string,
+    appHostHash: string,
+    priorRuntimeId?: string | null,
+  ): Promise<string> {
+    const workerName = this.federationWorkerName(username, appHostHash);
     const existingWorkerUrl = await this.loadExistingFederationWorkerUrl(workerName);
     if (existingWorkerUrl) {
       await this.saveFederationWorkerMetadata(username, appHostHash, existingWorkerUrl);
@@ -135,9 +158,9 @@ export class Provisioning {
       throw new Error(missingPuterProvisioningMessage());
     }
 
-    const hadPriorWorkerMetadata = !!storedUrl || !!storedRuntimeId;
+    const hadPriorWorkerMetadata = priorRuntimeId !== undefined;
     if (hadPriorWorkerMetadata) {
-      const priorRuntime = storedRuntimeId ?? "missing-runtime-id";
+      const priorRuntime = priorRuntimeId ?? "missing-runtime-id";
       console.info(
         `[vennbase] upgrading federation worker ${workerName} for ${username} on ${appHostname} from runtime ${priorRuntime} to ${CLASSIC_WORKER_RUNTIME_ID}`,
       );
@@ -176,6 +199,46 @@ export class Provisioning {
     );
     await this.saveFederationWorkerMetadata(username, appHostHash, activeWorkerUrl);
     return activeWorkerUrl;
+  }
+
+  private startBackgroundRuntimeReconciliation(
+    username: string,
+    appHostname: string,
+    appHostHash: string,
+    cacheKey: string,
+    priorRuntimeId: string | null,
+  ): void {
+    if (sharedFederationWorkerUrls.has(cacheKey)) {
+      return;
+    }
+
+    const existingPromise = sharedFederationWorkerReconciliationPromises.get(cacheKey);
+    if (existingPromise) {
+      return;
+    }
+
+    const workerName = this.federationWorkerName(username, appHostHash);
+    const promise = this.ensureCurrentFederationWorkerUrl(
+      username,
+      appHostname,
+      appHostHash,
+      cacheKey,
+      priorRuntimeId,
+    )
+      .then(() => undefined)
+      .catch((error) => {
+        console.error("[vennbase] federation worker reconciliation failed", {
+          error,
+          workerName,
+        });
+      })
+      .finally(() => {
+        if (sharedFederationWorkerReconciliationPromises.get(cacheKey) === promise) {
+          sharedFederationWorkerReconciliationPromises.delete(cacheKey);
+        }
+      });
+
+    sharedFederationWorkerReconciliationPromises.set(cacheKey, promise);
   }
 
   canDeployFederationWorker(): boolean {

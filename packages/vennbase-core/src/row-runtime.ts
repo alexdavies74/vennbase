@@ -30,7 +30,7 @@ export class RowRuntime {
     private readonly transport: Transport,
     private readonly identity: Identity,
     private readonly provisioning: Provisioning,
-    private readonly ensureReady: () => Promise<void>,
+    private readonly ensureMutationBootstrap: () => Promise<void>,
   ) {}
 
   setPlannedState(state: PlannedRowState): void {
@@ -43,7 +43,7 @@ export class RowRuntime {
 
   assertPlannedState(): PlannedRowState {
     if (!this.plannedState) {
-      throw new Error("Vennbase client is not ready. Call ensureReady() before mutating.");
+      throw new Error("Vennbase client has not finished mutation bootstrap.");
     }
 
     return this.plannedState;
@@ -93,9 +93,9 @@ export class RowRuntime {
   }
 
   async createRow(name: string): Promise<Row> {
-    await this.ensureReady();
+    await this.ensureMutationBootstrap();
     const user = await this.identity.whoAmI();
-    const federationWorkerUrl = await this.provisioning.getFederationWorkerUrl(user.username);
+    const federationWorkerUrl = await this.provisioning.getUsableFederationWorkerUrl(user.username);
     this.setPlannedState({ user, federationWorkerUrl });
     return this.commitPlannedRow(this.planRow(name));
   }
