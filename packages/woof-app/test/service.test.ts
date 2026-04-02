@@ -102,10 +102,9 @@ function dogHistoryRef(id: string): RowRef<"dogHistory"> {
 }
 
 function shareLink(rowId: string): string {
-  return `https://woof.example/?${VENNBASE_INVITE_TARGET_PARAM}=${encodeURIComponent(JSON.stringify({
-    ref: dogRef(rowId),
-    shareToken: "invite_1",
-  }))}`;
+  const row = dogRef(rowId);
+  const payload = `1*${row.id.replace(/^row_/, "")}*${row.collection}*1*u${Buffer.from(row.baseUrl).toString("base64url")}`;
+  return `https://woof.example/?${VENNBASE_INVITE_TARGET_PARAM}=${encodeURIComponent(payload)}`;
 }
 
 class MockDb implements WoofDbPort {

@@ -82,11 +82,15 @@ function tagRef(id: string): RowRef<"tags"> {
 }
 
 function inviteUrl(row: RowRef, shareToken = "invite_1"): string {
+  const encodeTrimmed = (value: string, prefix: string) =>
+    value.startsWith(prefix)
+      ? value.slice(prefix.length)
+      : `_${Buffer.from(value).toString("base64url")}`;
   const url = new URL("http://localhost:3000/");
-  url.searchParams.set(VENNBASE_INVITE_TARGET_PARAM, JSON.stringify({
-    ref: row,
-    shareToken,
-  }));
+  url.searchParams.set(
+    VENNBASE_INVITE_TARGET_PARAM,
+    `1*${encodeTrimmed(row.id, "row_")}*${row.collection}*${encodeTrimmed(shareToken, "invite_")}*h${new URL(row.baseUrl).host}`,
+  );
   return url.toString();
 }
 
@@ -252,7 +256,26 @@ class FakeDb {
       throw new Error("missing invite payload");
     }
 
-    const parsed = JSON.parse(payload) as { ref: RowRef; shareToken?: string };
+    const [version, id, collection, shareToken, locator] = payload.split("*");
+    if (version !== "1" || !id || !collection || locator === undefined) {
+      throw new Error("malformed invite payload");
+    }
+
+    const baseUrl = locator.startsWith("h")
+      ? `https://${locator.slice(1)}`
+      : "";
+    if (!baseUrl) {
+      throw new Error("invalid worker locator");
+    }
+
+    const decodeTrimmed = (value: string, prefix: string) =>
+      value.startsWith("_")
+        ? Buffer.from(value.slice(1), "base64url").toString("utf8")
+        : `${prefix}${value}`;
+    const parsed = {
+      ref: { id: decodeTrimmed(id, "row_"), collection, baseUrl } as RowRef,
+      shareToken: shareToken ? decodeTrimmed(shareToken, "invite_") : undefined,
+    };
     const role = parsed.shareToken === "invite_submitter" ? "submitter" : "viewer";
     this.pendingInviteOpen = role !== "submitter";
 
