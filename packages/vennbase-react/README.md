@@ -94,7 +94,7 @@ function CardList({ board }: { board: BoardHandle }) {
 
 By default, `useQuery` returns full `RowHandle` values. Those handles are locatable and can be passed to row-scoped hooks and helpers.
 
-If you pass `select: "anonymous"`, `useQuery` returns anonymous projections shaped like `{ kind: "anonymous-projection", id, collection, keyFields }`. They are for anonymous visibility only and cannot be reopened or reused as row handles.
+If you pass `select: "anonymous"`, `useQuery` returns anonymous projections shaped like `{ kind: "anonymous-projection", id, collection, fields }`, where `fields` contains only values declared `.key()`. They are for anonymous visibility only and cannot be reopened or reused as row handles.
 
 ```tsx
 function RecentBoards() {
@@ -237,7 +237,7 @@ function AppRoot() {
 }
 ```
 
-If a submitter needs anonymized sibling visibility, use `select: "anonymous"` so the hook returns anonymous projections containing only `kind`, `id`, `collection`, and `keyFields`:
+If a submitter needs anonymized sibling visibility, use `select: "anonymous"` so the hook returns anonymous projections containing only `kind`, `id`, `collection`, and key-only `fields`:
 
 ```tsx
 function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {
@@ -248,7 +248,7 @@ function AvailabilityGrid({ availability }: { availability: RowRef<"availability
     order: "asc",
   });
 
-  return <pre>{JSON.stringify(bookings.map((row) => row.keyFields))}</pre>;
+  return <pre>{JSON.stringify(bookings.map((row) => row.fields))}</pre>;
 }
 ```
 

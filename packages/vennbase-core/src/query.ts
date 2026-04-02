@@ -34,7 +34,7 @@ interface DbFullQueryRow extends DbQueryBaseRow {
 interface DbAnonymousQueryRow {
   rowId: string;
   collection: string;
-  keyFields: Record<string, JsonValue>;
+  fields: Record<string, JsonValue>;
 }
 
 interface DbFullQueryResponse {
@@ -105,7 +105,7 @@ function compareAnonymousRows(
   order: "asc" | "desc",
 ): number {
   if (orderBy) {
-    const comparison = compareFieldValue(left.keyFields[orderBy], right.keyFields[orderBy]);
+    const comparison = compareFieldValue(left.fields[orderBy], right.fields[orderBy]);
     if (comparison !== 0) {
       return order === "desc" ? -comparison : comparison;
     }
@@ -120,14 +120,13 @@ function snapshotRows(rows: Array<{
   collection: string;
   fields?: unknown;
   kind?: "anonymous-projection";
-  keyFields?: unknown;
   owner?: string;
   ref?: RowRef;
 }>): string {
   const snapshot = rows.map((row) => ({
     id: row.id,
     collection: row.collection,
-    ...(row.kind ? { kind: row.kind, keyFields: row.keyFields } : {}),
+    ...(row.kind ? { kind: row.kind } : {}),
     owner: row.owner,
     ...("ref" in row && row.ref ? { ref: row.ref } : {}),
     ...("fields" in row ? { fields: row.fields } : {}),
@@ -484,9 +483,9 @@ export class Query<Schema extends DbSchema> {
       .map((record) => ({
         rowId: record.row.id,
         collection,
-        keyFields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
+        fields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
       }))
-      .filter((row) => matchesWhere(row.keyFields, options.where));
+      .filter((row) => matchesWhere(row.fields, options.where));
 
     for (const row of optimisticRows) {
       if (!deduped.has(row.rowId)) {
@@ -499,9 +498,9 @@ export class Query<Schema extends DbSchema> {
       const localFields = optimisticRow ? this.optimisticStore.getLogicalFields(optimisticRow.row) : null;
       return {
         ...row,
-        keyFields: pickKeyFieldValues(collectionSpec, localFields ?? row.keyFields),
+        fields: pickKeyFieldValues(collectionSpec, localFields ?? row.fields),
       };
-    }).filter((row) => matchesWhere(row.keyFields, options.where));
+    }).filter((row) => matchesWhere(row.fields, options.where));
 
     if (options.orderBy) {
       mergedRows.sort((left, right) => compareAnonymousRows(
@@ -516,7 +515,7 @@ export class Query<Schema extends DbSchema> {
       kind: "anonymous-projection",
       id: row.rowId,
       collection,
-      keyFields: pickKeyFieldValues(collectionSpec, row.keyFields),
+      fields: pickKeyFieldValues(collectionSpec, row.fields),
     })) as Array<DbAnonymousProjection<Schema, TCollection>>;
   }
 
@@ -538,7 +537,6 @@ export class Query<Schema extends DbSchema> {
           collection: string;
           fields?: unknown;
           kind?: "anonymous-projection";
-          keyFields?: unknown;
           owner?: string;
           ref?: RowRef;
         }>);

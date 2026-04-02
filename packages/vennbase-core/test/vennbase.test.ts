@@ -143,12 +143,12 @@ describe("Vennbase", () => {
       kind: "anonymous-projection",
       id: "row_1",
       collection: "rows",
-      keyFields: {},
+      fields: {},
     })).toBe(true);
     expect(isAnonymousProjection({
       id: "row_1",
       collection: "rows",
-      keyFields: {},
+      fields: {},
     })).toBe(false);
   });
 

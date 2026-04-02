@@ -80,8 +80,11 @@ void db.query("gameRecords", { in: CURRENT_USER, where: { role: "owner" } });
 void db.query("gameRecords", { in: CURRENT_USER, where: { gameRef: projectRef } });
 void db.query("tasks", { in: projectRef, select: "anonymous", orderBy: "status" }).then((rows) => {
   const first = rows[0] as DbAnonymousProjection<typeof typeTestSchema, "tasks"> | undefined;
-  const projectedStatus: string | undefined = first?.keyFields.status;
+  const projectedStatus: string | undefined = first?.fields.status;
   void projectedStatus;
+
+  // @ts-expect-error anonymous projections expose fields, not keyFields
+  void first?.keyFields;
 
   // @ts-expect-error anonymous projections do not expose row refs
   void first?.ref;
@@ -112,7 +115,7 @@ function firstQueryRow<
 
 void db.query("tasks", taskAnonymousOptions).then((rows) => {
   const first = firstQueryRow(rows);
-  const projectedStatus: string | undefined = first?.keyFields.status;
+  const projectedStatus: string | undefined = first?.fields.status;
   void projectedStatus;
 });
 
@@ -129,8 +132,11 @@ void db.query("tasks", taskFullOptions).then((rows) => {
 
 declare const maybeTaskQueryRow: DbQueryRow<typeof typeTestSchema, "tasks", DbQuerySelect> | undefined;
 if (maybeTaskQueryRow && isAnonymousProjection(maybeTaskQueryRow)) {
-  const projectedStatus: string | undefined = maybeTaskQueryRow.keyFields.status;
+  const projectedStatus: string | undefined = maybeTaskQueryRow.fields.status;
   void projectedStatus;
+
+  // @ts-expect-error anonymous projections expose fields, not keyFields
+  void maybeTaskQueryRow.keyFields;
 
   // @ts-expect-error anonymous projections do not expose row refs
   void maybeTaskQueryRow.ref;

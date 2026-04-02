@@ -51,7 +51,7 @@ The customer never holds a viewer link to `bookingRoots` itself, so they cannot 
 
 **Problem.** Customers need to see which slots are already taken so they can pick an open one — but they shouldn't see other customers' private booking details.
 
-**Trick.** Query with `select: "anonymous"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an anonymous projection: it includes only `kind`, `id`, `collection`, and fields declared `.key()` in `keyFields`.
+**Trick.** Query with `select: "anonymous"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an anonymous projection: it includes only `kind`, `id`, `collection`, and key-only `fields`.
 
 **In the UI** — reactive:
 
@@ -117,7 +117,7 @@ The app wires all three together into a single access-control surface the owner 
 2. **Owner shares the schedule** using a viewer share link. Customers open it.
 3. **Customer joins the inbox** — Pattern 1. `ensureBookingRootAccess` calls `joinInvite` on the embedded link, returning a `BookingRootRef` with submitter access.
 4. **Customer creates a claim** under the `BookingRootRef`. No preflight race check is needed.
-5. **Customer queries visible claims** — Patterns 2 and 3. `select: "anonymous"` returns anonymous projections with `keyFields: { slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which claim is active.
+5. **Customer queries visible claims** — Patterns 2 and 3. `select: "anonymous"` returns anonymous projections with `fields: { slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which claim is active.
 6. **Owner and customers converge** on the same active booking from the same visible rows. Only the owner (with full access) can read the complete booking records.
 
 The owner never manually grants or revokes customer access. The submitter link embedded in the schedule is the entire access-control surface.

@@ -213,7 +213,7 @@ const slots = await db.query("bookings", {
 });
 ```
 
-They return objects shaped like `{ kind: "anonymous-projection", id, collection, keyFields }`. These are for anonymous visibility only. They are not row refs, cannot be reopened, and cannot be passed to row-handle APIs.
+They return objects shaped like `{ kind: "anonymous-projection", id, collection, fields }`, where `fields` contains only values declared `.key()`. These are for anonymous visibility only. They are not row refs, cannot be reopened, and cannot be passed to row-handle APIs.
 
 
 ---
@@ -254,7 +254,7 @@ const joined = await db.joinInvite(submissionLink);
 
 `joinInvite` is idempotent, so call it whenever you need it.
 
-`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "anonymous" })` to see only anonymous projections from sibling rows. Anonymous projections expose `kind`, `id`, `collection`, and `keyFields` only; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
+`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "anonymous" })` to see only anonymous projections from sibling rows. Anonymous projections expose `kind`, `id`, `collection`, and key-only `fields`; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Apps that need a submitter to revisit their own submissions should persist the created child refs separately.
 
 ---
 

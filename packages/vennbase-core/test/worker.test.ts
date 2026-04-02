@@ -442,7 +442,7 @@ describe("RowWorker", () => {
     expect(submitterQueryBody.rows).toEqual([
       expect.objectContaining({
         rowId: "task_submitter",
-        keyFields: { status: "todo" },
+        fields: { status: "todo" },
       }),
     ]);
     expect((submitterQueryBody.rows as Array<Record<string, unknown>>)[0]).not.toHaveProperty("owner");

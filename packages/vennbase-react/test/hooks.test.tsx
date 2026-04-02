@@ -113,7 +113,7 @@ function makeProjectedTagRow(id: string, createdAt: number): DbAnonymousProjecti
     kind: "anonymous-projection",
     id,
     collection: "tags",
-    keyFields: { createdAt },
+    fields: { createdAt },
   };
 }
 
@@ -1623,7 +1623,7 @@ describe("@vennbase/react", () => {
         orderBy: "createdAt",
         order: "asc",
       });
-      return <div>{(result.rows ?? []).map((row) => `${row.id}:${row.keyFields.createdAt}`).join(",")}</div>;
+      return <div>{(result.rows ?? []).map((row) => `${row.id}:${row.fields.createdAt}`).join(",")}</div>;
     }
 
     const app = await renderApp(<Probe />);

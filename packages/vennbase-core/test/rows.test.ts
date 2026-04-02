@@ -536,7 +536,7 @@ describe("Vennbase rows", () => {
         kind: "anonymous-projection",
         id: task.id,
         collection: "tasks",
-        keyFields: { status: "todo" },
+        fields: { status: "todo" },
       }),
     ]);
     expect(submitterRows[0]).not.toHaveProperty("owner");
@@ -842,12 +842,12 @@ describe("Vennbase rows", () => {
           {
             rowId: "card_2",
             collection: "cards",
-            keyFields: { rank: 2 },
+            fields: { rank: 2 },
           },
           {
             rowId: "card_3",
             collection: "cards",
-            keyFields: { rank: 3 },
+            fields: { rank: 3 },
           },
         ],
       }],
@@ -856,12 +856,12 @@ describe("Vennbase rows", () => {
           {
             rowId: "card_1",
             collection: "cards",
-            keyFields: { rank: 1 },
+            fields: { rank: 1 },
           },
           {
             rowId: "card_2",
             collection: "cards",
-            keyFields: { rank: 2 },
+            fields: { rank: 2 },
           },
         ],
       }],
@@ -905,13 +905,13 @@ describe("Vennbase rows", () => {
         kind: "anonymous-projection",
         id: "card_1",
         collection: "cards",
-        keyFields: { rank: 1 },
+        fields: { rank: 1 },
       },
       {
         kind: "anonymous-projection",
         id: "card_2",
         collection: "cards",
-        keyFields: { rank: 2 },
+        fields: { rank: 2 },
       },
     ]);
     expect(rows[0]).not.toHaveProperty("ref");

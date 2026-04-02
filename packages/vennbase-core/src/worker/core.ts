@@ -1320,7 +1320,7 @@ export class RowWorker {
         rowId: row.rowId,
         ...(select === "full"
           ? { owner: row.owner, baseUrl: row.baseUrl, fields: row.fields }
-          : { keyFields: row.fields }),
+          : { fields: row.fields }),
         collection: row.collection,
       })),
     });

@@ -89,7 +89,7 @@ interface BookingClaim {
   claimedAtMs: number;
 }
 
-type BookingClaimSource = Pick<BookingAnonymousProjection, "id" | "keyFields">
+type BookingClaimSource = Pick<BookingAnonymousProjection, "id" | "fields">
   | Pick<BookingHandle, "id" | "fields">;
 
 function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
@@ -101,7 +101,7 @@ function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
 }
 
 function readBookingClaim(source: BookingClaimSource): BookingClaim {
-  const values = "keyFields" in source ? source.keyFields : source.fields;
+  const values = source.fields;
   return {
     id: source.id,
     slotStartMs: values.slotStartMs,
@@ -241,7 +241,7 @@ export function generateSlotOccurrences(
 
 export function buildCustomerSlotDays(
   schedule: Pick<ScheduleHandle, "fields"> | { fields: Record<string, unknown> },
-  sharedBookings: Array<Pick<BookingAnonymousProjection, "id" | "keyFields">>,
+  sharedBookings: Array<Pick<BookingAnonymousProjection, "id" | "fields">>,
   savedBookings: Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
   nowMs = Date.now(),
 ): SlotDay[] {

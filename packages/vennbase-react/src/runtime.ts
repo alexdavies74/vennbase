@@ -201,7 +201,6 @@ function snapshotQueryRows(value: Array<{
   collection: string;
   fields?: unknown;
   kind?: "anonymous-projection";
-  keyFields?: unknown;
   owner?: string;
   ref?: RowRef;
 }>): string {
@@ -209,7 +208,7 @@ function snapshotQueryRows(value: Array<{
     value.map((row) => ({
       id: row.id,
       collection: row.collection,
-      ...(row.kind ? { kind: row.kind, keyFields: row.keyFields } : {}),
+      ...(row.kind ? { kind: row.kind } : {}),
       owner: row.owner,
       ...("ref" in row && row.ref ? { ref: row.ref } : {}),
       ...("fields" in row ? { fields: row.fields } : {}),

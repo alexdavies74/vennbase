@@ -77,10 +77,10 @@ function makeBookingKeyRow(args: {
   slotStartMs: number;
   slotEndMs: number;
   claimedAtMs: number;
-}): Pick<BookingAnonymousProjection, "id" | "keyFields"> {
+}): Pick<BookingAnonymousProjection, "id" | "fields"> {
   return {
     id: args.id,
-    keyFields: {
+    fields: {
       slotStartMs: args.slotStartMs,
       slotEndMs: args.slotEndMs,
       claimedAtMs: args.claimedAtMs,

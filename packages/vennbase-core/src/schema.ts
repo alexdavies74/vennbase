@@ -394,7 +394,7 @@ export interface DbAnonymousProjection<
   kind: "anonymous-projection";
   id: string;
   collection: TCollection;
-  keyFields: KeyRowFields<Schema, TCollection>;
+  fields: KeyRowFields<Schema, TCollection>;
 }
 
 export function isAnonymousProjection<
@@ -409,8 +409,8 @@ export function isAnonymousProjection<
   return record.kind === "anonymous-projection"
     && typeof record.id === "string"
     && typeof record.collection === "string"
-    && typeof record.keyFields === "object"
-    && record.keyFields !== null;
+    && typeof record.fields === "object"
+    && record.fields !== null;
 }
 
 export type DbQueryRow<

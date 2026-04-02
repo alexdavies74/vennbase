@@ -82,6 +82,7 @@ const projectedTagFromOptions: DbQueryRow<TestSchema, "tags", "anonymous"> | und
 const recentDog: RowHandle<TestSchema, "recentDogs"> | undefined = recentDogs.rows?.[0];
 const recentDogFromOptions: DbQueryRow<TestSchema, "recentDogs"> | undefined = recentDogsFromOptions.rows?.[0];
 const dogName: string = dogHandle.fields.name;
+const projectedCreatedAt: number | undefined = projectedTag?.fields.createdAt;
 
 function useTypedQuery<
   TCollection extends keyof TestSchema & string,
@@ -106,6 +107,7 @@ void recentDogFromOptions;
 void genericProjectedTag;
 void genericRecentDog;
 void dogName;
+void projectedCreatedAt;
 
 // @ts-expect-error queries always require an explicit in option
 void useQuery(anyClient, "recentDogs", {
@@ -122,6 +124,9 @@ if (inviteResult?.kind === "opened") {
 
 // @ts-expect-error anonymous projections do not expose row refs
 void projectedTag?.ref;
+
+// @ts-expect-error anonymous projections expose fields, not keyFields
+void projectedTag?.keyFields;
 
 // @ts-expect-error anonymous projections are not row inputs
 void useRow(anyClient, projectedTag);
