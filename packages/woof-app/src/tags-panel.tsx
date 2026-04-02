@@ -50,7 +50,7 @@ export function TagsPanel({ row, onCreateTag }: TagsPanelProps) {
   });
   const createTag = useMutation(async (label: string) => {
     await onCreateTag(label);
-    await tagsQuery.refresh();
+    void tagsQuery.refresh();
   });
   const tags = mapDogTags(tagsQuery.rows);
 

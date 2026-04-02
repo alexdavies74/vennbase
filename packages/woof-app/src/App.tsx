@@ -226,7 +226,9 @@ function RoomScreen(props: {
       </p>
       <TagsPanel
         row={props.row}
-        onCreateTag={(label) => service.createTag(props.row, label)}
+        onCreateTag={(label) => service.createTag(props.row, label, {
+          createdBy: props.currentUsername,
+        })}
       />
       <ChatPanel currentUsername={props.currentUsername} doc={crdt.value} entries={entries} flush={crdt.flush} row={props.row} />
       <p className="muted">{relinquish.error ? getErrorMessage(relinquish.error, "Failed to relinquish dog.") : ""}</p>

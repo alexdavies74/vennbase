@@ -345,14 +345,15 @@ export function VennbaseProvider<Schema extends DbSchema>({
   db,
   subscribeToActivity,
 }: VennbaseProviderProps<Schema>) {
-
   const runtimeRef = useRef<VennbaseReactRuntime<Schema> | null>(null);
   if (
     runtimeRef.current === null ||
     runtimeRef.current.client !== db ||
     runtimeRef.current.externalSubscribeToActivity !== subscribeToActivity
   ) {
-    runtimeRef.current = new Runtime(db, subscribeToActivity);
+    runtimeRef.current = subscribeToActivity
+      ? new Runtime(db, subscribeToActivity)
+      : getDefaultRuntime(db);
   }
 
   return (

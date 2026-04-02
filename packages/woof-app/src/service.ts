@@ -108,7 +108,11 @@ export class WoofService {
     await args.flush?.();
   }
 
-  async createTag(row: DogRowHandle, label: string): Promise<void> {
+  async createTag(
+    row: DogRowHandle,
+    label: string,
+    options?: { createdBy?: string | null },
+  ): Promise<void> {
     const trimmed = label.trim();
     if (!trimmed) {
       throw new Error("Tag text is required.");
@@ -118,19 +122,25 @@ export class WoofService {
       throw new Error("Tag text must be 32 characters or fewer.");
     }
 
-    const actor = await this.db.whoAmI();
+    const createdBy = options?.createdBy?.trim() || (await this.db.whoAmI()).username;
     const tagWrite = this.db.create(
       "tags",
       {
         label: trimmed,
-        createdBy: actor.username,
+        createdBy,
         createdAt: Date.now(),
       },
       {
         in: row.ref,
       },
     );
-    await tagWrite.committed;
+    void tagWrite.committed.catch((error) => {
+      console.error("[woof-app] createTag commit failed", {
+        error,
+        rowRef: row.ref,
+        label: trimmed,
+      });
+    });
   }
 
   async relinquish(): Promise<void> {

@@ -38,6 +38,16 @@ function committedReceipt<TValue>(value: TValue): MutationReceipt<TValue> {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function encodeUpdate(update: Uint8Array): { type: string; data: string } {
   return {
     type: "yjs-update",
@@ -107,6 +117,9 @@ class MockDb implements WoofDbPort {
     fields: Record<string, unknown>;
     options?: { in?: RowRef<"dogs"> | typeof CURRENT_USER };
   }> = [];
+  public nextTagReceipt:
+    | { committed: Promise<TagRowHandle>; value: TagRowHandle }
+    | null = null;
 
   private readonly rowFields = new Map<string, Record<string, unknown>>();
   private readonly historyRows = new Map<string, DogHistoryRowHandle>();
@@ -242,7 +255,18 @@ class MockDb implements WoofDbPort {
       return committedReceipt(this.makeDogHistoryRow(`history_${this.createCalls.length}`, fields));
     }
 
-    return committedReceipt(this.makeTagRow(`tag_${this.createCalls.length}`, fields));
+    const row = this.makeTagRow(`tag_${this.createCalls.length}`, fields);
+    if (this.nextTagReceipt) {
+      const receipt = this.nextTagReceipt;
+      this.nextTagReceipt = null;
+      return {
+        value: receipt.value,
+        committed: receipt.committed,
+        status: "pending",
+        error: undefined,
+      };
+    }
+    return committedReceipt(row);
   }
 
   async query(
@@ -339,6 +363,50 @@ describe("WoofService", () => {
       collection: "dogs",
       baseUrl: row.ref.baseUrl,
     });
+  });
+
+  it("resolves createTag before commit when createdBy is already known", async () => {
+    const db = new MockDb();
+    const service = new WoofService(db);
+    const row = service.enterChat({ dogName: "Rex" });
+    const pendingTag = new RowHandle(
+      {
+        addParent: () => committedReceipt(undefined),
+        removeParent: () => committedReceipt(undefined),
+        listParents: async () => [],
+        addMember: () => committedReceipt(undefined),
+        removeMember: () => committedReceipt(undefined),
+        listDirectMembers: async () => [],
+        listEffectiveMembers: async () => [],
+        refreshFields: async () => ({}),
+        connectCrdt: () => ({
+          disconnect: () => undefined,
+          flush: async () => undefined,
+        }),
+        listMembers: async () => [],
+      },
+      tagRef("tag_pending"),
+      "alex",
+      { label: "friendly", createdBy: "alex", createdAt: 1 },
+    );
+    const commit = deferred<TagRowHandle>();
+    db.nextTagReceipt = {
+      value: pendingTag,
+      committed: commit.promise,
+    };
+
+    let resolved = false;
+    void service.createTag(row, "friendly", { createdBy: "alex" }).then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+
+    expect(resolved).toBe(true);
+    expect(db.createCalls.at(-1)?.fields.createdBy).toBe("alex");
+
+    commit.resolve(pendingTag);
+    await Promise.resolve();
   });
 
   it("sends user and dog messages in one turn", async () => {

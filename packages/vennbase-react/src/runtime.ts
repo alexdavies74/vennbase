@@ -239,8 +239,10 @@ class Resource<TData> implements ResourceController<TData> {
   private snapshot: ResourceSnapshot<TData> = idleSnapshot as ResourceSnapshot<TData>;
   private readonly listeners = new Set<() => void>();
   private lastValueSnapshot: string | null = null;
+  private lastAppliedByPeek = false;
   private inFlight: Promise<void> | null = null;
   private poller: AdaptivePoller | null = null;
+  private disposeTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     readonly live: boolean,
@@ -254,8 +256,10 @@ class Resource<TData> implements ResourceController<TData> {
   };
 
   subscribe = (listener: () => void): (() => void) => {
+    this.cancelPendingDispose();
+    const wasEmpty = this.listeners.size === 0;
     this.listeners.add(listener);
-    if (this.listeners.size === 1) {
+    if (wasEmpty) {
       this.start();
     }
 
@@ -263,7 +267,7 @@ class Resource<TData> implements ResourceController<TData> {
       this.listeners.delete(listener);
       if (this.listeners.size === 0) {
         this.stop();
-        this.onEmpty();
+        this.scheduleDispose();
       }
     };
   };
@@ -287,6 +291,7 @@ class Resource<TData> implements ResourceController<TData> {
       const nextValueSnapshot = this.options.snapshotOf?.(data) ?? snapshotValue(data);
       if (this.lastValueSnapshot !== nextValueSnapshot) {
         this.lastValueSnapshot = nextValueSnapshot;
+        this.lastAppliedByPeek = true;
         this.setSnapshot({
           data,
           error: undefined,
@@ -324,6 +329,31 @@ class Resource<TData> implements ResourceController<TData> {
     this.poller = null;
   }
 
+  private scheduleDispose(): void {
+    if (this.disposeTimeout) {
+      return;
+    }
+
+    // React can briefly unsubscribe and resubscribe the same live resource
+    // during StrictMode and external-store churn. Delay eviction so the runtime
+    // map stays consistent across that transient gap.
+    this.disposeTimeout = setTimeout(() => {
+      this.disposeTimeout = null;
+      if (this.listeners.size === 0) {
+        this.onEmpty();
+      }
+    }, 0);
+  }
+
+  private cancelPendingDispose(): void {
+    if (!this.disposeTimeout) {
+      return;
+    }
+
+    clearTimeout(this.disposeTimeout);
+    this.disposeTimeout = null;
+  }
+
   private async runLoad(options: { markActivity: boolean | (() => void); isRefresh: boolean }): Promise<void> {
     if (this.inFlight) {
       return this.inFlight;
@@ -352,14 +382,32 @@ class Resource<TData> implements ResourceController<TData> {
 
     this.inFlight = (async () => {
       try {
-        const data = await this.options.load();
-        const nextValueSnapshot = this.options.snapshotOf?.(data) ?? snapshotValue(data);
+        const data = await this.options.load() as TData;
+        let displayData: TData = data;
+        let nextValueSnapshot = this.options.snapshotOf?.(data) ?? snapshotValue(data);
+        let appliedByPeek = false;
+
+        if (this.lastAppliedByPeek && this.options.peek) {
+          try {
+            const peekData = this.options.peek();
+            const peekSnapshot = this.options.snapshotOf?.(peekData) ?? snapshotValue(peekData);
+            if (peekSnapshot !== nextValueSnapshot) {
+              displayData = peekData;
+              nextValueSnapshot = peekSnapshot;
+              appliedByPeek = true;
+            }
+          } catch {
+            // ignore peek errors — the loaded server snapshot is still usable
+          }
+        }
+
         const changed = this.lastValueSnapshot !== nextValueSnapshot;
         this.lastValueSnapshot = nextValueSnapshot;
+        this.lastAppliedByPeek = appliedByPeek;
 
         if (changed) {
           this.setSnapshot({
-            data,
+            data: displayData,
             error: undefined,
             refreshError: undefined,
             isRefreshing: false,

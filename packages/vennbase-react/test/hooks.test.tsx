@@ -30,6 +30,7 @@ import {
   useRow,
   useSession,
 } from "../src/index";
+import { getDefaultRuntime, snapshots, type ResourceController } from "../src/runtime";
 
 const schema = defineSchema({
   dogs: collection({
@@ -1275,6 +1276,82 @@ describe("@vennbase/react", () => {
     expect(latest?.rows?.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
     expect(latest?.isRefreshing).toBe(false);
     await app.unmount();
+  });
+
+  it("does not let a stale background refresh overwrite the optimistic peek", async () => {
+    const db = new FakeDb();
+    const queryOptions = {
+      in: dogRef(),
+      orderBy: "createdAt" as const,
+      order: "asc" as const,
+      limit: 100,
+    };
+    const staleRefresh = deferred<typeof db.queryRows>();
+    let latest: ReturnType<typeof useQuery<TestSchema, "tags">> | null = null;
+
+    function Probe() {
+      latest = useQuery(db as unknown as Vennbase<TestSchema>, "tags", queryOptions);
+      return <div>{(latest.rows ?? []).map((row) => row.fields.label).join(",")}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    db.peekQueryRows = [makeTagRow("tag_1", "friendly"), makeTagRow("tag_2", "sleepy")];
+    db.nextQueryPromise = staleRefresh.promise;
+
+    await act(async () => {
+      db.emitLocalMutation();
+    });
+
+    expect(latest?.rows?.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
+
+    await act(async () => {
+      staleRefresh.resolve([makeTagRow("tag_1", "friendly")]);
+      await flushMicrotasks();
+    });
+
+    expect(latest?.rows?.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
+    await app.unmount();
+  });
+
+  it("keeps a live query registered through immediate unsubscribe and resubscribe churn", async () => {
+    const db = new FakeDb();
+    const runtime = getDefaultRuntime(db as unknown as Vennbase<TestSchema>);
+    const resourceKey = "query:tags:test";
+    const refreshQuery = deferred<typeof db.queryRows>();
+    const listener = vi.fn();
+    const resource = runtime.getLive(
+      resourceKey,
+      () => db.query(),
+      snapshots.queryRows,
+      () => db.peekQuery(),
+    ) as ResourceController<typeof db.queryRows>;
+
+    const unsubscribe = resource.subscribe(listener);
+    await flushMicrotasks();
+    expect(runtime.resources.has(resourceKey)).toBe(true);
+
+    unsubscribe();
+    const unsubscribeAgain = resource.subscribe(listener);
+    await flushMicrotasks();
+
+    db.peekQueryRows = [makeTagRow("tag_1", "friendly"), makeTagRow("tag_2", "sleepy")];
+    db.nextQueryPromise = refreshQuery.promise;
+
+    await act(async () => {
+      db.emitLocalMutation();
+    });
+
+    expect(runtime.resources.has(resourceKey)).toBe(true);
+    expect(db.peekQueryCalls).toBe(1);
+    expect(resource.getSnapshot().data?.map((row) => row.fields.label)).toEqual(["friendly", "sleepy"]);
+
+    await act(async () => {
+      refreshQuery.resolve(db.peekQueryRows!);
+      await flushMicrotasks();
+    });
+
+    unsubscribeAgain();
   });
 
   it("supports live anonymous queries with anonymous projections", async () => {
