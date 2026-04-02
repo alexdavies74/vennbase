@@ -102,14 +102,6 @@ export default function App() {
 
 function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard: (b: BoardHandle) => void }) {
   const [title, setTitle] = useState("");
-
-  const createBoard = useMutation(async (t: string) => {
-    const boardWrite = db.create("boards", { title: t });
-    const board = boardWrite.value;
-    await boardWrite.committed;
-    await rememberRecentBoard(board);
-    return board;
-  });
   const openRecent = useMutation(async (recentBoard: RecentBoardHandle) => openRecentBoard(recentBoard));
   const { rows: recentBoards = [], error: recentBoardsError } = useQuery(db, "recentBoards", {
     in: CURRENT_USER,
@@ -132,9 +124,23 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            createBoard.mutate(title.trim())
-              .then((b) => onBoard(b))
-              .catch(console.error);
+            const trimmed = title.trim();
+            if (!trimmed) return;
+
+            const boardWrite = db.create("boards", { title: trimmed });
+            const board = boardWrite.value;
+
+            setTitle("");
+            onBoard(board);
+
+            void (async () => {
+              try {
+                await boardWrite.committed;
+                await rememberRecentBoard(board);
+              } catch (error) {
+                console.error(error);
+              }
+            })();
           }}
         >
           <input
@@ -143,13 +149,8 @@ function LandingView({ errorMessage, onBoard }: { errorMessage?: string; onBoard
             placeholder="Board title"
             required
           />
-          <button type="submit" disabled={createBoard.status === "loading"}>
-            {createBoard.status === "loading" ? "Creating…" : "Create"}
-          </button>
+          <button type="submit">Create</button>
         </form>
-        {createBoard.error != null && (
-          <p className="error">Failed to create board.</p>
-        )}
         {errorMessage ? <p className="error">{errorMessage}</p> : null}
       </section>
 
@@ -235,11 +236,6 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
 
   const { shareLink } = useShareLink(db, board.ref, { role: "editor" });
 
-  const addCard = useMutation(async (cardText: string) => {
-    const cardWrite = db.create("cards", { text: cardText, done: false, createdAt: Date.now() }, { in: board.ref });
-    await cardWrite.committed;
-  });
-
   const toggleDone = useMutation(async (card: CardHandle) => {
     const updatedCardWrite = db.update("cards", card.ref, { done: !card.fields.done });
     await updatedCardWrite.committed;
@@ -257,9 +253,14 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
           e.preventDefault();
           const trimmed = text.trim();
           if (!trimmed) return;
-          addCard.mutate(trimmed)
-            .then(() => setText(""))
-            .catch(console.error);
+
+          try {
+            const cardWrite = db.create("cards", { text: trimmed, done: false, createdAt: Date.now() }, { in: board.ref });
+            setText("");
+            void cardWrite.committed.catch(console.error);
+          } catch (error) {
+            console.error(error);
+          }
         }}
       >
         <input
@@ -268,9 +269,7 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
           placeholder="New card"
           required
         />
-        <button type="submit" disabled={addCard.status === "loading"}>
-          Add card
-        </button>
+        <button type="submit">Add card</button>
       </form>
 
       {status === "loading" ? <p className="muted">Loading cards…</p> : null}
