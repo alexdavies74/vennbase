@@ -1,4 +1,4 @@
-import { RowWorker, type WorkerKv } from "./core";
+import { RowWorker, type WorkerKv } from "./core.js";
 import type { Auth, KV, Puter, WorkersHandler } from "@heyputer/puter.js";
 
 type DeployRuntimeKv = Pick<KV, "get" | "set" | "incr" | "list" | "del">;

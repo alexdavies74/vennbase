@@ -1,5 +1,5 @@
-import type { JsonValue } from "./types";
-import { stableJsonStringify } from "./stable-json";
+import type { JsonValue } from "./types.js";
+import { stableJsonStringify } from "./stable-json.js";
 
 const NULL_SENTINEL = "\\x00";
 

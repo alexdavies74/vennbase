@@ -1,7 +1,7 @@
-import { createAdaptivePoller } from "./polling";
-import { OptimisticStore } from "./optimistic-store";
-import { RowHandle } from "./row-handle";
-import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-reference";
+import { createAdaptivePoller } from "./polling.js";
+import { OptimisticStore } from "./optimistic-store.js";
+import { RowHandle } from "./row-handle.js";
+import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-reference.js";
 import type {
   CollectionName,
   DbAnonymousProjection,
@@ -12,12 +12,12 @@ import type {
   DbQueryWatchHandle,
   DbSchema,
   RowRef,
-} from "./schema";
-import { getCollectionKeyFieldNames, getCollectionSpec, pickKeyFieldValues } from "./schema";
-import { stableJsonStringify } from "./stable-json";
-import type { Transport } from "./transport";
-import { encodeFieldValue } from "./key-encoding";
-import type { JsonValue } from "./types";
+} from "./schema.js";
+import { getCollectionKeyFieldNames, getCollectionSpec, pickKeyFieldValues } from "./schema.js";
+import { stableJsonStringify } from "./stable-json.js";
+import type { Transport } from "./transport.js";
+import { encodeFieldValue } from "./key-encoding.js";
+import type { JsonValue } from "./types.js";
 
 interface DbQueryBaseRow {
   rowId: string;

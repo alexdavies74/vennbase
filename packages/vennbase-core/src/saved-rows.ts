@@ -1,7 +1,7 @@
-import { resolveBackendAsync } from "./backend";
-import type { RowInput, RowRef } from "./schema";
-import { normalizeRowRef } from "./row-reference";
-import type { BackendClient, BackendKv } from "./types";
+import { resolveBackendAsync } from "./backend.js";
+import type { RowInput, RowRef } from "./schema.js";
+import { normalizeRowRef } from "./row-reference.js";
+import type { BackendClient, BackendKv } from "./types.js";
 
 const SAVED_ROW_PREFIX = "vennbase:saved-row:v2";
 

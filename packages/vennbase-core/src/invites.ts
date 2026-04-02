@@ -1,9 +1,9 @@
-import type { Identity } from "./identity";
-import type { VennbaseOptions } from "./vennbase";
-import type { Transport } from "./transport";
-import type { MemberRole, RowInput, RowRef } from "./schema";
-import { normalizeRowRef } from "./row-reference";
-import type { ParsedInvite, ShareToken } from "./types";
+import type { Identity } from "./identity.js";
+import type { VennbaseOptions } from "./vennbase.js";
+import type { Transport } from "./transport.js";
+import type { MemberRole, RowInput, RowRef } from "./schema.js";
+import { normalizeRowRef } from "./row-reference.js";
+import type { ParsedInvite, ShareToken } from "./types.js";
 
 export const VENNBASE_INVITE_TARGET_PARAM = "db";
 

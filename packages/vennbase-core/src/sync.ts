@@ -1,8 +1,8 @@
-import { createAdaptivePoller } from "./polling";
-import type { RowRuntime } from "./row-runtime";
-import type { CrdtConnectCallbacks, CrdtConnection, SyncMessage } from "./types";
-import type { RowInput } from "./schema";
-import { normalizeRowRef } from "./row-reference";
+import { createAdaptivePoller } from "./polling.js";
+import type { RowRuntime } from "./row-runtime.js";
+import type { CrdtConnectCallbacks, CrdtConnection, SyncMessage } from "./types.js";
+import type { RowInput } from "./schema.js";
+import { normalizeRowRef } from "./row-reference.js";
 
 export class Sync {
   constructor(private readonly rowRuntime: RowRuntime) {}

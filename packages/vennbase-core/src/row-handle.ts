@@ -1,5 +1,5 @@
-import type { CrdtConnectCallbacks, CrdtConnection, JsonValue } from "./types";
-import type { MutationReceipt } from "./mutation-receipt";
+import type { CrdtConnectCallbacks, CrdtConnection, JsonValue } from "./types.js";
+import type { MutationReceipt } from "./mutation-receipt.js";
 import type {
   AllowedParentCollections,
   CollectionName,
@@ -10,7 +10,7 @@ import type {
   RowRef,
   RowInput,
   RowFields,
-} from "./schema";
+} from "./schema.js";
 
 export interface RowHandleBackend<Schema extends DbSchema = DbSchema> {
   addParent(child: RowInput, parent: RowInput): MutationReceipt<void>;

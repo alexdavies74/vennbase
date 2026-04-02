@@ -1,6 +1,6 @@
-import type { Transport } from "./transport";
-import type { DbMemberInfo, DbSchema, MemberRole, RowInput } from "./schema";
-import { normalizeRowRef } from "./row-reference";
+import type { Transport } from "./transport.js";
+import type { DbMemberInfo, DbSchema, MemberRole, RowInput } from "./schema.js";
+import { normalizeRowRef } from "./row-reference.js";
 
 interface ListMembersResponse {
   members: Array<{ username: string; role: MemberRole }>;

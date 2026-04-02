@@ -1,4 +1,4 @@
-import type { WorkerKv } from "./core";
+import type { WorkerKv } from "./core.js";
 
 interface KvEntry {
   key: string;

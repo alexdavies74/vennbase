@@ -1,5 +1,5 @@
-import { isCurrentUser, type CurrentUser, type RowInput, type RowRef } from "./schema";
-import { normalizeBaseUrl } from "./transport";
+import { isCurrentUser, type CurrentUser, type RowInput, type RowRef } from "./schema.js";
+import { normalizeBaseUrl } from "./transport.js";
 
 function hasEmbeddedRowRef<TCollection extends string>(
   row: RowInput<TCollection>,

@@ -1,8 +1,8 @@
-import { RowHandle } from "./row-handle";
-import { createMutationReceipt, type MutationReceipt } from "./mutation-receipt";
-import { OptimisticStore } from "./optimistic-store";
-import type { RowRuntime } from "./row-runtime";
-import type { WriteSettler } from "./write-settler";
+import { RowHandle } from "./row-handle.js";
+import { createMutationReceipt, type MutationReceipt } from "./mutation-receipt.js";
+import { OptimisticStore } from "./optimistic-store.js";
+import type { RowRuntime } from "./row-runtime.js";
+import type { WriteSettler } from "./write-settler.js";
 import type {
   CollectionName,
   DbCreateOptions,
@@ -12,11 +12,11 @@ import type {
   RowRef,
   RowInput,
   RowFields,
-} from "./schema";
-import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec, pickKeyFieldValues } from "./schema";
-import type { Transport } from "./transport";
-import { normalizeParentRefs, normalizeRowRef, rowRefKey } from "./row-reference";
-import type { JsonValue } from "./types";
+} from "./schema.js";
+import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec, pickKeyFieldValues } from "./schema.js";
+import type { Transport } from "./transport.js";
+import { normalizeParentRefs, normalizeRowRef, rowRefKey } from "./row-reference.js";
+import type { JsonValue } from "./types.js";
 
 interface GetFieldsResponse {
   fields: Record<string, JsonValue>;

@@ -1,11 +1,11 @@
-export { Vennbase } from "./vennbase";
-export { RowHandle } from "./row-handle";
-export type { AnyRowHandle } from "./row-handle";
-export { VennbaseError } from "./errors";
-export { VENNBASE_INVITE_TARGET_PARAM } from "./invites";
-export { CURRENT_USER, collection, defineSchema, field } from "./schema";
-export type { VennbaseOptions } from "./vennbase";
-export type { MutationReceipt, MutationStatus } from "./mutation-receipt";
+export { Vennbase } from "./vennbase.js";
+export { RowHandle } from "./row-handle.js";
+export type { AnyRowHandle } from "./row-handle.js";
+export { VennbaseError } from "./errors.js";
+export { VENNBASE_INVITE_TARGET_PARAM } from "./invites.js";
+export { CURRENT_USER, collection, defineSchema, field } from "./schema.js";
+export type { VennbaseOptions } from "./vennbase.js";
+export type { MutationReceipt, MutationStatus } from "./mutation-receipt.js";
 export type {
   AuthSession,
   BackendClient,
@@ -18,7 +18,7 @@ export type {
   ShareToken,
   VennbaseUser,
   SyncMessage,
-} from "./types";
+} from "./types.js";
 export type {
   AllowedParentCollections,
   AllowedParentRef,
@@ -44,4 +44,4 @@ export type {
   RowRef,
   RowInput,
   RowFields,
-} from "./schema";
+} from "./schema.js";

@@ -16,7 +16,7 @@ import type {
 } from "@vennbase/core";
 import type { RowHandle } from "@vennbase/core";
 
-import { createAdaptivePoller, subscribeToBrowserActivity, type ActivitySubscriber, type AdaptivePoller } from "./polling";
+import { createAdaptivePoller, subscribeToBrowserActivity, type ActivitySubscriber, type AdaptivePoller } from "./polling.js";
 
 type MutationSubscribedClient<Schema extends DbSchema> = Vennbase<Schema> & {
   subscribeToLocalMutations?: (listener: () => void) => (() => void) | void;

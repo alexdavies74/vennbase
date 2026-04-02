@@ -1,5 +1,5 @@
 import type { KV, Puter } from "@heyputer/puter.js";
-import type { MemberRole, RowRef } from "./schema";
+import type { MemberRole, RowRef } from "./schema.js";
 
 export interface BackendKv extends Pick<KV, "get" | "set" | "del"> {}
 

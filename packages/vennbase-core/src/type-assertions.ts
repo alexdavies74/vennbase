@@ -1,4 +1,4 @@
-import { Vennbase } from "./vennbase";
+import { Vennbase } from "./vennbase.js";
 import {
   CURRENT_USER,
   collection,
@@ -6,7 +6,7 @@ import {
   field,
   type DbAnonymousProjection,
   type RowRef,
-} from "./schema";
+} from "./schema.js";
 
 const typeTestSchema = defineSchema({
   projects: collection({

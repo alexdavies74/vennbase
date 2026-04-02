@@ -27,6 +27,14 @@ for (const packageName of packages) {
 }
 
 for (const packageName of packages) {
+  if (packageName === "@vennbase/yjs") {
+    continue;
+  }
+
+  run("pnpm", ["--filter", packageName, "smoke:node-esm"]);
+}
+
+for (const packageName of packages) {
   run("pnpm", [
     "--filter",
     packageName,

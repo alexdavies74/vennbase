@@ -1,7 +1,7 @@
-import type { MemberRole, RowRef } from "./schema";
-import { normalizeBaseUrl } from "./transport";
-import type { ShareToken, VennbaseUser, Row } from "./types";
-import type { Transport } from "./transport";
+import type { MemberRole, RowRef } from "./schema.js";
+import { normalizeBaseUrl } from "./transport.js";
+import type { ShareToken, VennbaseUser, Row } from "./types.js";
+import type { Transport } from "./transport.js";
 
 export interface PlannedRow {
   readonly row: Row;

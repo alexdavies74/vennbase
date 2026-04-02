@@ -1,4 +1,4 @@
-import type { BackendClient } from "./types";
+import type { BackendClient } from "./types.js";
 
 let ambientBackendPromise: Promise<BackendClient | undefined> | null = null;
 

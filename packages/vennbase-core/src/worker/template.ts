@@ -1,4 +1,4 @@
-import { CLASSIC_WORKER_RUNTIME, CLASSIC_WORKER_RUNTIME_ID } from "./dist/generated-runtime";
+import { CLASSIC_WORKER_RUNTIME, CLASSIC_WORKER_RUNTIME_ID } from "./dist/generated-runtime.js";
 
 export { CLASSIC_WORKER_RUNTIME_ID };
 

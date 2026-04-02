@@ -1,9 +1,9 @@
-import type { Identity } from "./identity";
-import type { Provisioning } from "./provisioning";
-import type { MemberRole, RowRef } from "./schema";
-import type { Transport } from "./transport";
-import { buildRowUrl, normalizeBaseUrl } from "./transport";
-import type { JoinOptions, VennbaseUser, Row, RowSnapshot } from "./types";
+import type { Identity } from "./identity.js";
+import type { Provisioning } from "./provisioning.js";
+import type { MemberRole, RowRef } from "./schema.js";
+import type { Transport } from "./transport.js";
+import { buildRowUrl, normalizeBaseUrl } from "./transport.js";
+import type { JoinOptions, VennbaseUser, Row, RowSnapshot } from "./types.js";
 
 interface PostMessageResponse {
   message: { sequence: number };

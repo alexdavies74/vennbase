@@ -1,22 +1,22 @@
-import { AuthManager } from "./auth";
-import { Identity } from "./identity";
-import { Invites } from "./invites";
-import { Members } from "./members";
-import { createMutationReceipt, type MutableMutationReceipt, type MutationReceipt } from "./mutation-receipt";
-import { OptimisticStore } from "./optimistic-store";
-import { Parents } from "./parents";
+import { AuthManager } from "./auth.js";
+import { Identity } from "./identity.js";
+import { Invites } from "./invites.js";
+import { Members } from "./members.js";
+import { createMutationReceipt, type MutableMutationReceipt, type MutationReceipt } from "./mutation-receipt.js";
+import { OptimisticStore } from "./optimistic-store.js";
+import { Parents } from "./parents.js";
 import {
   clearSavedRow,
   loadSavedRow,
   saveRow,
-} from "./saved-rows";
-import { Provisioning } from "./provisioning";
-import { Query } from "./query";
-import { RowHandle, type AnyRowHandle, type RowHandleBackend } from "./row-handle";
-import { RowRuntime } from "./row-runtime";
-import { Rows } from "./rows";
-import { WritePlanner } from "./write-planner";
-import { WriteSettler } from "./write-settler";
+} from "./saved-rows.js";
+import { Provisioning } from "./provisioning.js";
+import { Query } from "./query.js";
+import { RowHandle, type AnyRowHandle, type RowHandleBackend } from "./row-handle.js";
+import { RowRuntime } from "./row-runtime.js";
+import { Rows } from "./rows.js";
+import { WritePlanner } from "./write-planner.js";
+import { WriteSettler } from "./write-settler.js";
 import type {
   AllowedParentCollections,
   CollectionName,
@@ -35,11 +35,11 @@ import type {
   RowRef,
   RowInput,
   RowFields,
-} from "./schema";
-import { resolveBackend } from "./backend";
-import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, collectionAllowsCurrentUser, isCurrentUser, resolveCollectionName } from "./schema";
-import { stableJsonStringify } from "./stable-json";
-import { Transport } from "./transport";
+} from "./schema.js";
+import { resolveBackend } from "./backend.js";
+import { BUILTIN_USER_SCOPE as USER_SCOPE_COLLECTION, collectionAllowsCurrentUser, isCurrentUser, resolveCollectionName } from "./schema.js";
+import { stableJsonStringify } from "./stable-json.js";
+import { Transport } from "./transport.js";
 import type {
   AuthSession,
   BackendClient,
@@ -50,9 +50,9 @@ import type {
   ParsedInvite,
   ShareToken,
   VennbaseUser,
-} from "./types";
-import { Sync } from "./sync";
-import { normalizeRowRef, rowRefKey } from "./row-reference";
+} from "./types.js";
+import { Sync } from "./sync.js";
+import { normalizeRowRef, rowRefKey } from "./row-reference.js";
 
 export interface VennbaseOptions<Schema extends DbSchema = DbSchema> {
   schema: Schema;

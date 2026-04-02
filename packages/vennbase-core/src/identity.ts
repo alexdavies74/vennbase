@@ -1,7 +1,7 @@
-import { resolveBackend, resolveBackendAsync } from "./backend";
-import { missingPuterClientMessage, signedOutError } from "./errors";
-import type { VennbaseOptions } from "./vennbase";
-import type { AuthSession, BackendClient, VennbaseUser } from "./types";
+import { resolveBackend, resolveBackendAsync } from "./backend.js";
+import { missingPuterClientMessage, signedOutError } from "./errors.js";
+import type { VennbaseOptions } from "./vennbase.js";
+import type { AuthSession, BackendClient, VennbaseUser } from "./types.js";
 
 export class Identity {
   private cached: VennbaseUser | null = null;

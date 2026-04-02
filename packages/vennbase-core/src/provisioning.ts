@@ -1,12 +1,12 @@
-import type { AuthManager } from "./auth";
-import { CLASSIC_WORKER_RUNTIME_ID, buildClassicWorkerScript } from "./worker/template";
-import { resolveBackend, resolveBackendAsync } from "./backend";
-import { missingPuterProvisioningMessage } from "./errors";
+import type { AuthManager } from "./auth.js";
+import { CLASSIC_WORKER_RUNTIME_ID, buildClassicWorkerScript } from "./worker/template.js";
+import { resolveBackend, resolveBackendAsync } from "./backend.js";
+import { missingPuterProvisioningMessage } from "./errors.js";
 import type { WorkerDeployment } from "@heyputer/puter.js";
-import type { VennbaseOptions } from "./vennbase";
-import type { Transport } from "./transport";
-import { stripTrailingSlash } from "./transport";
-import type { BackendClient, DeployWorkerArgs } from "./types";
+import type { VennbaseOptions } from "./vennbase.js";
+import type { Transport } from "./transport.js";
+import { stripTrailingSlash } from "./transport.js";
+import type { BackendClient, DeployWorkerArgs } from "./types.js";
 
 const FEDERATION_WORKER_ROW_SENTINEL = "bootstrap";
 const WORKER_METADATA_NAMESPACE = "vennbase";

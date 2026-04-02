@@ -1,10 +1,10 @@
-import type { AuthManager } from "./auth";
-import { VennbaseError, toApiError } from "./errors";
-import { resolveBackend } from "./backend";
+import type { AuthManager } from "./auth.js";
+import { VennbaseError, toApiError } from "./errors.js";
+import { resolveBackend } from "./backend.js";
 import type { WorkersHandler } from "@heyputer/puter.js";
-import type { VennbaseOptions } from "./vennbase";
-import type { BackendClient } from "./types";
-import type { RowRef } from "./schema";
+import type { VennbaseOptions } from "./vennbase.js";
+import type { BackendClient } from "./types.js";
+import type { RowRef } from "./schema.js";
 
 type RowAction =
   | "db/query"

@@ -1,4 +1,4 @@
-import type { ApiError, ErrorCode } from "./types";
+import type { ApiError, ErrorCode } from "./types.js";
 
 const PUTER_SETUP_HINT = "Pass backend to new Vennbase(...), or let Vennbase use the default Puter browser client.";
 

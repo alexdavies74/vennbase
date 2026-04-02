@@ -1,9 +1,9 @@
-import type { RowRuntime } from "./row-runtime";
-import type { Transport } from "./transport";
-import type { DbSchema, RowInput, RowRef } from "./schema";
-import { assertParentAllowed, getCollectionKeyFieldNames, pickKeyFieldValues } from "./schema";
-import { normalizeRowRef } from "./row-reference";
-import type { JsonValue } from "./types";
+import type { RowRuntime } from "./row-runtime.js";
+import type { Transport } from "./transport.js";
+import type { DbSchema, RowInput, RowRef } from "./schema.js";
+import { assertParentAllowed, getCollectionKeyFieldNames, pickKeyFieldValues } from "./schema.js";
+import { normalizeRowRef } from "./row-reference.js";
+import type { JsonValue } from "./types.js";
 
 export class Parents {
   constructor(

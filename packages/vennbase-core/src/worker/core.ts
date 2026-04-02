@@ -1,7 +1,7 @@
-import { parseProtectedRequest, verifyPrincipalProof, verifyRequestProof } from "../auth";
-import { canonicalize } from "../crypto";
+import { parseProtectedRequest, verifyPrincipalProof, verifyRequestProof } from "../auth.js";
+import { canonicalize } from "../crypto.js";
 import type { WorkersHandler } from "@heyputer/puter.js";
-import type { DbFieldValue, MemberRole, RowRef } from "../schema";
+import type { DbFieldValue, MemberRole, RowRef } from "../schema.js";
 import type {
   ApiError,
   JsonValue,
@@ -13,7 +13,7 @@ import type {
   RowSnapshot,
   ShareToken,
   VerifiedPrincipal,
-} from "../types";
+} from "../types.js";
 
 interface KvEntry {
   key: string;

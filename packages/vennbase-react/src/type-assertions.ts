@@ -10,7 +10,7 @@ import {
   type RowRef,
 } from "@vennbase/core";
 
-import { useAcceptInviteFromUrl, useShareLink, useQuery, useRow } from "./index";
+import { useAcceptInviteFromUrl, useShareLink, useQuery, useRow } from "./index.js";
 
 const schema = defineSchema({
   dogs: collection({

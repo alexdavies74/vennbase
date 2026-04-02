@@ -1,7 +1,7 @@
-import type { MutationReceipt } from "./mutation-receipt";
-import type { DbMemberInfo, DbSchema, MemberRole, RowRef } from "./schema";
-import { rowRefKey, sameRowRef } from "./row-reference";
-import type { JsonValue, ShareToken } from "./types";
+import type { MutationReceipt } from "./mutation-receipt.js";
+import type { DbMemberInfo, DbSchema, MemberRole, RowRef } from "./schema.js";
+import { rowRefKey, sameRowRef } from "./row-reference.js";
+import type { JsonValue, ShareToken } from "./types.js";
 
 type RowKey = string;
 

@@ -30,7 +30,7 @@ import type {
 } from "@vennbase/core";
 import type { RowHandle } from "@vennbase/core";
 
-import type { ActivitySubscriber } from "./polling";
+import type { ActivitySubscriber } from "./polling.js";
 import {
   getDefaultRuntime,
   getIdleSnapshot,
@@ -47,11 +47,11 @@ import {
   type ResourceController,
   type ResourceSnapshot,
   snapshots,
-} from "./runtime";
-import { VennbaseReactRuntime as Runtime } from "./runtime";
+} from "./runtime.js";
+import { VennbaseReactRuntime as Runtime } from "./runtime.js";
 
-export type { ActivitySubscriber } from "./polling";
-export type { LoadStatus } from "./runtime";
+export type { ActivitySubscriber } from "./polling.js";
+export type { LoadStatus } from "./runtime.js";
 
 export interface UseResourceResult<TData> extends ResourceSnapshot<TData> {
   refresh(): Promise<void>;

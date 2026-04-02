@@ -15,8 +15,9 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -35,10 +36,12 @@
     "build": "tsc -p tsconfig.json",
     "predev": "pnpm run generate:worker-runtime",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "smoke:node-esm": "node ../../scripts/run-node-esm-smoke.mjs .",
     "pretypecheck": "pnpm run generate:worker-runtime",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prelint": "pnpm run generate:worker-runtime",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm run smoke:node-esm",
     "pretest": "pnpm run generate:worker-runtime",
     "test": "vitest run"
   },

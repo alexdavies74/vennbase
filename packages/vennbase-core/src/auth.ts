@@ -1,4 +1,4 @@
-import { resolveBackend, resolveBackendAsync } from "./backend";
+import { resolveBackend, resolveBackendAsync } from "./backend.js";
 import {
   exportPrivateJwk,
   exportPublicJwk,
@@ -8,8 +8,8 @@ import {
   importPublicKey,
   signCanonicalValue,
   verifyCanonicalValue,
-} from "./crypto";
-import type { BackendClient, PrincipalProof, ProtectedRequest, RequestProof, VerifiedPrincipal } from "./types";
+} from "./crypto.js";
+import type { BackendClient, PrincipalProof, ProtectedRequest, RequestProof, VerifiedPrincipal } from "./types.js";
 
 interface StoredSignerKey {
   version: 1;
