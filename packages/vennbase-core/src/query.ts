@@ -5,9 +5,10 @@ import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-referenc
 import type {
   CollectionName,
   DbAnonymousProjection,
-  DbAnonymousQueryOptions,
-  DbFullQueryOptions,
   DbQueryOptions,
+  DbQueryRows,
+  DbQuerySelect,
+  InferDbQuerySelect,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
@@ -165,38 +166,35 @@ export class Query<Schema extends DbSchema> {
     private readonly rowLoader: QueryRowLoader<Schema>,
     private readonly optimisticStore: OptimisticStore,
     private readonly schema: Schema,
-    private readonly resolveOptions?: <TCollection extends CollectionName<Schema>>(
+    private readonly resolveOptions?: <
+      TCollection extends CollectionName<Schema>,
+      TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    >(
       collection: TCollection,
-      options: DbQueryOptions<Schema, TCollection>,
-    ) => Promise<DbQueryOptions<Schema, TCollection>>,
-    private readonly resolveOptionsSync?: <TCollection extends CollectionName<Schema>>(
+      options: TOptions,
+    ) => Promise<TOptions>,
+    private readonly resolveOptionsSync?: <
+      TCollection extends CollectionName<Schema>,
+      TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    >(
       collection: TCollection,
-      options: DbQueryOptions<Schema, TCollection>,
-    ) => DbQueryOptions<Schema, TCollection>,
+      options: TOptions,
+    ) => TOptions,
   ) {}
 
-  async query<TCollection extends CollectionName<Schema>>(
+  async query<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     collection: TCollection,
-    options: DbAnonymousQueryOptions<Schema, TCollection>,
-  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
+    options: TOptions,
+  ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     return this.runQuery(collection, options);
   }
 
   peekQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
+    options: DbQueryOptions<Schema, TCollection, "full">,
   ): Array<RowHandle<Schema, TCollection>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const resolvedOptions = this.resolveOptionsSync
@@ -227,10 +225,13 @@ export class Query<Schema extends DbSchema> {
     });
   }
 
-  private async runQuery<TCollection extends CollectionName<Schema>>(
+  private async runQuery<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
+    options: TOptions,
+  ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const resolvedOptions = this.resolveOptions
       ? await this.resolveOptions(collection, options)
@@ -256,20 +257,20 @@ export class Query<Schema extends DbSchema> {
     );
 
     if (select === "anonymous") {
-      return this.runAnonymousQuery(collection, parentRefs, {
+      return await this.runAnonymousQuery(collection, parentRefs, {
         orderBy,
         order: resolvedOptions.order ?? "asc",
         limit,
         where: resolvedOptions.where as Record<string, JsonValue> | undefined,
-      });
+      }) as DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>;
     }
 
-    return this.runFullQuery(collection, parentRefs, {
+    return await this.runFullQuery(collection, parentRefs, {
       orderBy,
       order: resolvedOptions.order ?? "asc",
       limit,
       where: resolvedOptions.where as Record<string, JsonValue> | undefined,
-    });
+    }) as DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>;
   }
 
   private async runFullQuery<TCollection extends CollectionName<Schema>>(
@@ -519,25 +520,13 @@ export class Query<Schema extends DbSchema> {
     })) as Array<DbAnonymousProjection<Schema, TCollection>>;
   }
 
-  watchQuery<TCollection extends CollectionName<Schema>>(
+  watchQuery<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     collection: TCollection,
-    options: DbAnonymousQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<DbAnonymousProjection<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
+    options: TOptions,
+    callbacks: DbQueryWatchCallbacks<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>[number]>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;
 

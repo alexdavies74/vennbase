@@ -1,12 +1,16 @@
+import type { RowHandle } from "./row-handle.js";
+
 export interface RowRef<TCollection extends string = string> {
   id: string;
   collection: TCollection;
   baseUrl: string;
 }
 
-export type RowInput<TCollection extends string = string> =
+export type RowTarget<TCollection extends string = string> =
   | RowRef<TCollection>
   | { ref: RowRef<TCollection> };
+
+export type RowInput<TCollection extends string = string> = RowTarget<TCollection>;
 
 export type DbFieldValue = string | number | boolean | RowRef;
 
@@ -31,6 +35,23 @@ export function isCurrentUser(value: unknown): value is CurrentUser {
     && value !== null
     && "__vennbase" in value
     && value.__vennbase === "CURRENT_USER";
+}
+
+export function isRowRef<TCollection extends string = string>(value: unknown): value is RowRef<TCollection> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return typeof record.id === "string"
+    && typeof record.collection === "string"
+    && typeof record.baseUrl === "string";
+}
+
+export function toRowRef<TCollection extends string>(
+  row: RowTarget<TCollection>,
+): RowRef<TCollection> {
+  return isRowRef(row) ? row : row.ref;
 }
 
 export interface DbFieldBuilder<
@@ -376,24 +397,59 @@ export interface DbAnonymousProjection<
   keyFields: KeyRowFields<Schema, TCollection>;
 }
 
-export type DbFullQueryOptions<
+export function isAnonymousProjection<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
-> = QueryBaseOptions<Schema, TCollection> & {
-  select?: "full" | undefined;
-};
+>(value: unknown): value is DbAnonymousProjection<Schema, TCollection> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
 
-export type DbAnonymousQueryOptions<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
-> = QueryBaseOptions<Schema, TCollection> & {
-  select: "anonymous";
-};
+  const record = value as Record<string, unknown>;
+  return record.kind === "anonymous-projection"
+    && typeof record.id === "string"
+    && typeof record.collection === "string"
+    && typeof record.keyFields === "object"
+    && record.keyFields !== null;
+}
+
+export type DbQueryRow<
+  Schema extends DbSchema = DbSchema,
+  TCollection extends CollectionName<Schema> = CollectionName<Schema>,
+  TSelect extends DbQuerySelect = "full",
+> = TSelect extends "anonymous"
+  ? DbAnonymousProjection<Schema, TCollection>
+  : RowHandle<Schema, TCollection>;
+
+export type DbQueryRows<
+  Schema extends DbSchema = DbSchema,
+  TCollection extends CollectionName<Schema> = CollectionName<Schema>,
+  TSelect extends DbQuerySelect = "full",
+> = Array<DbQueryRow<Schema, TCollection, TSelect>>;
+
+export type InferDbQuerySelect<TOptions> = TOptions extends { select: "anonymous" }
+  ? "anonymous"
+  : "full";
 
 export type DbQueryOptions<
   Schema extends DbSchema = DbSchema,
   TCollection extends CollectionName<Schema> = CollectionName<Schema>,
-> = DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection>;
+  TSelect extends DbQuerySelect = "full",
+> = QueryBaseOptions<Schema, TCollection> & (
+  TSelect extends "anonymous"
+    ? { select: "anonymous" }
+    : { select?: "full" | undefined }
+);
+
+export type DbFullQueryOptions<
+  Schema extends DbSchema = DbSchema,
+  TCollection extends CollectionName<Schema> = CollectionName<Schema>,
+> = DbQueryOptions<Schema, TCollection, "full">;
+
+export type DbAnonymousQueryOptions<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+> = DbQueryOptions<Schema, TCollection, "anonymous">;
 
 export interface DbQueryWatchCallbacks<TRow> {
   onChange(rows: TRow[]): void;

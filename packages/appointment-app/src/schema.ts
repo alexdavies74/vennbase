@@ -1,4 +1,4 @@
-import { Vennbase, RowHandle, collection, defineSchema, field, type DbAnonymousProjection, type InsertFields, type RowRef } from "@vennbase/core";
+import { Vennbase, RowHandle, collection, defineSchema, field, type DbQueryRow, type InsertFields, type RowRef } from "@vennbase/core";
 
 export const schema = defineSchema({
   schedules: collection({
@@ -62,7 +62,7 @@ export type BookingRootHandle = RowHandle<Schema, "bookingRoots">;
 export type BookingHandle = RowHandle<Schema, "bookings">;
 export type RecentScheduleHandle = RowHandle<Schema, "recentSchedules">;
 export type SavedBookingHandle = RowHandle<Schema, "savedBookings">;
-export type BookingAnonymousProjection = DbAnonymousProjection<Schema, "bookings">;
+export type BookingAnonymousProjection = DbQueryRow<Schema, "bookings", "anonymous">;
 export type BookingRootRef = RowRef<"bookingRoots">;
 export type ScheduleInsertFields = InsertFields<Schema, "schedules">;
 export type EditableScheduleFields = Omit<ScheduleInsertFields, "bookingSubmitterLink">;

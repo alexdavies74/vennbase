@@ -6,6 +6,9 @@ import {
   field,
   type AnyRowHandle,
   type DbAnonymousProjection,
+  type DbQueryOptions,
+  type DbQueryRow,
+  type DbQuerySelect,
   type RowHandle,
   type RowRef,
 } from "@vennbase/core";
@@ -59,19 +62,49 @@ const projectedTags = useQuery(anyClient, "tags", {
   select: "anonymous",
   orderBy: "createdAt",
 });
+const projectedTagOptions: DbQueryOptions<TestSchema, "tags", "anonymous"> = {
+  in: dogHandle,
+  select: "anonymous",
+  orderBy: "createdAt",
+};
+const recentDogOptions: DbQueryOptions<TestSchema, "recentDogs"> = {
+  in: CURRENT_USER,
+  orderBy: "openedAt",
+};
+const projectedTagsFromOptions = useQuery(anyClient, "tags", projectedTagOptions);
 const recentDogs = useQuery(anyClient, "recentDogs", {
   in: CURRENT_USER,
   orderBy: "openedAt",
 });
+const recentDogsFromOptions = useQuery(anyClient, "recentDogs", recentDogOptions);
 const projectedTag: DbAnonymousProjection<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
+const projectedTagFromOptions: DbQueryRow<TestSchema, "tags", "anonymous"> | undefined = projectedTagsFromOptions.rows?.[0];
 const recentDog: RowHandle<TestSchema, "recentDogs"> | undefined = recentDogs.rows?.[0];
+const recentDogFromOptions: DbQueryRow<TestSchema, "recentDogs"> | undefined = recentDogsFromOptions.rows?.[0];
 const dogName: string = dogHandle.fields.name;
+
+function useTypedQuery<
+  TCollection extends keyof TestSchema & string,
+  TSelect extends DbQuerySelect = "full",
+>(collection: TCollection, options: DbQueryOptions<TestSchema, TCollection, TSelect>) {
+  return useQuery(anyClient, collection, options);
+}
+
+const genericProjectedTag: DbQueryRow<TestSchema, "tags", "anonymous"> | undefined =
+  useTypedQuery("tags", projectedTagOptions).rows?.[0];
+const genericRecentDog: DbQueryRow<TestSchema, "recentDogs"> | undefined =
+  useTypedQuery("recentDogs", recentDogOptions).rows?.[0];
+
 void maybeAnyRowHandle;
 void maybeDogHandle;
 void maybeTagHandle;
 void fallbackTagRows;
 void projectedTag;
+void projectedTagFromOptions;
 void recentDog;
+void recentDogFromOptions;
+void genericProjectedTag;
+void genericRecentDog;
 void dogName;
 
 // @ts-expect-error queries always require an explicit in option

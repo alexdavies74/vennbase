@@ -3,7 +3,7 @@ import type {
   AnyRowHandle,
   VennbaseUser,
 } from "@vennbase/core";
-import { CURRENT_USER } from "@vennbase/core";
+import { CURRENT_USER, toRowRef } from "@vennbase/core";
 import type { AI, ChatMessage, ChatResponse } from "@heyputer/puter.js";
 
 import type { DogRowHandle, TagRowHandle, WoofDb, WoofSchema } from "./schema";
@@ -64,7 +64,7 @@ export class WoofService {
     args: { content: string; doc: Y.Doc; flush?: () => Promise<void>; puterAI?: PuterAI },
   ): Promise<void> {
     const actor = await this.db.whoAmI();
-    const members = await this.db.listMembers(row.ref);
+    const members = await this.db.listMembers(row);
     const dogName = String(row.fields.name ?? "");
     const chatArray = getChatArray(args.doc);
 
@@ -123,6 +123,7 @@ export class WoofService {
     }
 
     const createdBy = options?.createdBy?.trim() || (await this.db.whoAmI()).username;
+    const rowRef = toRowRef(row);
     const tagWrite = this.db.create(
       "tags",
       {
@@ -131,13 +132,13 @@ export class WoofService {
         createdAt: Date.now(),
       },
       {
-        in: row.ref,
+        in: row,
       },
     );
     void tagWrite.committed.catch((error) => {
       console.error("[woof-app] createTag commit failed", {
         error,
-        rowRef: row.ref,
+        rowRef,
         label: trimmed,
       });
     });
@@ -148,8 +149,9 @@ export class WoofService {
   }
 
   activateHistory(row: DogRowHandle): void {
+    const dogRef = toRowRef(row);
     const historyRow = this.db.create("dogHistory", {
-      dogRef: row.ref,
+      dogRef,
       status: "active",
     }, {
       in: CURRENT_USER,
@@ -157,7 +159,7 @@ export class WoofService {
     void this.clearActiveHistory(historyRow.id).catch((error) => {
       console.error("[woof-app] failed to clear prior active dog history rows", {
         error,
-        rowRef: row.ref,
+        rowRef: dogRef,
       });
     });
   }
@@ -174,7 +176,7 @@ export class WoofService {
         historyRow.id === keepHistoryRowId
           ? Promise.resolve(historyRow)
           :
-        this.db.update("dogHistory", historyRow.ref, { status: "inactive" }).committed),
+        this.db.update("dogHistory", historyRow, { status: "inactive" }).committed),
     );
   }
 

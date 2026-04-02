@@ -1,4 +1,4 @@
-import { VENNBASE_INVITE_TARGET_PARAM } from "@vennbase/core";
+import { VENNBASE_INVITE_TARGET_PARAM, isRowRef, toRowRef } from "@vennbase/core";
 import {
   createContext,
   type ReactNode,
@@ -17,12 +17,13 @@ import type {
   CrdtAdapter,
   CrdtConnectCallbacks,
   CrdtConnection,
-  DbAnonymousProjection,
-  DbAnonymousQueryOptions,
-  DbFullQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryRows,
+  DbQuerySelect,
+  DbQueryRow,
   DbSchema,
+  InferDbQuerySelect,
   MemberRole,
   VennbaseUser,
   RowRef,
@@ -296,17 +297,15 @@ function hasRowRef(value: unknown): value is { ref: RowRef } {
     && typeof (candidate.ref as { baseUrl?: unknown }).baseUrl === "string";
 }
 
-function resolveRowInput<TCollection extends string>(row: RowInput<TCollection>): RowRef<TCollection> {
-  return hasRowRef(row) ? row.ref as RowRef<TCollection> : row;
-}
-
 function getRowFromResult<TResult>(
   result: TResult,
   getRow?: (result: TResult) => RowRef,
 ): RowRef {
   const row = getRow
     ? getRow(result)
-    : hasRowRef(result)
+    : isRowRef(result)
+      ? result
+      : hasRowRef(result)
       ? result.ref
       : null;
   if (!row) {
@@ -480,40 +479,17 @@ export function useCurrentUser<Schema extends DbSchema>(
 export function useQuery<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
+  TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
 >(
   db: Vennbase<Schema>,
   collection: TCollection,
-  options: DbAnonymousQueryOptions<Schema, TCollection> | null | undefined,
-  hookOptions?: UseHookOptions,
-): UseQueryResult<
-  DbAnonymousProjection<Schema, TCollection>
->;
-export function useQuery<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
->(
-  db: Vennbase<Schema>,
-  collection: TCollection,
-  options: DbFullQueryOptions<Schema, TCollection> | null | undefined,
-  hookOptions?: UseHookOptions,
-): UseQueryResult<
-  RowHandle<Schema, TCollection>
->;
-export function useQuery<
-  Schema extends DbSchema,
-  TCollection extends CollectionName<Schema>,
->(
-  db: Vennbase<Schema>,
-  collection: TCollection,
-  options: DbQueryOptions<Schema, TCollection> | null | undefined,
+  options: TOptions | null | undefined,
   hookOptions: UseHookOptions = {},
-): UseQueryResult<
-  RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>
-> {
+): UseQueryResult<DbQueryRow<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
-  const resourceKey = options ? makeQueryKey(collection, options) : null;
-  const blocked = blockedResourceResult<Array<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>>(session);
+  const resourceKey = options ? makeQueryKey<Schema, TCollection, TOptions>(collection, options) : null;
+  const blocked = blockedResourceResult<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>>(session);
   const isFullQuery = options?.select !== "anonymous";
   const resource = useOptionalResource(
     (hookOptions.enabled ?? true) && !!options && !blocked,
@@ -523,14 +499,14 @@ export function useQuery<
       resourceKey as string,
       () => runtime.client.query(
         collection,
-        options as DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection>,
-      ) as Promise<Array<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>>,
+        options as TOptions,
+      ),
       snapshots.queryRows,
       isFullQuery
         ? () => runtime.client.peekQuery(
             collection,
-            options as DbFullQueryOptions<Schema, TCollection>,
-          ) as Array<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>
+            options as DbQueryOptions<Schema, TCollection, "full">,
+          ) as DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>
         : undefined,
     ),
   );
@@ -553,7 +529,7 @@ export function useRow<
 > {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeRowKey(rowRef.collection, rowRef) : null;
   const blocked = blockedResourceResult<RowHandle<Schema, TCollection>>(session);
   const resource = useOptionalResource(
@@ -578,7 +554,7 @@ export function useParents<Schema extends DbSchema>(
 ): UseResourceResult<Array<RowRef>> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeParentsKey(rowRef) : null;
   const blocked = blockedResourceResult<Array<RowRef>>(session);
   const resource = useOptionalResource(
@@ -601,7 +577,7 @@ export function useMemberUsernames<Schema extends DbSchema>(
 ): UseResourceResult<string[]> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeMembersKey("usernames", rowRef) : null;
   const blocked = blockedResourceResult<string[]>(session);
   const resource = useOptionalResource(
@@ -624,7 +600,7 @@ export function useDirectMembers<Schema extends DbSchema>(
 ): UseResourceResult<Array<{ username: string; role: MemberRole }>> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeMembersKey("direct", rowRef) : null;
   const blocked = blockedResourceResult<Array<{ username: string; role: MemberRole }>>(session);
   const resource = useOptionalResource(
@@ -647,7 +623,7 @@ export function useEffectiveMembers<Schema extends DbSchema>(
 ): UseResourceResult<Array<DbMemberInfo<Schema>>> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeMembersKey("effective", rowRef) : null;
   const blocked = blockedResourceResult<Array<DbMemberInfo<Schema>>>(session);
   const resource = useOptionalResource(
@@ -670,7 +646,7 @@ export function useShareLink<Schema extends DbSchema>(
 ): UseShareLinkResult {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
-  const rowRef = row ? resolveRowInput(row) : null;
+  const rowRef = row ? toRowRef(row) : null;
   const resourceKey = rowRef ? makeShareLinkKey(rowRef, options.role) : null;
   const blocked = blockedResourceResult<string>(session);
   const resource = useOptionalResource(

@@ -455,7 +455,7 @@ describe("service flows", () => {
     });
 
     expect(remove).toHaveBeenCalledWith(makeRef("root_1", "bookingRoots"));
-    expect(update).toHaveBeenCalledWith("savedBookings", savedBooking.ref, {
+    expect(update).toHaveBeenCalledWith("savedBookings", savedBooking, {
       status: "canceled",
     });
   });

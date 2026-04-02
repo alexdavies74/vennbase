@@ -1,6 +1,6 @@
 import { useAcceptInviteFromUrl, useMutation, useQuery, useRow, useSession, useShareLink } from "@vennbase/react";
 import { useState } from "react";
-import { CURRENT_USER, type RowHandle } from "@vennbase/core";
+import { CURRENT_USER, toRowRef, type RowHandle } from "@vennbase/core";
 import { db } from "./db";
 import type { Schema } from "./schema";
 
@@ -10,15 +10,16 @@ export type RecentBoardHandle = RowHandle<Schema, "recentBoards">;
 export type CardHandle = RowHandle<Schema, "cards">;
 
 async function rememberRecentBoard(board: BoardHandle): Promise<void> {
+  const boardRef = toRowRef(board);
   const existingRecentBoards = await db.query("recentBoards", {
     in: CURRENT_USER,
-    where: { boardRef: board.ref },
+    where: { boardRef },
     limit: 1,
   });
   const existingRecentBoard = existingRecentBoards[0] ?? null;
 
   if (existingRecentBoard) {
-    const updatedRecentBoardWrite = db.update("recentBoards", existingRecentBoard.ref, {
+    const updatedRecentBoardWrite = db.update("recentBoards", existingRecentBoard, {
       openedAt: Date.now(),
     });
     await updatedRecentBoardWrite.committed;
@@ -26,7 +27,7 @@ async function rememberRecentBoard(board: BoardHandle): Promise<void> {
   }
 
   const recentBoardWrite = db.create("recentBoards", {
-    boardRef: board.ref,
+    boardRef,
     openedAt: Date.now(),
   }, {
     in: CURRENT_USER,
@@ -224,7 +225,7 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
   const [text, setText] = useState("");
 
   const { rows: cards = [], status, error } = useQuery(db, "cards", {
-    in: board.ref,
+    in: board,
     orderBy: "createdAt",
     order: "asc",
   });
@@ -234,10 +235,10 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
       ? "Failed to load cards."
       : "";
 
-  const { shareLink } = useShareLink(db, board.ref, { role: "editor" });
+  const { shareLink } = useShareLink(db, board, { role: "editor" });
 
   const toggleDone = useMutation(async (card: CardHandle) => {
-    const updatedCardWrite = db.update("cards", card.ref, { done: !card.fields.done });
+    const updatedCardWrite = db.update("cards", card, { done: !card.fields.done });
     await updatedCardWrite.committed;
   });
 
@@ -255,7 +256,7 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
           if (!trimmed) return;
 
           try {
-            const cardWrite = db.create("cards", { text: trimmed, done: false, createdAt: Date.now() }, { in: board.ref });
+            const cardWrite = db.create("cards", { text: trimmed, done: false, createdAt: Date.now() }, { in: board });
             setText("");
             void cardWrite.committed.catch(console.error);
           } catch (error) {

@@ -1,4 +1,4 @@
-import { CURRENT_USER } from "@vennbase/core";
+import { CURRENT_USER, toRowRef, type RowTarget } from "@vennbase/core";
 import {
   createDefaultScheduleDraft,
   draftToScheduleFields,
@@ -131,12 +131,14 @@ function groupBookingClaims(
 }
 
 function sameRef(
-  left: Pick<ScheduleHandle["ref"], "id" | "baseUrl" | "collection">,
-  right: Pick<ScheduleHandle["ref"], "id" | "baseUrl" | "collection">,
+  left: RowTarget<"schedules">,
+  right: RowTarget<"schedules">,
 ): boolean {
-  return left.id === right.id
-    && left.collection === right.collection
-    && left.baseUrl === right.baseUrl;
+  const leftRef = toRowRef(left);
+  const rightRef = toRowRef(right);
+  return leftRef.id === rightRef.id
+    && leftRef.collection === rightRef.collection
+    && leftRef.baseUrl === rightRef.baseUrl;
 }
 
 export function createInitialDraft(timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"): ScheduleDraft {
@@ -354,23 +356,24 @@ export class AppointmentService {
   }
 
   async rememberRecentSchedule(schedule: ScheduleHandle): Promise<void> {
+    const scheduleRef = toRowRef(schedule);
     const existing = await this.db.query("recentSchedules", {
       in: CURRENT_USER,
-      where: { scheduleRef: schedule.ref },
+      where: { scheduleRef },
       orderBy: "openedAt",
       order: "desc",
       limit: 1,
     });
     const now = Date.now();
-    const current = existing.find((recentSchedule) => sameRef(recentSchedule.fields.scheduleRef, schedule.ref)) ?? null;
+    const current = existing.find((recentSchedule) => sameRef(recentSchedule.fields.scheduleRef, schedule)) ?? null;
 
     if (current) {
-      await this.db.update("recentSchedules", current.ref, { openedAt: now }).committed;
+      await this.db.update("recentSchedules", current, { openedAt: now }).committed;
       return;
     }
 
     await this.db.create("recentSchedules", {
-      scheduleRef: schedule.ref,
+      scheduleRef,
       openedAt: now,
     }, {
       in: CURRENT_USER,
@@ -395,7 +398,7 @@ export class AppointmentService {
 
     const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() });
     const bookingRoot = bookingRootWrite.value;
-    const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot.ref, "submitter");
+    const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "submitter");
     const bookingSubmitterLink = bookingSubmitterLinkWrite.value;
     const scheduleWrite = this.db.create("schedules", {
       ...draftToScheduleFields(draft),
@@ -415,7 +418,7 @@ export class AppointmentService {
       throw new Error(validationError);
     }
 
-    const updatedWrite = this.db.update("schedules", schedule.ref, draftToScheduleFields(draft));
+    const updatedWrite = this.db.update("schedules", schedule, draftToScheduleFields(draft));
     return updatedWrite.committed;
   }
 
@@ -453,9 +456,11 @@ export class AppointmentService {
     const booking = bookingWrite.value;
     await bookingWrite.committed;
 
+    const scheduleRef = toRowRef(args.schedule);
+    const bookingRef = toRowRef(booking);
     await this.db.create("savedBookings", {
-      scheduleRef: args.schedule.ref,
-      bookingRef: booking.ref,
+      scheduleRef,
+      bookingRef,
       status: "active",
       slotStartMs: args.slotStartMs,
       slotEndMs: args.slotEndMs,
@@ -476,6 +481,6 @@ export class AppointmentService {
     }
 
     await booking.in.remove(args.bookingRootRef).committed;
-    await this.db.update("savedBookings", args.savedBooking.ref, { status: "canceled" }).committed;
+    await this.db.update("savedBookings", args.savedBooking, { status: "canceled" }).committed;
   }
 }

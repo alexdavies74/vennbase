@@ -1,27 +1,25 @@
 import type { Vennbase } from "@vennbase/core";
-import type {
-  AuthSession,
-  AnyRowHandle,
-  CollectionName,
-  DbAnonymousProjection,
-  DbAnonymousQueryOptions,
-  DbFullQueryOptions,
-  DbMemberInfo,
-  DbQueryOptions,
-  DbSchema,
-  MemberRole,
-  VennbaseUser,
-  RowRef,
-  RowInput,
+import {
+  isRowRef,
+  toRowRef,
+  type AuthSession,
+  type CollectionName,
+  type DbMemberInfo,
+  type DbQueryOptions,
+  type DbQueryRows,
+  type DbQuerySelect,
+  type DbSchema,
+  type InferDbQuerySelect,
+  type MemberRole,
+  type VennbaseUser,
+  type RowRef,
+  type RowInput,
 } from "@vennbase/core";
-import type { RowHandle } from "@vennbase/core";
-
 import { createAdaptivePoller, subscribeToBrowserActivity, type ActivitySubscriber, type AdaptivePoller } from "./polling.js";
 
 type MutationSubscribedClient<Schema extends DbSchema> = Vennbase<Schema> & {
   subscribeToLocalMutations?: (listener: () => void) => (() => void) | void;
 };
-
 
 const browserActivitySubscriber: ActivitySubscriber = (notify) => {
   return subscribeToBrowserActivity(notify) ?? undefined;
@@ -98,21 +96,8 @@ function snapshotValue(value: unknown): string {
   return stableJsonStringify(canonicalizeKeyPart(value));
 }
 
-function isRowRefLike(value: unknown): value is RowRef {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.id === "string"
-    && typeof record.collection === "string"
-    && typeof record.baseUrl === "string"
-  );
-}
-
 function isRowInputLike(value: unknown): value is RowInput {
-  if (isRowRefLike(value)) {
+  if (isRowRef(value)) {
     return true;
   }
 
@@ -121,11 +106,7 @@ function isRowInputLike(value: unknown): value is RowInput {
   }
 
   const record = value as Record<string, unknown>;
-  return isRowRefLike(record.ref);
-}
-
-function resolveRowInput(value: RowInput): RowRef {
-  return isRowRefLike(value) ? value : value.ref;
+  return isRowRef(record.ref);
 }
 
 function canonicalizeRowRef(value: RowRef): Record<string, string> {
@@ -142,7 +123,7 @@ function canonicalizeKeyPart(value: unknown, seen = new WeakSet<object>()): unkn
   }
 
   if (isRowInputLike(value)) {
-    return canonicalizeRowRef(resolveRowInput(value));
+    return canonicalizeRowRef(toRowRef(value));
   }
 
   if (seen.has(value)) {
@@ -641,9 +622,13 @@ export function getIdleSnapshot<TData>(): ResourceSnapshot<TData> {
   return idleSnapshot as ResourceSnapshot<TData>;
 }
 
-export function makeQueryKey<Schema extends DbSchema, TCollection extends CollectionName<Schema>>(
+export function makeQueryKey<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+  TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+>(
   collection: TCollection,
-  options: DbQueryOptions<Schema, TCollection>,
+  options: TOptions,
 ): string {
   return `query:${collection}:${stableJsonStringify(canonicalizeKeyPart(options))}`;
 }
@@ -689,8 +674,5 @@ export const snapshots = {
 export type QueryRows<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-  TOptions extends DbFullQueryOptions<Schema, TCollection> | DbAnonymousQueryOptions<Schema, TCollection> =
-    DbFullQueryOptions<Schema, TCollection>,
-> = TOptions extends DbAnonymousQueryOptions<Schema, TCollection>
-  ? Array<DbAnonymousProjection<Schema, TCollection>>
-  : Array<RowHandle<Schema, TCollection>>;
+  TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+> = DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>;

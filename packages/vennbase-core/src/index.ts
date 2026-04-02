@@ -3,7 +3,15 @@ export { RowHandle } from "./row-handle.js";
 export type { AnyRowHandle } from "./row-handle.js";
 export { VennbaseError } from "./errors.js";
 export { VENNBASE_INVITE_TARGET_PARAM } from "./invites.js";
-export { CURRENT_USER, collection, defineSchema, field } from "./schema.js";
+export {
+  CURRENT_USER,
+  collection,
+  defineSchema,
+  field,
+  isAnonymousProjection,
+  isRowRef,
+  toRowRef,
+} from "./schema.js";
 export type { VennbaseOptions } from "./vennbase.js";
 export type { MutationReceipt, MutationStatus } from "./mutation-receipt.js";
 export type {
@@ -33,15 +41,19 @@ export type {
   DbFullQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryRow,
+  DbQueryRows,
   DbQuerySelect,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
   InsertFields,
+  InferDbQuerySelect,
   KeyFieldNames,
   QueryWhere,
   MemberRole,
   RowRef,
   RowInput,
+  RowTarget,
   RowFields,
 } from "./schema.js";

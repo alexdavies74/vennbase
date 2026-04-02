@@ -358,11 +358,7 @@ describe("WoofService", () => {
     const tagCall = db.createCalls.find((c) => c.collection === "tags");
     expect(tagCall).toBeDefined();
     expect(tagCall!.fields.label).toBe("friendly");
-    expect(tagCall!.options?.in).toMatchObject({
-      id: row.id,
-      collection: "dogs",
-      baseUrl: row.ref.baseUrl,
-    });
+    expect(tagCall!.options?.in).toBe(row);
   });
 
   it("resolves createTag before commit when createdBy is already known", async () => {

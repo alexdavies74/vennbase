@@ -1,5 +1,5 @@
 import { puter } from "@heyputer/puter.js";
-import { CURRENT_USER, type CrdtAdapter, type RowRef } from "@vennbase/core";
+import { CURRENT_USER, toRowRef, type CrdtAdapter, type RowRef } from "@vennbase/core";
 import { useCrdt, useAcceptInviteFromUrl, useShareLink, useMutation, useVennbase, useQuery, useRow, useSession } from "@vennbase/react";
 import { createYjsAdapter } from "@vennbase/yjs";
 import { useEffect, useRef, useState } from "react";
@@ -175,7 +175,7 @@ function RoomScreen(props: {
   if (bindingRef.current === null) {
     bindingRef.current = createYjsAdapter(Y);
   }
-  const shareLink = useShareLink(db, props.row.ref, { role: "editor" });
+  const shareLink = useShareLink(db, props.row, { role: "editor" });
   const crdt = useCrdt(props.row, bindingRef.current);
   const relinquish = useMutation(async () => {
     await service.relinquish();
@@ -360,7 +360,7 @@ export function App() {
       currentUsername={signedInUser?.username ?? null}
       row={row}
       onRelinquished={async () => {
-        setDismissedDogRef(row.ref);
+        setDismissedDogRef(toRowRef(row));
       }}
     />
   );

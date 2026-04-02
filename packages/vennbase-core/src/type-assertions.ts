@@ -5,7 +5,14 @@ import {
   defineSchema,
   field,
   type DbAnonymousProjection,
+  type DbQueryOptions,
+  type DbQueryRow,
+  type DbQueryRows,
+  type DbQuerySelect,
   type RowRef,
+  isAnonymousProjection,
+  isRowRef,
+  toRowRef,
 } from "./schema.js";
 
 const typeTestSchema = defineSchema({
@@ -83,6 +90,57 @@ void db.query("tasks", { in: projectRef, select: "anonymous", orderBy: "status" 
   void db.getRow(first);
 });
 
+const taskAnonymousOptions: DbQueryOptions<typeof typeTestSchema, "tasks", "anonymous"> = {
+  in: projectRef,
+  select: "anonymous",
+  orderBy: "status",
+};
+
+const taskFullOptions: DbQueryOptions<typeof typeTestSchema, "tasks"> = {
+  in: projectRef,
+  orderBy: "status",
+};
+
+function firstQueryRow<
+  TCollection extends keyof typeof typeTestSchema & string,
+  TSelect extends DbQuerySelect = "full",
+>(
+  rows: DbQueryRows<typeof typeTestSchema, TCollection, TSelect>,
+): DbQueryRow<typeof typeTestSchema, TCollection, TSelect> | undefined {
+  return rows[0];
+}
+
+void db.query("tasks", taskAnonymousOptions).then((rows) => {
+  const first = firstQueryRow(rows);
+  const projectedStatus: string | undefined = first?.keyFields.status;
+  void projectedStatus;
+});
+
+void db.query("tasks", taskFullOptions).then((rows) => {
+  const first = firstQueryRow(rows);
+  const taskTitle: string | undefined = first?.fields.title;
+  void taskTitle;
+  if (first) {
+    const ref = toRowRef(first);
+    const taskCollection: "tasks" = ref.collection;
+    void taskCollection;
+  }
+});
+
+declare const maybeTaskQueryRow: DbQueryRow<typeof typeTestSchema, "tasks", DbQuerySelect> | undefined;
+if (maybeTaskQueryRow && isAnonymousProjection(maybeTaskQueryRow)) {
+  const projectedStatus: string | undefined = maybeTaskQueryRow.keyFields.status;
+  void projectedStatus;
+
+  // @ts-expect-error anonymous projections do not expose row refs
+  void maybeTaskQueryRow.ref;
+} else if (maybeTaskQueryRow) {
+  const taskTitle: string = maybeTaskQueryRow.fields.title;
+  const taskRef = toRowRef(maybeTaskQueryRow);
+  void taskTitle;
+  void taskRef;
+}
+
 // @ts-expect-error invalid where field
 void db.query("tasks", { in: projectRef, where: { missing: "nope" } });
 
@@ -127,6 +185,14 @@ void db.createShareLink(project, "submitter");
 void db.joinInvite("https://example.com/?db=%7B%7D");
 void db.listMembers(project);
 void db.saveRow("recent-project", project);
+const projectRowRef = toRowRef(project);
+const projectRefStillTyped: RowRef<"projects"> = projectRowRef;
+void projectRefStillTyped;
+declare const maybeUnknownRow: unknown;
+if (isRowRef<"projects">(maybeUnknownRow)) {
+  const typedProjectRef: RowRef<"projects"> = maybeUnknownRow;
+  void typedProjectRef;
+}
 
 // @ts-expect-error ref fields still require a serializable RowRef
 void db.create("gameRecords", { gameRef: project, role: "owner" }, { in: CURRENT_USER });

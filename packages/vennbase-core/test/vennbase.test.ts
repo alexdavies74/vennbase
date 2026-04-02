@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { VennbaseError } from "../src/errors";
 import { Vennbase } from "../src/vennbase";
 import { RowHandle } from "../src/row-handle";
-import { collection, defineSchema, field } from "../src/schema";
+import { collection, defineSchema, field, isAnonymousProjection, isRowRef, toRowRef } from "../src/schema";
 import type { BackendClient } from "../src/types";
 import { CLASSIC_WORKER_RUNTIME_ID } from "../src/worker/template";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
@@ -96,6 +96,60 @@ describe("Vennbase", () => {
         fields: {},
       }),
     })).toThrow('Collection name "user" is reserved');
+  });
+
+  it("normalizes row targets with toRowRef", () => {
+    const row = new RowHandle(
+      {
+        addParent: () => ({ value: undefined, committed: Promise.resolve(undefined), status: "committed", error: undefined }),
+        removeParent: () => ({ value: undefined, committed: Promise.resolve(undefined), status: "committed", error: undefined }),
+        listParents: async () => [],
+        addMember: () => ({ value: undefined, committed: Promise.resolve(undefined), status: "committed", error: undefined }),
+        removeMember: () => ({ value: undefined, committed: Promise.resolve(undefined), status: "committed", error: undefined }),
+        listDirectMembers: async () => [],
+        listEffectiveMembers: async () => [],
+        refreshFields: async () => ({ name: "Rex" }),
+        connectCrdt: () => ({ disconnect: () => undefined, flush: async () => undefined }),
+        listMembers: async () => [],
+      },
+      {
+        id: "row_1",
+        collection: "rows",
+        baseUrl: "https://worker.example",
+      },
+      "owner",
+      { name: "Rex" },
+    );
+
+    expect(toRowRef(row)).toEqual(row.ref);
+    expect(toRowRef(row.ref)).toEqual(row.ref);
+  });
+
+  it("identifies row refs and anonymous projections", () => {
+    expect(isRowRef({
+      id: "row_1",
+      collection: "rows",
+      baseUrl: "https://worker.example",
+    })).toBe(true);
+    expect(isRowRef({
+      ref: {
+        id: "row_1",
+        collection: "rows",
+        baseUrl: "https://worker.example",
+      },
+    })).toBe(false);
+
+    expect(isAnonymousProjection({
+      kind: "anonymous-projection",
+      id: "row_1",
+      collection: "rows",
+      keyFields: {},
+    })).toBe(true);
+    expect(isAnonymousProjection({
+      id: "row_1",
+      collection: "rows",
+      keyFields: {},
+    })).toBe(false);
   });
 
   it("reopens a row from a row ref", async () => {

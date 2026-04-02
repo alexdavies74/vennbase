@@ -268,7 +268,7 @@ function ScheduleScreen(props: {
 }) {
   const db = useVennbase<Schema>();
   const session = useSession(db);
-  const liveScheduleResult = useRow(db, props.schedule.ref);
+  const liveScheduleResult = useRow(db, props.schedule);
   const schedule = liveScheduleResult.status === "success" && liveScheduleResult.data
     ? liveScheduleResult.data
     : props.schedule;
@@ -387,7 +387,7 @@ function OwnerScheduleView(props: {
   const [draft, setDraft] = useState(() => service.createDraftFromSchedule(props.schedule));
   const [copyStatus, setCopyStatus] = useState("");
   const updateSchedule = useMutation(async (nextDraft: ScheduleDraft) => service.updateSchedule(props.schedule, nextDraft));
-  const shareLink = useShareLink(db, props.schedule.ref, { role: "viewer" });
+  const shareLink = useShareLink(db, props.schedule, { role: "viewer" });
   const {
     rows: bookings = [],
     error: bookingsError,

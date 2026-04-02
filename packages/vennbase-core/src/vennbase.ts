@@ -20,13 +20,13 @@ import { WriteSettler } from "./write-settler.js";
 import type {
   AllowedParentCollections,
   CollectionName,
-  DbAnonymousProjection,
-  DbAnonymousQueryOptions,
   DbCreateArgs,
   DbCreateOptions,
-  DbFullQueryOptions,
   DbMemberInfo,
   DbQueryOptions,
+  DbQueryRows,
+  DbQuerySelect,
+  InferDbQuerySelect,
   DbQueryWatchCallbacks,
   DbQueryWatchHandle,
   DbSchema,
@@ -227,52 +227,31 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     return this.rowsModule.getRow(row);
   }
 
-  async query<TCollection extends CollectionName<Schema>>(
+  async query<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     collection: TCollection,
-    options: DbAnonymousQueryOptions<Schema, TCollection>,
-  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>>;
-  async query<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<Array<RowHandle<Schema, TCollection>> | Array<DbAnonymousProjection<Schema, TCollection>>> {
+    options: TOptions,
+  ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     return this.queryModule.query(collection, options);
   }
 
   /** @internal Use peekQuery only via the React runtime. Returns local optimistic state only — no transport call. */
   peekQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
+    options: DbQueryOptions<Schema, TCollection, "full">,
   ): Array<RowHandle<Schema, TCollection>> {
     return this.queryModule.peekQuery(collection, options);
   }
 
-  watchQuery<TCollection extends CollectionName<Schema>>(
+  watchQuery<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     collection: TCollection,
-    options: DbAnonymousQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<DbAnonymousProjection<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbFullQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
-  ): DbQueryWatchHandle;
-  watchQuery<TCollection extends CollectionName<Schema>>(
-    collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-    callbacks: DbQueryWatchCallbacks<RowHandle<Schema, TCollection> | DbAnonymousProjection<Schema, TCollection>>,
+    options: TOptions,
+    callbacks: DbQueryWatchCallbacks<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>[number]>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);
   }
@@ -741,10 +720,13 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     } as DbCreateOptions<Schema, TCollection>;
   }
 
-  private async resolveCurrentUserQueryOptions<TCollection extends CollectionName<Schema>>(
+  private async resolveCurrentUserQueryOptions<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     _collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): Promise<DbQueryOptions<Schema, TCollection>> {
+    options: TOptions,
+  ): Promise<TOptions> {
     if (options.in === undefined) {
       return options;
     }
@@ -752,13 +734,16 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     return {
       ...options,
       in: await this.resolveCurrentUserParentInput(options.in),
-    } as DbQueryOptions<Schema, TCollection>;
+    } as TOptions;
   }
 
-  private resolveCurrentUserQueryOptionsSync<TCollection extends CollectionName<Schema>>(
+  private resolveCurrentUserQueryOptionsSync<
+    TCollection extends CollectionName<Schema>,
+    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  >(
     _collection: TCollection,
-    options: DbQueryOptions<Schema, TCollection>,
-  ): DbQueryOptions<Schema, TCollection> {
+    options: TOptions,
+  ): TOptions {
     if (options.in === undefined) {
       return options;
     }
@@ -766,7 +751,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
     return {
       ...options,
       in: this.resolveCurrentUserParentInputSync(options.in),
-    } as DbQueryOptions<Schema, TCollection>;
+    } as TOptions;
   }
 
   private resolveCurrentUserParentInputSync<TParentInput>(input: TParentInput): TParentInput {

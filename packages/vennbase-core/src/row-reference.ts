@@ -1,16 +1,10 @@
-import { isCurrentUser, type CurrentUser, type RowInput, type RowRef } from "./schema.js";
+import { isCurrentUser, toRowRef, type CurrentUser, type RowInput, type RowRef } from "./schema.js";
 import { normalizeBaseUrl } from "./transport.js";
-
-function hasEmbeddedRowRef<TCollection extends string>(
-  row: RowInput<TCollection>,
-): row is { ref: RowRef<TCollection> } {
-  return "ref" in row;
-}
 
 export function normalizeRowRef<TCollection extends string>(
   row: RowInput<TCollection>,
 ): RowRef<TCollection> {
-  const resolved = hasEmbeddedRowRef(row) ? row.ref : row;
+  const resolved = toRowRef(row);
   return {
     id: resolved.id,
     collection: resolved.collection,
