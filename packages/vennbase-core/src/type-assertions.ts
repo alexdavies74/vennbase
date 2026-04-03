@@ -191,6 +191,7 @@ void db.createShareLink(project, "submitter");
 void db.joinInvite("https://example.com/?db=%7B%7D");
 void db.listMembers(project);
 void db.saveRow("recent-project", project);
+void project.members.add("alice", "editor");
 const projectRowRef = toRowRef(project);
 const projectRefStillTyped: RowRef<"projects"> = projectRowRef;
 void projectRefStillTyped;
@@ -202,6 +203,8 @@ if (isRowRef<"projects">(maybeUnknownRow)) {
 
 // @ts-expect-error ref fields still require a serializable RowRef
 void db.create("gameRecords", { gameRef: project, role: "owner" }, { in: CURRENT_USER });
+// @ts-expect-error role is now positional on row-handle membership helpers
+void project.members.add("alice", { role: "editor" });
 
 const taskWrite = db.create("tasks", { title: "Ship v2" }, { in: projectRef });
 const task = taskWrite.value;

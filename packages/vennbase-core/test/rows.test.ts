@@ -402,7 +402,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "contributor" }).committed;
+    await aliceProject.members.add("bob", "contributor").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -419,7 +419,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "contributor" }).committed;
+    await aliceProject.members.add("bob", "contributor").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -453,7 +453,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "contributor" }).committed;
+    await aliceProject.members.add("bob", "contributor").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -481,7 +481,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await project.members.add("bob", { role: "editor" }).committed;
+    await project.members.add("bob", "editor").committed;
     const task = await settle(aliceDb.create("tasks", { title: "Review" }, { in: project.ref }));
     const shareToken = aliceDb.createShareToken(task.ref, "editor");
     await shareToken.committed;
@@ -570,7 +570,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", { role: "viewer" }).committed;
+    await aliceProject.members.add("bob", "viewer").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));

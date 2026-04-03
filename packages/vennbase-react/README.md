@@ -178,7 +178,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useShareLink` lazily generates (or reuses) a share link for a row. Always pass an explicit role such as `{ role: "editor" }`, `{ role: "contributor" }`, or `{ role: "submitter" }`. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a submitter-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
+`useShareLink` lazily generates (or reuses) a share link for a row. Pass an explicit role such as `"editor"`, `"contributor"`, or `"submitter"` as the third argument. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a submitter-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
 
 ```tsx
 import { useShareLink, useAcceptInviteFromUrl } from "@vennbase/react";
@@ -186,7 +186,7 @@ import { db } from "./db";
 
 // Sharer side
 function ShareButton({ board }: { board: BoardHandle }) {
-  const { shareLink } = useShareLink(db, board, { role: "editor" });
+  const { shareLink } = useShareLink(db, board, "editor");
   return <button onClick={() => navigator.clipboard.writeText(shareLink ?? "")}>Copy share link</button>;
 }
 
@@ -287,7 +287,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isRefreshing, error, refreshError, refresh }` |
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isRefreshing, error, refreshError, refresh }` |
-| `useShareLink(db, row, options)` | db, row handle or row ref, `{ role: "editor" \| "contributor" \| "viewer" \| "submitter" }` | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
+| `useShareLink(db, row, role, options?)` | db, row handle or row ref, role `"editor" \| "contributor" \| "viewer" \| "submitter"`, optional `{ enabled }` | `{ shareLink: string, status, isRefreshing, error, refreshError, refresh }` |
 | `useAcceptInviteFromUrl(db, options?)` | db, `{ url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, loadSavedRow?, getRow? }` | `{ data, status, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |

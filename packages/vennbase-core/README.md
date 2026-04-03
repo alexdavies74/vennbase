@@ -21,7 +21,7 @@ const { rows: cards = [] } = useQuery(db, "cards", {
 });
 
 // Share
-const { shareLink } = useShareLink(db, board, { role: "editor" });
+const { shareLink } = useShareLink(db, board, "editor");
 ```
 
 Write your frontend. Vennbase handles the rest.
@@ -230,7 +230,7 @@ They return objects shaped like `{ kind: "anonymous-projection", id, collection,
 
 Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
 
-In React, prefer `useShareLink(db, row, { role: "editor" })` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
+In React, prefer `useShareLink(db, row, "editor")` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
 
 ```ts
 // 1. Generate a token for the row you want to share
@@ -379,7 +379,7 @@ pnpm --filter appointment-app dev
 | `.refresh()` | Re-fetch fields from the server. Resolves to the latest field snapshot. |
 | `.connectCrdt(callbacks)` | Shorthand for `db.connectCrdt(row, callbacks)`. |
 | `.in.add(parent)` / `.in.remove(parent)` / `.in.list()` | Manage parent links. |
-| `.members.add(username, { role })` / `.members.remove(username)` / `.members.list()` | Manage membership. |
+| `.members.add(username, role)` / `.members.remove(username)` / `.members.list()` | Manage membership. |
 
 ### `MutationReceipt<T>`
 

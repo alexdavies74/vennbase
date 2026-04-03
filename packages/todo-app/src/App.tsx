@@ -235,7 +235,7 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
       ? "Failed to load cards."
       : "";
 
-  const { shareLink } = useShareLink(db, board, { role: "editor" });
+  const { shareLink } = useShareLink(db, board, "editor");
 
   const toggleDone = useMutation(async (card: CardHandle) => {
     const updatedCardWrite = db.update("cards", card, { done: !card.fields.done });

@@ -175,7 +175,7 @@ function RoomScreen(props: {
   if (bindingRef.current === null) {
     bindingRef.current = createYjsAdapter(Y);
   }
-  const shareLink = useShareLink(db, props.row, { role: "editor" });
+  const shareLink = useShareLink(db, props.row, "editor");
   const crdt = useCrdt(props.row, bindingRef.current);
   const relinquish = useMutation(async () => {
     await service.relinquish();

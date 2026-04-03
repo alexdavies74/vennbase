@@ -52,7 +52,7 @@ export class RowHandle<
   };
 
   readonly members: {
-    add: (username: string, options: { role: MemberRole }) => MutationReceipt<void>;
+    add: (username: string, role: MemberRole) => MutationReceipt<void>;
     remove: (username: string) => MutationReceipt<void>;
     list: () => Promise<Array<{ username: string; role: MemberRole }>>;
     effective: () => Promise<Array<DbMemberInfo<TSchema>>>;
@@ -78,7 +78,7 @@ export class RowHandle<
     };
 
     this.members = {
-      add: (username: string, options: { role: MemberRole }) => this.backend.addMember(this.ref, username, options.role),
+      add: (username: string, role: MemberRole) => this.backend.addMember(this.ref, username, role),
       remove: (username: string) => this.backend.removeMember(this.ref, username),
       list: async () => this.backend.listDirectMembers(this.ref),
       effective: async () => this.backend.listEffectiveMembers(this.ref),

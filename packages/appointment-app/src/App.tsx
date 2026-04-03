@@ -387,7 +387,7 @@ function OwnerScheduleView(props: {
   const [draft, setDraft] = useState(() => service.createDraftFromSchedule(props.schedule));
   const [copyStatus, setCopyStatus] = useState("");
   const updateSchedule = useMutation(async (nextDraft: ScheduleDraft) => service.updateSchedule(props.schedule, nextDraft));
-  const shareLink = useShareLink(db, props.schedule, { role: "viewer" });
+  const shareLink = useShareLink(db, props.schedule, "viewer");
   const {
     rows: bookings = [],
     error: bookingsError,

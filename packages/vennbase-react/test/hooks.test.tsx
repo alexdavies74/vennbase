@@ -759,7 +759,7 @@ describe("@vennbase/react", () => {
     let latest: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "editor" });
+      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "editor");
       return <div>{latest.shareLink ?? latest.status}</div>;
     }
 
@@ -781,8 +781,8 @@ describe("@vennbase/react", () => {
     let submitterLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      contributorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "contributor" });
-      submitterLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "submitter" });
+      contributorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "contributor");
+      submitterLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "submitter");
       return <div>{contributorLink.status}:{submitterLink.status}</div>;
     }
 
@@ -811,7 +811,7 @@ describe("@vennbase/react", () => {
     let latest: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, { role: "editor" });
+      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "editor");
       return <div>{latest.shareLink ?? latest.status}</div>;
     }
 

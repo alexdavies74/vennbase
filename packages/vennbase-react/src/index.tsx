@@ -82,9 +82,7 @@ export interface UseHookOptions {
   enabled?: boolean;
 }
 
-export interface UseShareLinkOptions extends UseHookOptions {
-  role: MemberRole;
-}
+export interface UseShareLinkHookOptions extends UseHookOptions {}
 
 export interface OpenedInviteResult<
   Schema extends DbSchema,
@@ -642,12 +640,13 @@ export function useEffectiveMembers<Schema extends DbSchema>(
 export function useShareLink<Schema extends DbSchema>(
   db: Vennbase<Schema>,
   row: RowInput | null | undefined,
-  options: UseShareLinkOptions,
+  role: MemberRole,
+  options: UseShareLinkHookOptions = {},
 ): UseShareLinkResult {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, options.enabled ?? true);
   const rowRef = row ? toRowRef(row) : null;
-  const resourceKey = rowRef ? makeShareLinkKey(rowRef, options.role) : null;
+  const resourceKey = rowRef ? makeShareLinkKey(rowRef, role) : null;
   const blocked = blockedResourceResult<string>(session);
   const resource = useOptionalResource(
     (options.enabled ?? true) && !!rowRef && !blocked,
@@ -656,8 +655,8 @@ export function useShareLink<Schema extends DbSchema>(
     () => runtime.getLoadOnce(
       resourceKey as string,
       async () => {
-        const existing = await runtime.client.getExistingShareToken(rowRef as RowRef, options.role);
-        const shareToken = existing ?? runtime.client.createShareToken(rowRef as RowRef, options.role).value;
+        const existing = await runtime.client.getExistingShareToken(rowRef as RowRef, role);
+        const shareToken = existing ?? runtime.client.createShareToken(rowRef as RowRef, role).value;
         return runtime.client.createShareLink(rowRef as RowRef, shareToken);
       },
       undefined,
