@@ -4,7 +4,7 @@ import { RowHandle } from "./row-handle.js";
 import { normalizeParentRefs, normalizeRowRef, sameRowRef } from "./row-reference.js";
 import type {
   CollectionName,
-  DbAnonymousProjection,
+  DbIndexKeyProjection,
   DbQueryOptions,
   DbQueryRows,
   DbQuerySelect,
@@ -14,7 +14,7 @@ import type {
   DbSchema,
   RowRef,
 } from "./schema.js";
-import { getCollectionKeyFieldNames, getCollectionSpec, pickKeyFieldValues } from "./schema.js";
+import { getCollectionIndexKeyFieldNames, getCollectionSpec, pickIndexKeyFieldValues } from "./schema.js";
 import { stableJsonStringify } from "./stable-json.js";
 import type { Transport } from "./transport.js";
 import { encodeFieldValue } from "./key-encoding.js";
@@ -31,7 +31,7 @@ interface DbFullQueryRow extends DbQueryBaseRow {
   baseUrl: string;
 }
 
-interface DbAnonymousQueryRow {
+interface DbIndexKeyQueryRow {
   rowId: string;
   collection: string;
   fields: Record<string, JsonValue>;
@@ -41,8 +41,8 @@ interface DbFullQueryResponse {
   rows: DbFullQueryRow[];
 }
 
-interface DbAnonymousQueryResponse {
-  rows: DbAnonymousQueryRow[];
+interface DbIndexKeyQueryResponse {
+  rows: DbIndexKeyQueryRow[];
 }
 
 function matchesWhere(
@@ -98,9 +98,9 @@ function compareQueriedRows(
   return order === "desc" ? -rowIdComparison : rowIdComparison;
 }
 
-function compareAnonymousRows(
-  left: DbAnonymousQueryRow,
-  right: DbAnonymousQueryRow,
+function compareIndexKeyRows(
+  left: DbIndexKeyQueryRow,
+  right: DbIndexKeyQueryRow,
   orderBy: string | undefined,
   order: "asc" | "desc",
 ): number {
@@ -119,7 +119,7 @@ function snapshotRows(rows: Array<{
   id: string;
   collection: string;
   fields?: unknown;
-  kind?: "anonymous-projection";
+  kind?: "index-key-projection";
   owner?: string;
   ref?: RowRef;
 }>): string {
@@ -135,18 +135,18 @@ function snapshotRows(rows: Array<{
 }
 
 function validateIndexedQuery(
-  keyFields: string[],
+  indexKeyFields: string[],
   where: Record<string, JsonValue> | undefined,
   orderBy: string | undefined,
 ): void {
   for (const fieldName of Object.keys(where ?? {})) {
-    if (!keyFields.includes(fieldName)) {
-      throw new Error(`where.${fieldName} must be a key field`);
+    if (!indexKeyFields.includes(fieldName)) {
+      throw new Error(`where.${fieldName} must be an index-key field`);
     }
   }
 
-  if (orderBy && !keyFields.includes(orderBy)) {
-    throw new Error("orderBy must be a key field");
+  if (orderBy && !indexKeyFields.includes(orderBy)) {
+    throw new Error("orderBy must be an index-key field");
   }
 }
 
@@ -208,10 +208,10 @@ export class Query<Schema extends DbSchema> {
       );
     }
 
-    const keyFields = getCollectionKeyFieldNames(collectionSpec);
+    const indexKeyFields = getCollectionIndexKeyFieldNames(collectionSpec);
     const orderBy = resolvedOptions.orderBy;
     validateIndexedQuery(
-      keyFields,
+      indexKeyFields,
       resolvedOptions.where as Record<string, JsonValue> | undefined,
       orderBy,
     );
@@ -244,19 +244,19 @@ export class Query<Schema extends DbSchema> {
       );
     }
 
-    const keyFields = getCollectionKeyFieldNames(collectionSpec);
+    const indexKeyFields = getCollectionIndexKeyFieldNames(collectionSpec);
     const orderBy = resolvedOptions.orderBy;
     const limit = Math.max(1, Math.min(200, resolvedOptions.limit ?? 50));
     const select = resolvedOptions.select ?? "full";
 
     validateIndexedQuery(
-      keyFields,
+      indexKeyFields,
       resolvedOptions.where as Record<string, JsonValue> | undefined,
       orderBy,
     );
 
-    if (select === "anonymous") {
-      return await this.runAnonymousQuery(collection, parentRefs, {
+    if (select === "indexKeys") {
+      return await this.runIndexKeyQuery(collection, parentRefs, {
         orderBy,
         order: resolvedOptions.order ?? "asc",
         limit,
@@ -437,7 +437,7 @@ export class Query<Schema extends DbSchema> {
       .filter((row): row is RowHandle<Schema, TCollection> => row !== null);
   }
 
-  private async runAnonymousQuery<TCollection extends CollectionName<Schema>>(
+  private async runIndexKeyQuery<TCollection extends CollectionName<Schema>>(
     collection: TCollection,
     parentRefs: RowRef[],
     options: {
@@ -446,7 +446,7 @@ export class Query<Schema extends DbSchema> {
       limit: number;
       where: Record<string, JsonValue> | undefined;
     },
-  ): Promise<Array<DbAnonymousProjection<Schema, TCollection>>> {
+  ): Promise<Array<DbIndexKeyProjection<Schema, TCollection>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
     const parentResults = await Promise.all(
       parentRefs.map(async (parent) => {
@@ -454,9 +454,9 @@ export class Query<Schema extends DbSchema> {
           return [];
         }
 
-        const response = await this.transport.row(parent).request<DbAnonymousQueryResponse>("db/query", {
+        const response = await this.transport.row(parent).request<DbIndexKeyQueryResponse>("db/query", {
           collection,
-          select: "anonymous",
+          select: "indexKeys",
           orderBy: options.orderBy,
           order: options.order,
           limit: options.limit,
@@ -464,13 +464,13 @@ export class Query<Schema extends DbSchema> {
         });
 
         return response.rows.filter((row) => {
-          const optimisticRow = this.optimisticStore.findAnonymousQueryRow(collection, row.rowId);
+          const optimisticRow = this.optimisticStore.findIndexKeyQueryRow(collection, row.rowId);
           return !(optimisticRow?.pendingParentRemoves.some((candidate) => sameRowRef(candidate, parent)) ?? false);
         });
       }),
     );
 
-    const deduped = new Map<string, DbAnonymousQueryRow>();
+    const deduped = new Map<string, DbIndexKeyQueryRow>();
     for (const result of parentResults) {
       for (const row of result) {
         if (!deduped.has(row.rowId)) {
@@ -483,7 +483,7 @@ export class Query<Schema extends DbSchema> {
       .map((record) => ({
         rowId: record.row.id,
         collection,
-        fields: pickKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
+        fields: pickIndexKeyFieldValues(collectionSpec, this.optimisticStore.getLogicalFields(record.row) ?? {}),
       }))
       .filter((row) => matchesWhere(row.fields, options.where));
 
@@ -494,16 +494,16 @@ export class Query<Schema extends DbSchema> {
     }
 
     const mergedRows = Array.from(deduped.values()).map((row) => {
-      const optimisticRow = this.optimisticStore.findAnonymousQueryRow(collection, row.rowId);
+      const optimisticRow = this.optimisticStore.findIndexKeyQueryRow(collection, row.rowId);
       const localFields = optimisticRow ? this.optimisticStore.getLogicalFields(optimisticRow.row) : null;
       return {
         ...row,
-        fields: pickKeyFieldValues(collectionSpec, localFields ?? row.fields),
+        fields: pickIndexKeyFieldValues(collectionSpec, localFields ?? row.fields),
       };
     }).filter((row) => matchesWhere(row.fields, options.where));
 
     if (options.orderBy) {
-      mergedRows.sort((left, right) => compareAnonymousRows(
+      mergedRows.sort((left, right) => compareIndexKeyRows(
         left,
         right,
         options.orderBy,
@@ -512,11 +512,11 @@ export class Query<Schema extends DbSchema> {
     }
 
     return mergedRows.slice(0, options.limit).map((row) => ({
-      kind: "anonymous-projection",
+      kind: "index-key-projection",
       id: row.rowId,
       collection,
-      fields: pickKeyFieldValues(collectionSpec, row.fields),
-    })) as Array<DbAnonymousProjection<Schema, TCollection>>;
+      fields: pickIndexKeyFieldValues(collectionSpec, row.fields),
+    })) as Array<DbIndexKeyProjection<Schema, TCollection>>;
   }
 
   watchQuery<
@@ -536,7 +536,7 @@ export class Query<Schema extends DbSchema> {
           id: string;
           collection: string;
           fields?: unknown;
-          kind?: "anonymous-projection";
+          kind?: "index-key-projection";
           owner?: string;
           ref?: RowRef;
         }>);

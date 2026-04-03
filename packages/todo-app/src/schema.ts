@@ -9,8 +9,8 @@ export const schema = defineSchema({
   recentBoards: collection({
     in: ["user"],
     fields: {
-      boardRef: field.ref("boards").key(),
-      openedAt: field.number().key(),
+      boardRef: field.ref("boards").indexKey(),
+      openedAt: field.number().indexKey(),
     },
   }),
   cards: collection({
@@ -18,7 +18,7 @@ export const schema = defineSchema({
     fields: {
       text: field.string(),
       done: field.boolean(),
-      createdAt: field.number().key(),
+      createdAt: field.number().indexKey(),
     },
   }),
 });

@@ -4,7 +4,7 @@ import { SavedRowCollectionMismatchError, VennbaseError } from "../src/errors";
 import { loadSavedRow } from "../src/saved-rows";
 import { Vennbase } from "../src/vennbase";
 import { RowHandle } from "../src/row-handle";
-import { collection, defineSchema, field, isAnonymousProjection, isRowRef, toRowRef } from "../src/schema";
+import { collection, defineSchema, field, isIndexKeyProjection, isRowRef, toRowRef } from "../src/schema";
 import type { BackendClient } from "../src/types";
 import { CLASSIC_WORKER_RUNTIME_ID } from "../src/worker/template";
 import { InMemoryKv } from "../src/worker/in-memory-kv";
@@ -135,7 +135,7 @@ describe("Vennbase", () => {
     expect(toRowRef(row.ref)).toEqual(row.ref);
   });
 
-  it("identifies row refs and anonymous projections", () => {
+  it("identifies row refs and index-key projections", () => {
     expect(isRowRef({
       id: "row_1",
       collection: "rows",
@@ -149,13 +149,13 @@ describe("Vennbase", () => {
       },
     })).toBe(false);
 
-    expect(isAnonymousProjection({
-      kind: "anonymous-projection",
+    expect(isIndexKeyProjection({
+      kind: "index-key-projection",
       id: "row_1",
       collection: "rows",
       fields: {},
     })).toBe(true);
-    expect(isAnonymousProjection({
+    expect(isIndexKeyProjection({
       id: "row_1",
       collection: "rows",
       fields: {},

@@ -100,20 +100,20 @@ const schema = defineSchema({
     in: ["projects"],
     fields: {
       title: field.string(),
-      status: field.string().key(),
+      status: field.string().indexKey(),
     },
   }),
   notes: collection({
     in: ["projects"],
     fields: {
       body: field.string(),
-      status: field.string().key(),
+      status: field.string().indexKey(),
     },
   }),
   recentProjects: collection({
     in: ["user"],
     fields: {
-      projectRef: field.ref("projects").key(),
+      projectRef: field.ref("projects").indexKey(),
     },
   }),
 });

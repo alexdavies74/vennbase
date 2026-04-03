@@ -13,7 +13,7 @@ import {
   type CrdtAdapter,
   type CrdtConnectCallbacks,
   type CrdtConnection,
-  type DbAnonymousProjection,
+  type DbIndexKeyProjection,
   type DbMemberInfo,
   type Vennbase,
   type RowRef,
@@ -43,7 +43,7 @@ const schema = defineSchema({
     in: ["dogs"],
     fields: {
       label: field.string(),
-      createdAt: field.number().key(),
+      createdAt: field.number().indexKey(),
     },
   }),
 });
@@ -114,9 +114,9 @@ function makeTagRow(id: string, label: string) {
   );
 }
 
-function makeProjectedTagRow(id: string, createdAt: number): DbAnonymousProjection<TestSchema, "tags"> {
+function makeProjectedTagRow(id: string, createdAt: number): DbIndexKeyProjection<TestSchema, "tags"> {
   return {
-    kind: "anonymous-projection",
+    kind: "index-key-projection",
     id,
     collection: "tags",
     fields: { createdAt },
@@ -142,8 +142,8 @@ class FakeDb {
   failSession = false;
   dogName = "Rex";
   inviteDogName = "Buddy";
-  queryRows: Array<ReturnType<typeof makeTagRow> | DbAnonymousProjection<TestSchema, "tags">> = [makeTagRow("tag_1", "friendly")];
-  peekQueryRows: Array<ReturnType<typeof makeTagRow> | DbAnonymousProjection<TestSchema, "tags">> | null = null;
+  queryRows: Array<ReturnType<typeof makeTagRow> | DbIndexKeyProjection<TestSchema, "tags">> = [makeTagRow("tag_1", "friendly")];
+  peekQueryRows: Array<ReturnType<typeof makeTagRow> | DbIndexKeyProjection<TestSchema, "tags">> | null = null;
   nextQueryError: Error | null = null;
   nextQueryPromise: Promise<typeof this.queryRows> | null = null;
   activitySubscriber: (() => void) | null = null;
@@ -1867,14 +1867,14 @@ describe("@vennbase/react", () => {
     unsubscribeAgain();
   });
 
-  it("supports live anonymous queries with anonymous projections", async () => {
+  it("supports live index-key queries with index-key projections", async () => {
     const db = new FakeDb();
     db.queryRows = [makeProjectedTagRow("tag_1", 1), makeProjectedTagRow("tag_2", 2)];
 
     function Probe() {
       const result = useQuery(db as unknown as Vennbase<TestSchema>, "tags", {
         in: dogRef(),
-        select: "anonymous",
+        select: "indexKeys",
         orderBy: "createdAt",
         order: "asc",
       });

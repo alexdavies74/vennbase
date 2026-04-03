@@ -13,7 +13,7 @@ import type {
   RowInput,
   RowFields,
 } from "./schema.js";
-import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec, pickKeyFieldValues } from "./schema.js";
+import { applyDefaults, assertCreateParents, assertValidFieldValues, getCollectionSpec, pickIndexKeyFieldValues } from "./schema.js";
 import type { Transport } from "./transport.js";
 import { normalizeParentRefs, normalizeRowRef, rowRefKey } from "./row-reference.js";
 import type { JsonValue } from "./types.js";
@@ -254,7 +254,7 @@ export class Rows<Schema extends DbSchema> {
     const rowRef = normalizeRowRef(row);
     const snapshot = await this.rowRuntime.getRow(rowRef);
     const collectionSpec = getCollectionSpec(this.schema, rowRef.collection);
-    const keyFields = pickKeyFieldValues(collectionSpec, fields);
+    const indexKeyFields = pickIndexKeyFieldValues(collectionSpec, fields);
     this.optimisticStore.recordParents(rowRef, snapshot.parentRefs);
     await Promise.all(
       snapshot.parentRefs.map((parentRef) =>
@@ -262,7 +262,7 @@ export class Rows<Schema extends DbSchema> {
           childRef: rowRef,
           childOwner: snapshot.owner,
           collection: rowRef.collection,
-          fields: keyFields,
+          fields: indexKeyFields,
         }),
       ),
     );

@@ -15,8 +15,8 @@ export const woofSchema = defineSchema({
   dogHistory: collection({
     in: ["user"],
     fields: {
-      dogRef: field.ref("dogs").key(),
-      status: field.string().key(),
+      dogRef: field.ref("dogs").indexKey(),
+      status: field.string().indexKey(),
     },
   }),
   tags: collection({
@@ -24,7 +24,7 @@ export const woofSchema = defineSchema({
     fields: {
       label: field.string(),
       createdBy: field.string(),
-      createdAt: field.number().key(),
+      createdAt: field.number().indexKey(),
     },
   }),
 });

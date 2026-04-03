@@ -23,7 +23,7 @@ import {
 import type {
   AppointmentDb,
   BookingHandle,
-  BookingAnonymousProjection,
+  BookingIndexKeyProjection,
   BookingRootRef,
   RecentScheduleHandle,
   SavedBookingHandle,
@@ -89,7 +89,7 @@ interface BookingClaim {
   claimedAtMs: number;
 }
 
-type BookingClaimSource = Pick<BookingAnonymousProjection, "id" | "fields">
+type BookingClaimSource = Pick<BookingIndexKeyProjection, "id" | "fields">
   | Pick<BookingHandle, "id" | "fields">;
 
 function compareBookingClaims(left: BookingClaim, right: BookingClaim): number {
@@ -241,7 +241,7 @@ export function generateSlotOccurrences(
 
 export function buildCustomerSlotDays(
   schedule: Pick<ScheduleHandle, "fields"> | { fields: Record<string, unknown> },
-  sharedBookings: Array<Pick<BookingAnonymousProjection, "id" | "fields">>,
+  sharedBookings: Array<Pick<BookingIndexKeyProjection, "id" | "fields">>,
   savedBookings: Array<Pick<SavedBookingHandle, "fields" | "id" | "ref">>,
   nowMs = Date.now(),
 ): SlotDay[] {

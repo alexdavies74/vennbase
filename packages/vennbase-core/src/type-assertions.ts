@@ -4,13 +4,13 @@ import {
   collection,
   defineSchema,
   field,
-  type DbAnonymousProjection,
+  type DbIndexKeyProjection,
   type DbQueryOptions,
   type DbQueryRow,
   type DbQueryRows,
   type DbQuerySelect,
   type RowRef,
-  isAnonymousProjection,
+  isIndexKeyProjection,
   isRowRef,
   toRowRef,
 } from "./schema.js";
@@ -30,15 +30,15 @@ const typeTestSchema = defineSchema({
     in: ["projects"],
     fields: {
       title: field.string(),
-      status: field.string().key().default("todo"),
+      status: field.string().indexKey().default("todo"),
       points: field.number().optional(),
     },
   }),
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameRef: field.ref("projects").key(),
-      role: field.string().key(),
+      gameRef: field.ref("projects").indexKey(),
+      role: field.string().indexKey(),
     },
   }),
   mixedRecords: collection({
@@ -78,24 +78,24 @@ void db.query("tasks", { in: projectRef, orderBy: "status", order: "asc" });
 void db.query("gameRecords", { where: { role: "owner" } });
 void db.query("gameRecords", { in: CURRENT_USER, where: { role: "owner" } });
 void db.query("gameRecords", { in: CURRENT_USER, where: { gameRef: projectRef } });
-void db.query("tasks", { in: projectRef, select: "anonymous", orderBy: "status" }).then((rows) => {
-  const first = rows[0] as DbAnonymousProjection<typeof typeTestSchema, "tasks"> | undefined;
+void db.query("tasks", { in: projectRef, select: "indexKeys", orderBy: "status" }).then((rows) => {
+  const first = rows[0] as DbIndexKeyProjection<typeof typeTestSchema, "tasks"> | undefined;
   const projectedStatus: string | undefined = first?.fields.status;
   void projectedStatus;
 
-  // @ts-expect-error anonymous projections expose fields, not keyFields
-  void first?.keyFields;
+  // @ts-expect-error index-key projections expose fields, not indexKeyFields
+  void first?.indexKeyFields;
 
-  // @ts-expect-error anonymous projections do not expose row refs
+  // @ts-expect-error index-key projections do not expose row refs
   void first?.ref;
 
-  // @ts-expect-error anonymous projections are not row inputs
+  // @ts-expect-error index-key projections are not row inputs
   void db.getRow(first);
 });
 
-const taskAnonymousOptions: DbQueryOptions<typeof typeTestSchema, "tasks", "anonymous"> = {
+const taskIndexKeyOptions: DbQueryOptions<typeof typeTestSchema, "tasks", "indexKeys"> = {
   in: projectRef,
-  select: "anonymous",
+  select: "indexKeys",
   orderBy: "status",
 };
 
@@ -113,7 +113,7 @@ function firstQueryRow<
   return rows[0];
 }
 
-void db.query("tasks", taskAnonymousOptions).then((rows) => {
+void db.query("tasks", taskIndexKeyOptions).then((rows) => {
   const first = firstQueryRow(rows);
   const projectedStatus: string | undefined = first?.fields.status;
   void projectedStatus;
@@ -131,14 +131,14 @@ void db.query("tasks", taskFullOptions).then((rows) => {
 });
 
 declare const maybeTaskQueryRow: DbQueryRow<typeof typeTestSchema, "tasks", DbQuerySelect> | undefined;
-if (maybeTaskQueryRow && isAnonymousProjection(maybeTaskQueryRow)) {
+if (maybeTaskQueryRow && isIndexKeyProjection(maybeTaskQueryRow)) {
   const projectedStatus: string | undefined = maybeTaskQueryRow.fields.status;
   void projectedStatus;
 
-  // @ts-expect-error anonymous projections expose fields, not keyFields
-  void maybeTaskQueryRow.keyFields;
+  // @ts-expect-error index-key projections expose fields, not indexKeyFields
+  void maybeTaskQueryRow.indexKeyFields;
 
-  // @ts-expect-error anonymous projections do not expose row refs
+  // @ts-expect-error index-key projections do not expose row refs
   void maybeTaskQueryRow.ref;
 } else if (maybeTaskQueryRow) {
   const taskTitle: string = maybeTaskQueryRow.fields.title;
@@ -150,10 +150,10 @@ if (maybeTaskQueryRow && isAnonymousProjection(maybeTaskQueryRow)) {
 // @ts-expect-error invalid where field
 void db.query("tasks", { in: projectRef, where: { missing: "nope" } });
 
-// @ts-expect-error title is not a key field
+// @ts-expect-error title is not an index-key field
 void db.query("tasks", { in: projectRef, where: { title: "Ship v2" } });
 
-// @ts-expect-error title is not a key field
+// @ts-expect-error title is not an index-key field
 void db.query("tasks", { in: projectRef, orderBy: "title" });
 
 // @ts-expect-error tasks can only be queried under projects

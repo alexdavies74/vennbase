@@ -9,7 +9,7 @@ import {
   createInitialDraft,
   generateSlotOccurrences,
 } from "../src/service";
-import type { BookingAnonymousProjection, BookingHandle, SavedBookingHandle, ScheduleHandle } from "../src/schema";
+import type { BookingIndexKeyProjection, BookingHandle, SavedBookingHandle, ScheduleHandle } from "../src/schema";
 
 function settledReceipt<T>(value: T) {
   return {
@@ -77,7 +77,7 @@ function makeBookingKeyRow(args: {
   slotStartMs: number;
   slotEndMs: number;
   claimedAtMs: number;
-}): Pick<BookingAnonymousProjection, "id" | "fields"> {
+}): Pick<BookingIndexKeyProjection, "id" | "fields"> {
   return {
     id: args.id,
     fields: {

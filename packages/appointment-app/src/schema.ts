@@ -25,32 +25,32 @@ export const schema = defineSchema({
   }),
   bookingRoots: collection({
     fields: {
-      createdAt: field.number().key(),
+      createdAt: field.number().indexKey(),
     },
   }),
   bookings: collection({
     in: ["bookingRoots"],
     fields: {
-      slotStartMs: field.number().key(),
-      slotEndMs: field.number().key(),
-      claimedAtMs: field.number().key(),
+      slotStartMs: field.number().indexKey(),
+      slotEndMs: field.number().indexKey(),
+      claimedAtMs: field.number().indexKey(),
     },
   }),
   recentSchedules: collection({
     in: ["user"],
     fields: {
-      scheduleRef: field.ref("schedules").key(),
-      openedAt: field.number().key(),
+      scheduleRef: field.ref("schedules").indexKey(),
+      openedAt: field.number().indexKey(),
     },
   }),
   savedBookings: collection({
     in: ["user"],
     fields: {
-      scheduleRef: field.ref("schedules").key(),
+      scheduleRef: field.ref("schedules").indexKey(),
       bookingRef: field.ref("bookings"),
-      status: field.string().key(),
-      slotStartMs: field.number().key(),
-      slotEndMs: field.number().key(),
+      status: field.string().indexKey(),
+      slotStartMs: field.number().indexKey(),
+      slotEndMs: field.number().indexKey(),
     },
   }),
 });
@@ -62,7 +62,7 @@ export type BookingRootHandle = RowHandle<Schema, "bookingRoots">;
 export type BookingHandle = RowHandle<Schema, "bookings">;
 export type RecentScheduleHandle = RowHandle<Schema, "recentSchedules">;
 export type SavedBookingHandle = RowHandle<Schema, "savedBookings">;
-export type BookingAnonymousProjection = DbQueryRow<Schema, "bookings", "anonymous">;
+export type BookingIndexKeyProjection = DbQueryRow<Schema, "bookings", "indexKeys">;
 export type BookingRootRef = RowRef<"bookingRoots">;
 export type ScheduleInsertFields = InsertFields<Schema, "schedules">;
 export type EditableScheduleFields = Omit<ScheduleInsertFields, "bookingSubmitterLink">;

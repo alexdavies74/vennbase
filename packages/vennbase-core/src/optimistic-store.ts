@@ -287,7 +287,7 @@ export class OptimisticStore {
     });
   }
 
-  findAnonymousQueryRow(collection: string, rowId: string): OptimisticRowRecord | null {
+  findIndexKeyQueryRow(collection: string, rowId: string): OptimisticRowRecord | null {
     return Array.from(this.rows.values()).find((record) => {
       return record.collection === collection && record.row.id === rowId;
     }) ?? null;

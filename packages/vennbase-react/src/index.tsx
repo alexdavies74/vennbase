@@ -518,7 +518,7 @@ export function useQuery<
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
   const resourceKey = options ? makeQueryKey<Schema, TCollection, TOptions>(collection, options) : null;
   const blocked = blockedResourceResult<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>>(session);
-  const isFullQuery = options?.select !== "anonymous";
+  const isFullQuery = options?.select !== "indexKeys";
   const resource = useOptionalResource(
     (hookOptions.enabled ?? true) && !!options && !blocked,
     resourceKey,

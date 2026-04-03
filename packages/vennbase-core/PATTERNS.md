@@ -47,18 +47,18 @@ The customer never holds a viewer link to `bookingRoots` itself, so they cannot 
 
 ---
 
-## Pattern 2: Anonymized sibling visibility with `select: "anonymous"`
+## Pattern 2: Index-key sibling visibility with `select: "indexKeys"`
 
 **Problem.** Customers need to see which slots are already taken so they can pick an open one — but they shouldn't see other customers' private booking details.
 
-**Trick.** Query with `select: "anonymous"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an anonymous projection: it includes only `kind`, `id`, `collection`, and key-only `fields`.
+**Trick.** Query with `select: "indexKeys"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an index-key projection: it includes only `kind`, `id`, `collection`, and index-key-only `fields`.
 
 **In the UI** — reactive:
 
 ```ts
 const { rows: sharedBookings = [] } = useQuery(db, "bookings", {
   in: props.bookingRootRef,
-  select: "anonymous",
+  select: "indexKeys",
   limit: 500,
 });
 ```
@@ -84,28 +84,28 @@ Then derive the active booking from the visible rows:
 5. after cooloff, treat only the first claim as active
 6. if that claim disappears later, recompute from the remaining rows and the next claim becomes active
 
-`select: "anonymous"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows anonymous sibling queries. These projections are not locatable row refs; use a full query if you need to reopen a row later.
+`select: "indexKeys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows index-key sibling queries. These projections are not locatable row refs; use a full query if you need to reopen a row later.
 
 This gives **honest convergence**, not fairness against malicious writers. All well-behaved clients will compute the same winner from the same visible rows, but a malicious writer can still bias the outcome by choosing favorable visible tiebreak values.
 
 ---
 
-## Pattern 3: Minimal key fields
+## Pattern 3: Minimal index-key fields
 
-`select: "anonymous"` only exposes fields declared `.key()`. The `bookings` schema is designed so anonymous projections contain just enough to render an occupied-slots calendar — nothing more:
+`select: "indexKeys"` only exposes fields declared `.indexKey()`. The `bookings` schema is designed so index-key projections contain just enough to render an occupied-slots calendar — nothing more:
 
 ```ts
 bookings: collection({
   in: ["bookingRoots"],
   fields: {
-    slotStartMs: field.number().key(),  // exposed by select: "anonymous"
-    slotEndMs:   field.number().key(),  // exposed by select: "anonymous"
-    claimedAtMs: field.number().key(),  // visible tiebreak for read-side arbitration
+    slotStartMs: field.number().indexKey(),  // exposed by select: "indexKeys"
+    slotEndMs:   field.number().indexKey(),  // exposed by select: "indexKeys"
+    claimedAtMs: field.number().indexKey(),  // visible tiebreak for read-side arbitration
   },
 }),
 ```
 
-**Design rule:** before marking a field `.key()`, ask whether it is safe for submitters to read. If not, leave `.key()` off and it will never appear in anonymous projections, regardless of what is added to the schema later. For this pattern, `claimedAtMs` is intentionally visible so all clients can run the same deterministic tiebreak.
+**Design rule:** before marking a field `.indexKey()`, ask whether it is safe for submitters to read. If not, leave `.indexKey()` off and it will never appear in index-key projections, regardless of what is added to the schema later. For this pattern, `claimedAtMs` is intentionally visible so all clients can run the same deterministic tiebreak.
 
 ---
 
@@ -117,7 +117,7 @@ The app wires all three together into a single access-control surface the owner 
 2. **Owner shares the schedule** using a viewer share link. Customers open it.
 3. **Customer joins the inbox** — Pattern 1. `ensureBookingRootAccess` calls `joinInvite` on the embedded link, returning a `BookingRootRef` with submitter access.
 4. **Customer creates a claim** under the `BookingRootRef`. No preflight race check is needed.
-5. **Customer queries visible claims** — Patterns 2 and 3. `select: "anonymous"` returns anonymous projections with `fields: { slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which claim is active.
+5. **Customer queries visible claims** — Patterns 2 and 3. `select: "indexKeys"` returns index-key projections with `fields: { slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which claim is active.
 6. **Owner and customers converge** on the same active booking from the same visible rows. Only the owner (with full access) can read the complete booking records.
 
 The owner never manually grants or revokes customer access. The submitter link embedded in the schedule is the entire access-control surface.

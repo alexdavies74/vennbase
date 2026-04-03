@@ -70,14 +70,14 @@ const schema = defineSchema({
     in: ["projects"],
     fields: {
       title: field.string(),
-      status: field.string().key().default("todo"),
+      status: field.string().indexKey().default("todo"),
     },
   }),
   gameRecords: collection({
     in: ["user"],
     fields: {
-      gameRef: field.ref("projects").key(),
-      role: field.string().key(),
+      gameRef: field.ref("projects").indexKey(),
+      role: field.string().indexKey(),
     },
   }),
 });
@@ -530,10 +530,10 @@ describe("Vennbase rows", () => {
 
     const task = await settle(bobDb.create("tasks", { title: "Need review" }, { in: joined.ref }));
 
-    const submitterRows = await bobDb.query("tasks", { in: joined.ref, select: "anonymous" });
+    const submitterRows = await bobDb.query("tasks", { in: joined.ref, select: "indexKeys" });
     expect(submitterRows).toEqual([
       expect.objectContaining({
-        kind: "anonymous-projection",
+        kind: "index-key-projection",
         id: task.id,
         collection: "tasks",
         fields: { status: "todo" },
@@ -644,7 +644,7 @@ describe("Vennbase rows", () => {
     });
   });
 
-  it("rejects non-key where fields locally before sending the query", async () => {
+  it("rejects non-index-key where fields locally before sending the query", async () => {
     const request = vi.fn();
     const transport = {
       row: vi.fn(() => ({
@@ -666,13 +666,13 @@ describe("Vennbase rows", () => {
         baseUrl: "https://worker.example",
       },
       where: { title: "Ship v2" },
-    } as never)).rejects.toThrow("where.title must be a key field");
+    } as never)).rejects.toThrow("where.title must be an index-key field");
 
     expect(transport.row).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("rejects non-key orderBy locally before sending the query", async () => {
+  it("rejects non-index-key orderBy locally before sending the query", async () => {
     const request = vi.fn();
     const transport = {
       row: vi.fn(() => ({
@@ -694,7 +694,7 @@ describe("Vennbase rows", () => {
         baseUrl: "https://worker.example",
       },
       orderBy: "title",
-    } as never)).rejects.toThrow("orderBy must be a key field");
+    } as never)).rejects.toThrow("orderBy must be an index-key field");
 
     expect(transport.row).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
@@ -734,7 +734,7 @@ describe("Vennbase rows", () => {
         in: ["shelves"],
         fields: {
           title: field.string(),
-          rank: field.number().key(),
+          rank: field.number().indexKey(),
         },
       }),
     });
@@ -820,7 +820,7 @@ describe("Vennbase rows", () => {
     expect(getRow.mock.calls.map(([row]) => row.id)).toEqual(["card_1", "card_2"]);
   });
 
-  it("returns anonymous projections for anonymous queries and dedupes multi-parent results by id", async () => {
+  it("returns index-key projections for index-key queries and dedupes multi-parent results by id", async () => {
     const multiParentSchema = defineSchema({
       shelves: collection({
         fields: {
@@ -831,7 +831,7 @@ describe("Vennbase rows", () => {
         in: ["shelves"],
         fields: {
           title: field.string(),
-          rank: field.number().key(),
+          rank: field.number().indexKey(),
         },
       }),
     });
@@ -894,7 +894,7 @@ describe("Vennbase rows", () => {
           baseUrl: "https://worker.example",
         },
       ],
-      select: "anonymous",
+      select: "indexKeys",
       orderBy: "rank",
       order: "asc",
       limit: 2,
@@ -902,13 +902,13 @@ describe("Vennbase rows", () => {
 
     expect(rows).toEqual([
       {
-        kind: "anonymous-projection",
+        kind: "index-key-projection",
         id: "card_1",
         collection: "cards",
         fields: { rank: 1 },
       },
       {
-        kind: "anonymous-projection",
+        kind: "index-key-projection",
         id: "card_2",
         collection: "cards",
         fields: { rank: 2 },

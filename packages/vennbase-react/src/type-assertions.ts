@@ -5,7 +5,7 @@ import {
   defineSchema,
   field,
   type AnyRowHandle,
-  type DbAnonymousProjection,
+  type DbIndexKeyProjection,
   type DbQueryOptions,
   type DbQueryRow,
   type DbQuerySelect,
@@ -25,14 +25,14 @@ const schema = defineSchema({
     in: ["dogs"],
     fields: {
       label: field.string(),
-      createdAt: field.number().key(),
+      createdAt: field.number().indexKey(),
     },
   }),
   recentDogs: collection({
     in: ["user"],
     fields: {
-      dogRef: field.ref("dogs").key(),
-      openedAt: field.number().key(),
+      dogRef: field.ref("dogs").indexKey(),
+      openedAt: field.number().indexKey(),
     },
   }),
 });
@@ -82,12 +82,12 @@ const savedDogSummary = useSavedRow(anyClient, {
 });
 const projectedTags = useQuery(anyClient, "tags", {
   in: dogHandle,
-  select: "anonymous",
+  select: "indexKeys",
   orderBy: "createdAt",
 });
-const projectedTagOptions: DbQueryOptions<TestSchema, "tags", "anonymous"> = {
+const projectedTagOptions: DbQueryOptions<TestSchema, "tags", "indexKeys"> = {
   in: dogHandle,
-  select: "anonymous",
+  select: "indexKeys",
   orderBy: "createdAt",
 };
 const recentDogOptions: DbQueryOptions<TestSchema, "recentDogs"> = {
@@ -100,8 +100,8 @@ const recentDogs = useQuery(anyClient, "recentDogs", {
   orderBy: "openedAt",
 });
 const recentDogsFromOptions = useQuery(anyClient, "recentDogs", recentDogOptions);
-const projectedTag: DbAnonymousProjection<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
-const projectedTagFromOptions: DbQueryRow<TestSchema, "tags", "anonymous"> | undefined = projectedTagsFromOptions.rows?.[0];
+const projectedTag: DbIndexKeyProjection<TestSchema, "tags"> | undefined = projectedTags.rows?.[0];
+const projectedTagFromOptions: DbQueryRow<TestSchema, "tags", "indexKeys"> | undefined = projectedTagsFromOptions.rows?.[0];
 const recentDog: RowHandle<TestSchema, "recentDogs"> | undefined = recentDogs.rows?.[0];
 const recentDogFromOptions: DbQueryRow<TestSchema, "recentDogs"> | undefined = recentDogsFromOptions.rows?.[0];
 const dogName: string = dogHandle.fields.name;
@@ -116,7 +116,7 @@ function useTypedQuery<
   return useQuery(anyClient, collection, options);
 }
 
-const genericProjectedTag: DbQueryRow<TestSchema, "tags", "anonymous"> | undefined =
+const genericProjectedTag: DbQueryRow<TestSchema, "tags", "indexKeys"> | undefined =
   useTypedQuery("tags", projectedTagOptions).rows?.[0];
 const genericRecentDog: DbQueryRow<TestSchema, "recentDogs"> | undefined =
   useTypedQuery("recentDogs", recentDogOptions).rows?.[0];
@@ -156,16 +156,16 @@ if (inviteResult?.kind === "opened") {
   void openedRow;
 }
 
-// @ts-expect-error anonymous projections do not expose row refs
+// @ts-expect-error index-key projections do not expose row refs
 void projectedTag?.ref;
 
-// @ts-expect-error anonymous projections expose fields, not keyFields
-void projectedTag?.keyFields;
+// @ts-expect-error index-key projections expose fields, not indexKeyFields
+void projectedTag?.indexKeyFields;
 
-// @ts-expect-error anonymous projections are not row inputs
+// @ts-expect-error index-key projections are not row inputs
 void useRow(anyClient, projectedTag);
 
-// @ts-expect-error anonymous projections are not row handles
+// @ts-expect-error index-key projections are not row handles
 void useShareLink(anyClient, projectedTag, "editor");
 
 if (dogResult.data) {

@@ -491,7 +491,7 @@ describe("RowWorker", () => {
             email: "private@example.com",
           },
           schema: {
-            keyFields: ["status"],
+            indexKeyFields: ["status"],
           },
         },
       }),
@@ -526,7 +526,7 @@ describe("RowWorker", () => {
         action: "db/query",
         rowId: "project_submitter",
         username: "submitter",
-        body: { collection: "tasks", select: "anonymous", orderBy: "status" },
+        body: { collection: "tasks", select: "indexKeys", orderBy: "status" },
       }),
     );
 

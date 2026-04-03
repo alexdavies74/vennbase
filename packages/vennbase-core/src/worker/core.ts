@@ -72,7 +72,7 @@ interface PostFieldsRequest {
 }
 
 interface ChildSchemaPayload {
-  keyFields?: string[];
+  indexKeyFields?: string[];
 }
 
 interface RegisterChildRequest {
@@ -107,7 +107,7 @@ interface MemberMutationRequest {
 
 interface QueryRequest {
   collection?: string;
-  select?: "full" | "anonymous";
+  select?: "full" | "indexKeys";
   orderBy?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -115,7 +115,7 @@ interface QueryRequest {
 }
 
 interface ChildCollectionSchema {
-  keyFields: string[];
+  indexKeyFields: string[];
 }
 
 interface ChildEntry {
@@ -370,10 +370,10 @@ function toFieldRecord(value: unknown, fieldName: string): Record<string, DbFiel
 
 function pickFieldRecordKeys(
   fields: Record<string, DbFieldValue>,
-  keyFields: string[],
+  indexKeyFields: string[],
 ): Record<string, DbFieldValue> {
   const next: Record<string, DbFieldValue> = {};
-  for (const fieldName of keyFields) {
+  for (const fieldName of indexKeyFields) {
     const value = fields[fieldName];
     if (value !== undefined) {
       next[fieldName] = value;
@@ -1149,7 +1149,7 @@ export class RowWorker {
       await this.kv.set(rowChildSchemaKey(parentRowId, body.collection), schema);
     }
     const storedSchema = schema ?? await this.getChildSchema(parentRowId, body.collection);
-    const keyFields = storedSchema?.keyFields ?? [];
+    const indexKeyFields = storedSchema?.indexKeyFields ?? [];
     const childFields = body.fields ? toFieldRecord(body.fields, "fields") : {};
 
     const childEntry: ChildEntry = {
@@ -1157,7 +1157,7 @@ export class RowWorker {
       owner: body.childOwner,
       baseUrl: childRef.baseUrl,
       collection: body.collection,
-      fields: keyFields.length > 0 ? pickFieldRecordKeys(childFields, keyFields) : childFields,
+      fields: indexKeyFields.length > 0 ? pickFieldRecordKeys(childFields, indexKeyFields) : childFields,
       addedAt: this.now(),
       updatedAt: this.now(),
       active: true,
@@ -1241,7 +1241,7 @@ export class RowWorker {
     });
 
     const schema = await this.getChildSchema(parentRowId, body.collection);
-    const keyFields = schema?.keyFields ?? [];
+    const indexKeyFields = schema?.indexKeyFields ?? [];
     const nextFields = toFieldRecord(body.fields, "fields");
     const childKey = rowChildKey(parentRowId, body.collection, body.childOwner, childRef.id);
     const existing = await this.kv.get<ChildEntry>(childKey);
@@ -1250,7 +1250,7 @@ export class RowWorker {
       owner: body.childOwner,
       baseUrl: childRef.baseUrl || stripTrailingSlash(existing?.baseUrl ?? ""),
       collection: body.collection,
-      fields: keyFields.length > 0 ? pickFieldRecordKeys(nextFields, keyFields) : nextFields,
+      fields: indexKeyFields.length > 0 ? pickFieldRecordKeys(nextFields, indexKeyFields) : nextFields,
       addedAt: existing?.addedAt ?? this.now(),
       updatedAt: this.now(),
       active: true,
@@ -1296,11 +1296,11 @@ export class RowWorker {
 
     const collection = payload.collection?.trim() || undefined;
 
-    const select = payload.select === "anonymous" ? "anonymous" : "full";
-    if (role === "submitter" && select !== "anonymous") {
-      error(401, "UNAUTHORIZED", "Submitters may only run anonymous projection queries");
+    const select = payload.select === "indexKeys" ? "indexKeys" : "full";
+    if (role === "submitter" && select !== "indexKeys") {
+      error(401, "UNAUTHORIZED", "Submitters may only run index-key projection queries");
     }
-    if (role === "submitter" && select === "anonymous") {
+    if (role === "submitter" && select === "indexKeys") {
       // allowed
     } else if (role === "submitter") {
       error(401, "UNAUTHORIZED", "Readable members only");
@@ -1718,26 +1718,26 @@ export class RowWorker {
   }
 
   private normalizeChildSchema(schema: ChildSchemaPayload | undefined): ChildCollectionSchema | null {
-    if (!schema?.keyFields || !Array.isArray(schema.keyFields)) {
+    if (!schema?.indexKeyFields || !Array.isArray(schema.indexKeyFields)) {
       return null;
     }
 
-    const keyFields = schema.keyFields.filter((field): field is string => typeof field === "string" && field.length > 0);
-    if (keyFields.length === 0) {
+    const indexKeyFields = schema.indexKeyFields.filter((field): field is string => typeof field === "string" && field.length > 0);
+    if (indexKeyFields.length === 0) {
       return null;
     }
 
-    return { keyFields };
+    return { indexKeyFields };
   }
 
   private async getChildSchema(parentRowId: string, collection: string): Promise<ChildCollectionSchema | null> {
     const stored = await this.kv.get<ChildCollectionSchema>(rowChildSchemaKey(parentRowId, collection));
-    if (!stored || !Array.isArray(stored.keyFields)) {
+    if (!stored || !Array.isArray(stored.indexKeyFields)) {
       return null;
     }
 
     return {
-      keyFields: stored.keyFields.filter((field): field is string => typeof field === "string" && field.length > 0),
+      indexKeyFields: stored.indexKeyFields.filter((field): field is string => typeof field === "string" && field.length > 0),
     };
   }
 

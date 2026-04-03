@@ -1,7 +1,7 @@
 import type { RowRuntime } from "./row-runtime.js";
 import type { Transport } from "./transport.js";
 import type { DbSchema, RowInput, RowRef } from "./schema.js";
-import { assertParentAllowed, getCollectionKeyFieldNames, pickKeyFieldValues } from "./schema.js";
+import { assertParentAllowed, getCollectionIndexKeyFieldNames, pickIndexKeyFieldValues } from "./schema.js";
 import { normalizeRowRef } from "./row-reference.js";
 import type { JsonValue } from "./types.js";
 
@@ -21,16 +21,16 @@ export class Parents {
     const childSnapshot = await this.rowRuntime.getRow(childRef);
     const childFields = await this.refreshFields(childRef);
     const childSpec = this.schema[childRef.collection];
-    const keyFields = childSpec ? getCollectionKeyFieldNames(childSpec) : [];
-    const keyFieldValues = childSpec ? pickKeyFieldValues(childSpec, childFields) : {};
+    const indexKeyFields = childSpec ? getCollectionIndexKeyFieldNames(childSpec) : [];
+    const indexKeyFieldValues = childSpec ? pickIndexKeyFieldValues(childSpec, childFields) : {};
 
     await this.transport.row(parentRef).request("parents/register-child", {
       childRef,
       childOwner: childSnapshot.owner,
       collection: childRef.collection,
-      fields: keyFieldValues,
+      fields: indexKeyFieldValues,
       schema: {
-        keyFields,
+        indexKeyFields,
       },
     });
 

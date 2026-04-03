@@ -200,7 +200,7 @@ function snapshotQueryRows(value: Array<{
   id: string;
   collection: string;
   fields?: unknown;
-  kind?: "anonymous-projection";
+  kind?: "index-key-projection";
   owner?: string;
   ref?: RowRef;
 }>): string {

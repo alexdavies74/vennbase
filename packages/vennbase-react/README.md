@@ -92,11 +92,11 @@ function CardList({ board }: { board: BoardHandle }) {
 }
 ```
 
-### Full rows vs anonymous projections
+### Full rows vs index-key projections
 
 By default, `useQuery` returns full `RowHandle` values. Those handles are locatable and can be passed to row-scoped hooks and helpers.
 
-If you pass `select: "anonymous"`, `useQuery` returns anonymous projections shaped like `{ kind: "anonymous-projection", id, collection, fields }`, where `fields` contains only values declared `.key()`. They are for anonymous visibility only and cannot be reopened or reused as row handles.
+If you pass `select: "indexKeys"`, `useQuery` returns index-key projections shaped like `{ kind: "index-key-projection", id, collection, fields }`, where `fields` contains only values declared `.indexKey()`. They are for index-key visibility only and cannot be reopened or reused as row handles.
 
 ```tsx
 function RecentBoards() {
@@ -242,13 +242,13 @@ function AppRoot() {
 }
 ```
 
-If a submitter needs anonymized sibling visibility, use `select: "anonymous"` so the hook returns anonymous projections containing only `kind`, `id`, `collection`, and key-only `fields`:
+If a submitter needs index-key sibling visibility, use `select: "indexKeys"` so the hook returns index-key projections containing only `kind`, `id`, `collection`, and index-key-only `fields`:
 
 ```tsx
 function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {
   const { rows: bookings = [] } = useQuery(db, "bookings", {
     in: availability,
-    select: "anonymous",
+    select: "indexKeys",
     orderBy: "startTime",
     order: "asc",
   });
@@ -286,7 +286,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useSession(db)` | `Vennbase` instance | `{ session, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, signIn, refresh }` |
 | `useCurrentUser(db)` | `Vennbase` instance | `{ user, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useVennbase()` | — | `Vennbase` instance from context |
-| `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` where `rows` is `RowHandle[]` by default or anonymous projections when `select: "anonymous"` is used |
+| `useQuery(db, collection, options)` | db, collection name, query options with required `in` | `{ rows, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` where `rows` is `RowHandle[]` by default or index-key projections when `select: "indexKeys"` is used |
 | `useRow(db, row)` | db, row handle or row ref | `{ row, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useParents(db, row)` | db, row handle or row ref | `{ data: RowRef[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |

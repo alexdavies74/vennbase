@@ -35,8 +35,8 @@ export interface InspectorQueryOptions {
   where?: Record<string, DbFieldValue>;
 }
 
-export interface InspectorAnonymousQueryOptions extends InspectorQueryOptions {
-  select: "anonymous";
+export interface InspectorIndexKeyQueryOptions extends InspectorQueryOptions {
+  select: "indexKeys";
 }
 
 export interface InspectorFullQueryOptions extends InspectorQueryOptions {
@@ -51,8 +51,8 @@ export interface InspectorFullQueryRow {
   fields: Record<string, JsonValue>;
 }
 
-export interface InspectorAnonymousQueryRow {
-  kind: "anonymous-projection";
+export interface InspectorIndexKeyQueryRow {
+  kind: "index-key-projection";
   id: string;
   collection: string;
   fields: Record<string, JsonValue>;
@@ -144,12 +144,12 @@ export class VennbaseInspector {
     return payload.members;
   }
 
-  async queryChildren(parent: RowInput, options: InspectorAnonymousQueryOptions): Promise<InspectorAnonymousQueryRow[]>;
+  async queryChildren(parent: RowInput, options: InspectorIndexKeyQueryOptions): Promise<InspectorIndexKeyQueryRow[]>;
   async queryChildren(parent: RowInput, options?: InspectorFullQueryOptions): Promise<InspectorFullQueryRow[]>;
   async queryChildren(
     parent: RowInput,
-    options: InspectorQueryOptions & { select?: "full" | "anonymous" } = {},
-  ): Promise<InspectorFullQueryRow[] | InspectorAnonymousQueryRow[]> {
+    options: InspectorQueryOptions & { select?: "full" | "indexKeys" } = {},
+  ): Promise<InspectorFullQueryRow[] | InspectorIndexKeyQueryRow[]> {
     await this.identity.whoAmI();
     const parentRef = normalizeRowRef(parent);
     const response = await this.transport.row(parentRef).request<InspectorQueryResponse>("db/query", {
@@ -161,9 +161,9 @@ export class VennbaseInspector {
       where: options.where,
     });
 
-    if (options.select === "anonymous") {
+    if (options.select === "indexKeys") {
       return response.rows.map((row) => ({
-        kind: "anonymous-projection",
+        kind: "index-key-projection",
         id: row.rowId,
         collection: row.collection,
         fields: row.fields,
