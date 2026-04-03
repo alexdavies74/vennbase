@@ -404,10 +404,14 @@ export class AppointmentService {
       ...draftToScheduleFields(draft),
       bookingSubmitterLink,
     });
-    const schedule = await scheduleWrite.committed;
-
-    await bookingRootWrite.committed;
-    await bookingSubmitterLinkWrite.committed;
+    // The embedded link is future-valid immediately, so we can store it on the
+    // schedule optimistically. Before returning the schedule to code that might
+    // publish it, wait for the inbox row and invite token to exist remotely.
+    const [schedule] = await Promise.all([
+      scheduleWrite.committed,
+      bookingRootWrite.committed,
+      bookingSubmitterLinkWrite.committed,
+    ]);
     await this.rememberRecentSchedule(schedule);
     return schedule;
   }

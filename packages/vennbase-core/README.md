@@ -350,10 +350,10 @@ pnpm --filter appointment-app dev
 | `getRow(row)` | Fetch a row by typed reference. |
 | `query(collection, options)` | Load rows under a parent, with optional index, order, and limit. Pass `in`, including `CURRENT_USER` for user-scoped collections. Default queries return locatable `RowHandle` values; `select: "indexKeys"` returns non-reopenable index-key projections. |
 | `watchQuery(collection, options, callbacks)` | Subscribe to repeated query refreshes via `callbacks.onChange`. Pass `in`, including `CURRENT_USER` for user-scoped collections. Returns a handle with `.disconnect()`. The callback receives either full `RowHandle` values or index-key projections depending on `select`. |
-| `createShareToken(row, role)` | Generate a new share token for a row and return a `MutationReceipt<ShareToken>`. Pass a role such as `"editor"` or `"submitter"`. |
+| `createShareToken(row, role)` | Generate a share token optimistically and return a `MutationReceipt<ShareToken>`. `.value` is usable locally right away; await `.committed` before another client must be able to use it. |
 | `getExistingShareToken(row, role)` | Return the existing token for the requested role if one exists, or `null`. |
 | `createShareLink(row, shareToken)` | Build a shareable URL containing a serialized row ref and token. |
-| `createShareLink(row, role)` | Generate a new share token for that role and return the resulting share link as a `MutationReceipt<string>`. |
+| `createShareLink(row, role)` | Generate a future-valid share link for that role and return it as a `MutationReceipt<string>`. `.value` is the local URL immediately; `.committed` resolves when recipients can rely on it remotely. |
 | `parseInvite(input)` | Parse an invite URL into `{ ref, shareToken? }`. |
 | `joinInvite(input)` | Idempotently join a row via invite URL or parsed invite object without opening it, and return `{ ref, role }`. |
 | `acceptInvite(input)` | Join a readable invite and return its handle. Use it for `"editor"`, `"contributor"`, or `"viewer"` invites; `"submitter"` invites should use `joinInvite(...)`. |

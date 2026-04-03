@@ -575,6 +575,27 @@ describe("Vennbase rows", () => {
     ]));
   });
 
+  it("creates future-valid submitter links from optimistic row handles", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = await buildReadyDb({ username: "alice", network });
+    const bobDb = await buildReadyDb({ username: "bob", network });
+
+    const projectWrite = aliceDb.create("projects", { name: "Inbox" });
+    const project = projectWrite.value;
+    const submissionLinkWrite = aliceDb.createShareLink(project, "submitter");
+    const submissionUrl = submissionLinkWrite.value;
+
+    await Promise.all([
+      projectWrite.committed,
+      submissionLinkWrite.committed,
+    ]);
+
+    await expect(bobDb.joinInvite(submissionUrl)).resolves.toEqual({
+      ref: project.ref,
+      role: "submitter",
+    });
+  });
+
   it("blocks viewers from linking child rows into shared parents", async () => {
     const network = new TestWorkerNetwork();
     const aliceDb = await buildReadyDb({ username: "alice", network });

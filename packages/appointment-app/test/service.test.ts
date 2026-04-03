@@ -20,6 +20,30 @@ function settledReceipt<T>(value: T) {
   };
 }
 
+function deferredReceipt<T>(value: T) {
+  let resolve!: (next: T) => void;
+  const committed = new Promise<T>((res) => {
+    resolve = res;
+  });
+
+  return {
+    receipt: {
+      value,
+      committed,
+      status: "pending" as const,
+      error: undefined,
+    },
+    resolve() {
+      resolve(value);
+    },
+  };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function makeRef<TCollection extends string>(id: string, collection: TCollection) {
   return {
     id,
@@ -329,6 +353,64 @@ describe("service flows", () => {
       order: "desc",
       limit: 1,
     });
+  });
+
+  it("waits to publish the schedule until the embedded submitter link is remotely ready", async () => {
+    const bookingRoot = {
+      ref: makeRef("root_1", "bookingRoots"),
+      id: "root_1",
+      collection: "bookingRoots",
+      owner: "alice",
+      fields: { createdAt: 1 },
+    } as unknown as BookingHandle;
+    const schedule = makeSchedule();
+    const submissionLinkWrite = deferredReceipt("invite://booking-root");
+    const query = vi.fn(async () => []);
+    const service = new AppointmentService({
+      create: vi.fn((collection: string) => {
+        if (collection === "bookingRoots") {
+          return settledReceipt(bookingRoot);
+        }
+
+        if (collection === "schedules") {
+          return settledReceipt(schedule);
+        }
+
+        return settledReceipt({
+          id: "recent_1",
+          ref: makeRef("recent_1", "recentSchedules"),
+          collection: "recentSchedules",
+          owner: "alice",
+          fields: {
+            scheduleRef: schedule.ref,
+            openedAt: 1,
+          },
+        });
+      }),
+      createShareLink: vi.fn(() => submissionLinkWrite.receipt),
+      getRow: vi.fn(),
+      joinInvite: vi.fn(),
+      parseInvite: vi.fn(),
+      query,
+      update: vi.fn(),
+    } as never);
+
+    let resolved = false;
+    const createSchedulePromise = service.createSchedule(createInitialDraft("UTC"))
+      .then((value) => {
+        resolved = true;
+        return value;
+      });
+
+    await flushMicrotasks();
+
+    expect(resolved).toBe(false);
+    expect(query).not.toHaveBeenCalled();
+
+    submissionLinkWrite.resolve();
+
+    await expect(createSchedulePromise).resolves.toBe(schedule);
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it("creates both shared and private booking records when reserving a slot", async () => {

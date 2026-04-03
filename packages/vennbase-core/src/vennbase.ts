@@ -270,6 +270,11 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
       ?? this.invitesModule.getExistingShareToken(rowRef, role);
   }
 
+  /**
+   * Optimistically mint a share token locally and enqueue the remote invite-token write.
+   * Use `.value` for local follow-up work immediately. Await `.committed` before another
+   * client must be able to consume the token.
+   */
   createShareToken(row: RowInput, role: MemberRole): MutationReceipt<ShareToken> {
     const state = this.assertReadyForMutation();
     const rowRef = normalizeRowRef(row);
@@ -296,6 +301,12 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   createShareLink(row: RowInput, role: MemberRole): MutationReceipt<string>;
   createShareLink(row: RowInput, shareToken: ShareToken): string;
+  
+  /**
+   * `createShareLink(row, shareToken)` is a pure local serializer.
+   * `createShareLink(row, role)` returns a future-valid link immediately and resolves once
+   * the invite token exists remotely.
+   */
   createShareLink(row: RowInput, roleOrShareToken: MemberRole | ShareToken): MutationReceipt<string> | string {
     if (typeof roleOrShareToken !== "string") {
       return this.invitesModule.createShareLink(row, roleOrShareToken.token);

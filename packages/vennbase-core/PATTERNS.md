@@ -23,13 +23,17 @@ The schema lives in `packages/appointment-app/src/schema.ts`. The service layer 
 ```ts
 const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() });
 const bookingRoot = bookingRootWrite.value;
-await bookingRootWrite.committed;
-
-const bookingSubmitterLink = await this.db.createShareLink(bookingRoot.ref, "submitter").committed;
-this.db.create("schedules", {
+const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "submitter");
+const scheduleWrite = this.db.create("schedules", {
   ...draftToScheduleFields(draft),
-  bookingSubmitterLink,  // stored as a plain string field on the readable row
+  bookingSubmitterLink: bookingSubmitterLinkWrite.value,  // stored as a plain string field on the readable row
 });
+
+await Promise.all([
+  scheduleWrite.committed,
+  bookingRootWrite.committed,
+  bookingSubmitterLinkWrite.committed,
+]);
 ```
 
 **Customer side — claim submitter access from the embedded link:**
