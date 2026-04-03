@@ -1,6 +1,6 @@
 {
   "name": "@vennbase/yjs",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Yjs adapters for Vennbase CRDT sync.",
   "license": "Apache-2.0",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "crdt", "yjs"],
