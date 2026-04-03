@@ -722,12 +722,10 @@ export function useAcceptInviteFromUrl<
 ): UseAcceptInviteFromUrlResult<Schema, TOpened> {
   const runtime = useRuntime(db);
   const enabled = options.enabled ?? true;
-  const session = useSessionResource(runtime, options.enabled ?? true);
+  const session = useSessionResource(runtime, enabled);
   const detectedInviteInput = options.url ?? getInviteInputFromUrl();
   const [latchedInviteInput, setLatchedInviteInput] = useState<string | null>(detectedInviteInput);
-  const inviteInput = enabled
-    ? detectedInviteInput ?? latchedInviteInput
-    : null;
+  const inviteInput = detectedInviteInput ?? latchedInviteInput;
   const resourceKey = inviteInput ? makeIncomingInviteKey(inviteInput) : null;
   const clearInviteParamsOption = options.clearInviteParams ?? true;
   const deliveryKey = inviteInput ?? null;
@@ -752,13 +750,6 @@ export function useAcceptInviteFromUrl<
   clearInviteParamsRef.current = clearInviteParamsOption;
 
   useEffect(() => {
-    if (!enabled) {
-      if (latchedInviteInput !== null) {
-        setLatchedInviteInput(null);
-      }
-      return;
-    }
-
     if (detectedInviteInput && detectedInviteInput !== latchedInviteInput) {
       setLatchedInviteInput(detectedInviteInput);
       return;
@@ -771,10 +762,10 @@ export function useAcceptInviteFromUrl<
     ) {
       setLatchedInviteInput(null);
     }
-  }, [deliveryState.status, detectedInviteInput, enabled, latchedInviteInput]);
+  }, [deliveryState.status, detectedInviteInput, latchedInviteInput]);
 
   const resource = useOptionalResource(
-    (options.enabled ?? true)
+    enabled
       && !!inviteInput
       && session.status === "success"
       && !!session.data?.signedIn,
@@ -789,6 +780,23 @@ export function useAcceptInviteFromUrl<
   );
 
   useEffect(() => {
+    if (!enabled) {
+      if (
+        currentDeliveryKey
+        && deliveryStateRef.current.key === currentDeliveryKey
+        && deliveryStateRef.current.status === "loading"
+      ) {
+        const nextState = {
+          key: currentDeliveryKey,
+          status: "idle" as const,
+          error: undefined,
+        };
+        deliveryStateRef.current = nextState;
+        setDeliveryState(nextState);
+      }
+      return;
+    }
+
     if (!currentDeliveryKey) {
       const nextState = {
         key: null,
@@ -883,7 +891,7 @@ export function useAcceptInviteFromUrl<
     return () => {
       cancelled = true;
     };
-  }, [currentDeliveryKey, inviteInput, resource.data, resource.status]);
+  }, [currentDeliveryKey, enabled, inviteInput, resource.data, resource.status]);
 
   const refresh = async (): Promise<void> => {
     if (session.status !== "success" || !session.data?.signedIn) {
@@ -895,10 +903,20 @@ export function useAcceptInviteFromUrl<
     setDeliveryEpoch((epoch) => epoch + 1);
   };
 
-  if (!enabled || !inviteInput) {
+  if (!inviteInput) {
     return {
       hasInvite: false,
       inviteInput: null,
+      ...makeResourceResult({
+        status: "idle",
+      }, noopRefresh),
+    };
+  }
+
+  if (!enabled) {
+    return {
+      hasInvite: true,
+      inviteInput,
       ...makeResourceResult({
         status: "idle",
       }, noopRefresh),

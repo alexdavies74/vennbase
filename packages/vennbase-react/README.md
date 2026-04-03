@@ -290,7 +290,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useShareLink(db, row, role, options?)` | db, row handle or row ref, role `"editor" \| "contributor" \| "viewer" \| "submitter"`, optional `{ enabled }` | `{ shareLink: string, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
-| `useAcceptInviteFromUrl(db, options?)` | db, `{ url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
+| `useAcceptInviteFromUrl(db, options?)` | db, `{ enabled?, url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, loadSavedRow?, getRow? }` | `{ row, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
@@ -423,6 +423,7 @@ function useAcceptInviteFromUrl<Schema extends DbSchema>(
 ```
 
 - `url` defaults to `window.location.href`.
+- `enabled` defaults to `true`
 - `clearInviteParams` defaults to `true`.
 - `onOpen` runs only for readable invites and receives the opened row directly.
 - `onResolve` runs after invite resolution succeeds and may be async.

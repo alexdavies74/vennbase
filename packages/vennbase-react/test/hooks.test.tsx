@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect, type ReactElement } from "react";
+import { act, createElement, useEffect, useState, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -837,6 +837,144 @@ describe("@vennbase/react", () => {
     await waitFor(() => {
       expect(latest?.shareLink).toBe(inviteUrl(rowRef, "invite_editor_2"));
     });
+    await app.unmount();
+  });
+
+  it("reports invite presence while disabled without accepting it", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
+    );
+
+    const db = new FakeDb();
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        enabled: false,
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.inviteInput).toBe(inviteUrl(dogRef()));
+    expect(latest?.status).toBe("idle");
+    expect(db.joinInviteCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("accepts a latched invite after enabled flips to true", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
+    );
+
+    const db = new FakeDb();
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+    let onOpenCalls = 0;
+
+    function Probe(props: { enabled: boolean }) {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        enabled: props.enabled,
+        clearInviteParams: false,
+        onOpen: () => {
+          onOpenCalls += 1;
+        },
+      });
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe enabled={false} />);
+
+    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.inviteInput).toBe(inviteUrl(dogRef()));
+    expect(latest?.status).toBe("idle");
+    expect(db.joinInviteCalls).toBe(0);
+
+    await app.render(<Probe enabled />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("success");
+    });
+
+    expect(db.joinInviteCalls).toBe(1);
+    expect(db.getRowCalls).toBe(1);
+    expect(db.lastInviteInput).toBe(inviteUrl(dogRef()));
+    expect(onOpenCalls).toBe(1);
+    await app.unmount();
+  });
+
+  it("keeps saved-row fallback gated off when auth enables invite processing", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
+    );
+
+    const db = new FakeDb();
+    const session = deferred<{ signedIn: true; user: { username: string } }>();
+    db.sessionPromise = session.promise;
+    const routes: string[] = [];
+    let latestInvite: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+
+    function Probe() {
+      const sessionState = useSession(db as unknown as Vennbase<TestSchema>);
+      const signedIn = sessionState.status === "success" && sessionState.data?.signedIn === true;
+      const [openedRow, setOpenedRow] = useState<object | null>(null);
+      latestInvite = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        enabled: signedIn,
+        onOpen: (row) => {
+          setOpenedRow(row);
+        },
+      });
+      const savedRow = useSavedRow<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+        key: "myStudio",
+        enabled: signedIn && openedRow === null && !latestInvite.hasInvite,
+      });
+      const route = !signedIn
+        ? "signin"
+        : openedRow
+          ? "invite"
+          : latestInvite.hasInvite && latestInvite.status !== "error"
+            ? "opening"
+            : savedRow.status === "success"
+              ? savedRow.row ? "saved" : "create"
+              : "saved-loading";
+
+      useEffect(() => {
+        if (routes[routes.length - 1] !== route) {
+          routes.push(route);
+        }
+      }, [route]);
+
+      return <div>{route}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latestInvite?.hasInvite).toBe(true);
+    expect(latestInvite?.status).toBe("idle");
+    expect(db.openSavedRowCalls).toBe(0);
+
+    await act(async () => {
+      session.resolve({ signedIn: true, user: { username: "alex" } });
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    await waitFor(() => {
+      expect(routes.at(-1)).toBe("invite");
+    });
+
+    expect(routes).not.toContain("create");
+    expect(db.openSavedRowCalls).toBe(0);
+    expect(db.joinInviteCalls).toBe(1);
+    expect(db.getRowCalls).toBe(1);
     await app.unmount();
   });
 
