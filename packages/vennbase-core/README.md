@@ -47,6 +47,14 @@ Access is **explicit-grant only**. To let someone into a row, generate a share l
 
 ---
 
+## Vennbase documentation
+
+| Document | Description |
+|----------|-------------|
+| [`PATTERNS.md`](https://github.com/alexdavies74/vennbase/blob/main/packages/vennbase-core/PATTERNS.md) | Recipe-style app patterns for blind inboxes, anonymous projections, conflict handling, and other real-world Vennbase designs. |
+
+---
+
 ## Install
 
 ```bash
