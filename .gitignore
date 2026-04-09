@@ -7,3 +7,4 @@ pnpm-lock.yaml
 packages/*/dist
 packages/*/.vite
 packages/*/src/worker/dist
+.DS_Store
