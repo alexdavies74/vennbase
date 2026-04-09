@@ -367,7 +367,7 @@ export class OptimisticStore {
     for (const member of direct) {
       byUsername.set(member.username, {
         username: member.username,
-        role: member.role,
+        roles: [member.role],
         via: "direct",
       } as DbMemberInfo<Schema>);
     }

@@ -99,20 +99,23 @@ export interface UseHookOptions {
 
 export interface UseShareLinkHookOptions extends UseHookOptions {}
 
+type JoinOnlyInviteRole = Extract<MemberRole, `index-${string}`>;
+type OpenedInviteRole = Exclude<MemberRole, JoinOnlyInviteRole>;
+
 export interface OpenedInviteResult<
   Schema extends DbSchema,
   TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
 > {
   kind: "opened";
   ref: RowRef;
-  role: Exclude<MemberRole, "submitter">;
+  role: OpenedInviteRole;
   row: TOpened;
 }
 
 export interface JoinedInviteResult {
   kind: "joined";
   ref: RowRef;
-  role: "submitter";
+  role: JoinOnlyInviteRole;
 }
 
 export type AcceptedInviteResult<
@@ -349,11 +352,11 @@ async function resolveInviteFromUrl<
   db: Vennbase<Schema>,
 ): Promise<AcceptedInviteResult<Schema, TOpened>> {
   const joined = await db.joinInvite(inviteInput);
-  if (joined.role === "submitter") {
+  if (joined.role.startsWith("index-")) {
     return {
       kind: "joined",
       ref: joined.ref,
-      role: joined.role,
+      role: joined.role as JoinOnlyInviteRole,
     };
   }
 
@@ -361,7 +364,7 @@ async function resolveInviteFromUrl<
   return {
     kind: "opened",
     ref: joined.ref,
-    role: joined.role,
+    role: joined.role as OpenedInviteRole,
     row,
   };
 }

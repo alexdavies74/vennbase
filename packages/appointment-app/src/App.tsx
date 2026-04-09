@@ -387,7 +387,7 @@ function OwnerScheduleView(props: {
   const [draft, setDraft] = useState(() => service.createDraftFromSchedule(props.schedule));
   const [copyStatus, setCopyStatus] = useState("");
   const updateSchedule = useMutation(async (nextDraft: ScheduleDraft) => service.updateSchedule(props.schedule, nextDraft));
-  const shareLink = useShareLink(db, props.schedule, "viewer");
+  const shareLink = useShareLink(db, props.schedule, "content-viewer");
   const {
     rows: bookings = [],
     error: bookingsError,
@@ -469,7 +469,7 @@ function OwnerScheduleView(props: {
             Copy link
           </button>
         </div>
-        <p className="muted">{copyStatus || (shareLink.error ? getErrorMessage(shareLink.error, "Could not create share link.") : "Share this viewer link with customers.")}</p>
+        <p className="muted">{copyStatus || (shareLink.error ? getErrorMessage(shareLink.error, "Could not create share link.") : "Share this content-viewer link with customers.")}</p>
       </section>
 
       <section className="card">

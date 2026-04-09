@@ -266,7 +266,7 @@ describe("Vennbase", () => {
     });
 
     await expect(db.listDirectMembers(row.ref)).resolves.toEqual([]);
-    await expect(db.listMembers(row.ref)).resolves.toEqual(["owner", "friend"]);
+    await expect(db.listMembers(row.ref)).resolves.toEqual([]);
   });
 
   it("uses globalThis.puter when no backend option is provided", async () => {
@@ -593,7 +593,7 @@ describe("Vennbase", () => {
 
       if (url.endsWith("/row/join")) {
         return Promise.resolve(
-          new Response(JSON.stringify({ role: "editor" }), {
+          new Response(JSON.stringify({ role: "all-editor" }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
@@ -650,7 +650,7 @@ describe("Vennbase", () => {
       rowId: "row_1",
       invitedBy: "owner",
       createdAt: 1,
-      role: "editor",
+      role: "all-editor",
     }));
 
     expect(row.id).toBe("row_1");
@@ -675,7 +675,7 @@ describe("Vennbase", () => {
 
         if (url.endsWith("/row/join")) {
           joinCalls += 1;
-          return new Response(JSON.stringify({ role: "submitter" }), {
+          return new Response(JSON.stringify({ role: "index-submitter" }), {
             status: 200,
             headers: { "content-type": "application/json" },
           });
@@ -701,17 +701,17 @@ describe("Vennbase", () => {
       rowId: rowRef.id,
       invitedBy: "owner",
       createdAt: 1,
-      role: "submitter",
+      role: "index-submitter",
     });
-    await expect(db.acceptInvite(invite)).rejects.toThrow("submitter access only");
+    await expect(db.acceptInvite(invite)).rejects.toThrow("join-only access");
     joinCalls = 0;
     await expect(db.joinInvite(invite)).resolves.toEqual({
       ref: rowRef,
-      role: "submitter",
+      role: "index-submitter",
     });
     await expect(db.joinInvite(invite)).resolves.toEqual({
       ref: rowRef,
-      role: "submitter",
+      role: "index-submitter",
     });
     expect(joinCalls).toBe(2);
     expect(rowGetCalls).toBe(0);
@@ -874,7 +874,7 @@ describe("Vennbase", () => {
       }
 
       if (rowId && url === `${deployedWorkerBase}/rows/${rowId}/row/join`) {
-        return new Response(JSON.stringify({ role: "editor" }), {
+        return new Response(JSON.stringify({ role: "all-editor" }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -966,7 +966,7 @@ describe("Vennbase", () => {
       }
 
       if (rowId && url === `${deployedWorkerBase}/rows/${rowId}/row/join`) {
-        return new Response(JSON.stringify({ role: "editor" }), {
+        return new Response(JSON.stringify({ role: "all-editor" }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });

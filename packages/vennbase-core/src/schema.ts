@@ -461,11 +461,20 @@ export interface DbQueryWatchHandle {
   refresh(): Promise<void>;
 }
 
-export type MemberRole = "editor" | "contributor" | "viewer" | "submitter";
+export type MemberRole =
+  | "index-viewer"
+  | "index-submitter"
+  | "index-editor"
+  | "content-viewer"
+  | "content-submitter"
+  | "content-editor"
+  | "all-viewer"
+  | "all-submitter"
+  | "all-editor";
 
 export interface DbMemberInfo<Schema extends DbSchema = DbSchema> {
   username: string;
-  role: MemberRole;
+  roles: MemberRole[];
   via: "direct" | AnyRowRef<Schema>;
 }
 

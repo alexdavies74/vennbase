@@ -213,7 +213,7 @@ describe("Vennbase rows", () => {
       where: { status: "done" },
     });
     const members = await db.listMembers(project);
-    const shareToken = db.createShareToken(project, "editor");
+    const shareToken = db.createShareToken(project, "all-editor");
     await shareToken.committed;
     const shareLink = db.createShareLink(project, shareToken.value);
 
@@ -402,7 +402,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", "contributor").committed;
+    await aliceProject.members.add("bob", "content-submitter").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -419,7 +419,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", "contributor").committed;
+    await aliceProject.members.add("bob", "content-submitter").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -453,7 +453,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", "contributor").committed;
+    await aliceProject.members.add("bob", "content-submitter").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));
@@ -466,7 +466,7 @@ describe("Vennbase rows", () => {
 
     expect(aliceMember).toMatchObject({
       username: "alice",
-      role: "editor",
+      roles: ["all-editor"],
       via: {
         id: aliceProject.id,
         collection: "projects",
@@ -481,9 +481,9 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await project.members.add("bob", "editor").committed;
+    await project.members.add("bob", "all-editor").committed;
     const task = await settle(aliceDb.create("tasks", { title: "Review" }, { in: project.ref }));
-    const shareToken = aliceDb.createShareToken(task.ref, "editor");
+    const shareToken = aliceDb.createShareToken(task.ref, "all-editor");
     await shareToken.committed;
     const shareLink = aliceDb.createShareLink(task.ref, shareToken.value);
 
@@ -507,7 +507,7 @@ describe("Vennbase rows", () => {
 
     const directMembers = await aliceDb.listDirectMembers(task.ref);
     expect(directMembers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ username: "bob", role: "editor" }),
+      expect.objectContaining({ username: "bob", role: "all-editor" }),
     ]));
   });
 
@@ -517,15 +517,15 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Inbox" }));
-    const submissionLink = aliceDb.createShareLink(project.ref, "submitter");
+    const submissionLink = aliceDb.createShareLink(project.ref, "index-submitter");
     const submissionUrl = await submissionLink.committed;
 
-    await expect(bobDb.acceptInvite(submissionUrl)).rejects.toThrow("submitter access only");
+    await expect(bobDb.acceptInvite(submissionUrl)).rejects.toThrow("join-only access");
 
     const joined = await bobDb.joinInvite(submissionUrl);
     expect(joined).toEqual({
       ref: project.ref,
-      role: "submitter",
+      role: "index-submitter",
     });
 
     const task = await settle(bobDb.create("tasks", { title: "Need review" }, { in: joined.ref }));
@@ -581,9 +581,9 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await project.members.add("bob", "viewer").committed;
+    await project.members.add("bob", "content-viewer").committed;
 
-    const inviteWrite = bobDb.createShareLink(project.ref, "editor");
+    const inviteWrite = bobDb.createShareLink(project.ref, "all-editor");
     await expect(inviteWrite.committed).rejects.toBeInstanceOf(VennbaseError);
     await expect(inviteWrite.committed).rejects.toMatchObject({
       code: "UNAUTHORIZED",
@@ -598,18 +598,18 @@ describe("Vennbase rows", () => {
     const charlieDb = await buildReadyDb({ username: "charlie", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Inbox" }));
-    const submissionUrl = await aliceDb.createShareLink(project.ref, "submitter").committed;
+    const submissionUrl = await aliceDb.createShareLink(project.ref, "index-submitter").committed;
 
     const joined = await bobDb.joinInvite(submissionUrl);
     expect(joined).toEqual({
       ref: project.ref,
-      role: "submitter",
+      role: "index-submitter",
     });
 
-    const forwardedSubmissionUrl = await bobDb.createShareLink(joined.ref, "submitter").committed;
+    const forwardedSubmissionUrl = await bobDb.createShareLink(joined.ref, "index-submitter").committed;
     await expect(charlieDb.joinInvite(forwardedSubmissionUrl)).resolves.toEqual({
       ref: project.ref,
-      role: "submitter",
+      role: "index-submitter",
     });
   });
 
@@ -621,10 +621,10 @@ describe("Vennbase rows", () => {
     const danaDb = await buildReadyDb({ username: "dana", network });
 
     const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await project.members.add("bob", "contributor").committed;
+    await project.members.add("bob", "content-submitter").committed;
 
-    const viewerUrl = await bobDb.createShareLink(project.ref, "viewer").committed;
-    const submitterUrl = await bobDb.createShareLink(project.ref, "submitter").committed;
+    const viewerUrl = await bobDb.createShareLink(project.ref, "content-viewer").committed;
+    const submitterUrl = await bobDb.createShareLink(project.ref, "index-submitter").committed;
 
     const opened = await charlieDb.acceptInvite(viewerUrl);
     expect(opened.ref).toEqual(project.ref);
@@ -632,7 +632,7 @@ describe("Vennbase rows", () => {
 
     await expect(danaDb.joinInvite(submitterUrl)).resolves.toEqual({
       ref: project.ref,
-      role: "submitter",
+      role: "index-submitter",
     });
   });
 
@@ -643,7 +643,7 @@ describe("Vennbase rows", () => {
 
     const projectWrite = aliceDb.create("projects", { name: "Inbox" });
     const project = projectWrite.value;
-    const submissionLinkWrite = aliceDb.createShareLink(project, "submitter");
+    const submissionLinkWrite = aliceDb.createShareLink(project, "index-submitter");
     const submissionUrl = submissionLinkWrite.value;
 
     await Promise.all([
@@ -653,7 +653,7 @@ describe("Vennbase rows", () => {
 
     await expect(bobDb.joinInvite(submissionUrl)).resolves.toEqual({
       ref: project.ref,
-      role: "submitter",
+      role: "index-submitter",
     });
   });
 
@@ -663,7 +663,7 @@ describe("Vennbase rows", () => {
     const bobDb = await buildReadyDb({ username: "bob", network });
 
     const aliceProject = await settle(aliceDb.create("projects", { name: "Roadmap" }));
-    await aliceProject.members.add("bob", "viewer").committed;
+    await aliceProject.members.add("bob", "content-viewer").committed;
 
     const bobProject = await settle(bobDb.create("projects", { name: "Bob scope" }));
     const bobTask = await settle(bobDb.create("tasks", { title: "Review" }, { in: bobProject.ref }));

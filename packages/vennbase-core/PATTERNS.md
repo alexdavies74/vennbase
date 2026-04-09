@@ -16,14 +16,14 @@ The schema lives in `packages/appointment-app/src/schema.ts`. The service layer 
 
 **Problem.** Customers need to create bookings under a parent row that only the owner can read. The owner doesn't want to send each customer a separate invite.
 
-**Trick.** Store the submitter link for the hidden `bookingRoots` row as a plain string field on the *readable* `schedules` row. Any viewer of the schedule calls `joinInvite(...)` on that embedded link to gain submitter access to the inbox — without ever getting readable access to it.
+**Trick.** Store the `index-submitter` link for the hidden `bookingRoots` row as a plain string field on the *readable* `schedules` row. Any `content-viewer` of the schedule calls `joinInvite(...)` on that embedded link to gain `index-submitter` access to the inbox without ever getting readable access to it.
 
 **Owner side — create the inbox and embed its link in the schedule:**
 
 ```ts
 const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() });
 const bookingRoot = bookingRootWrite.value;
-const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "submitter");
+const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "index-submitter");
 const scheduleWrite = this.db.create("schedules", {
   ...draftToScheduleFields(draft),
   bookingSubmitterLink: bookingSubmitterLinkWrite.value,  // stored as a plain string field on the readable row
@@ -36,7 +36,7 @@ await Promise.all([
 ]);
 ```
 
-**Customer side — claim submitter access from the embedded link:**
+**Customer side — claim `index-submitter` access from the embedded link:**
 
 ```ts
 async ensureBookingRootAccess(schedule: ScheduleHandle): Promise<BookingRootRef> {
@@ -47,9 +47,9 @@ async ensureBookingRootAccess(schedule: ScheduleHandle): Promise<BookingRootRef>
 
 `joinInvite` is idempotent — calling it again on a link the user already joined is a no-op. Call it every time a customer opens a schedule; no local state needed.
 
-The customer never holds a viewer link to `bookingRoots` itself, so they cannot read the parent row, inspect its members, or see other customers' full booking records.
+The customer never holds a readable invite to `bookingRoots` itself, so they cannot read the parent row, inspect its members, or see other customers' full booking records.
 
-That has an important consequence: a blind inbox lets a submitter **create** child rows, but not later rediscover them as full rows from the inbox itself. If the app needs self-cancel, self-edit, or "show me my booking" flows, write a second private record the submitter owns at creation time:
+That has an important consequence: a blind inbox lets an `index-submitter` **create** child rows, but not later rediscover them as full rows from the inbox itself. If the app needs self-cancel, self-edit, or "show me my booking" flows, write a second private record the submitter owns at creation time:
 
 ```ts
 const bookingWrite = await this.db.create("bookings", {
@@ -79,7 +79,7 @@ Later, the app reopens the shared booking through that private `bookingRef` and 
 
 **Problem.** Customers need to see which slots currently look occupied so they can avoid obvious collisions — but they shouldn't see other customers' private booking details.
 
-**Trick.** Query with `select: "indexKeys"`. Submitters can run this query against the inbox without needing read access to the parent. The response is an index-key projection: it includes only `kind`, `id`, `collection`, and index-key-only `fields`.
+**Trick.** Query with `select: "indexKeys"`. `index-*` members can run this query against the inbox without needing read access to the parent. The response is an index-key projection: it includes only `kind`, `id`, `collection`, and index-key-only `fields`.
 
 **In the UI** — reactive:
 
@@ -112,7 +112,7 @@ Then derive the visible winning claim from the visible rows:
 5. after cooloff, treat only the first claim as active
 6. if that claim disappears later, recompute from the remaining rows and the next claim becomes active
 
-`select: "indexKeys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required — submitter access already allows index-key sibling queries. These projections are not locatable row refs; use a full query if you need to reopen a row later.
+`select: "indexKeys"` works in both `useQuery` and the imperative `db.query`. No additional permissions are required: `index-*` access already allows index-key sibling queries. These projections are not locatable row refs; use a full query if you need to reopen a row later.
 
 Important: this pattern gives **shared visibility and client convergence only**.
 
@@ -140,7 +140,7 @@ bookings: collection({
 }),
 ```
 
-**Design rule:** before marking a field `.indexKey()`, ask whether it is safe for submitters to read. If not, leave `.indexKey()` off and it will never appear in index-key projections, regardless of what is added to the schema later. For this pattern, `claimedAtMs` is intentionally visible so all clients can run the same deterministic tiebreak.
+**Design rule:** before marking a field `.indexKey()`, ask whether it is safe for `index-*` members to read. If not, leave `.indexKey()` off and it will never appear in index-key projections, regardless of what is added to the schema later. For this pattern, `claimedAtMs` is intentionally visible so all clients can run the same deterministic tiebreak.
 
 ---
 
@@ -148,11 +148,11 @@ bookings: collection({
 
 The app wires all three together into a single access-control surface the owner never has to touch again:
 
-1. **Owner creates a schedule.** During creation, a hidden `bookingRoots` row is created and its submitter link is stored in `schedule.fields.bookingSubmitterLink`.
-2. **Owner shares the schedule** using a viewer share link. Customers open it.
-3. **Customer joins the inbox** — Pattern 1. `ensureBookingRootAccess` calls `joinInvite` on the embedded link, returning a `BookingRootRef` with submitter access.
+1. **Owner creates a schedule.** During creation, a hidden `bookingRoots` row is created and its `index-submitter` link is stored in `schedule.fields.bookingSubmitterLink`.
+2. **Owner shares the schedule** using a `content-viewer` share link. Customers open it.
+3. **Customer joins the inbox** — Pattern 1. `ensureBookingRootAccess` calls `joinInvite` on the embedded link, returning a `BookingRootRef` with `index-submitter` access.
 4. **Customer creates a claim** under the `BookingRootRef` and immediately stores its `bookingRef` in a private user-scoped row. No preflight race check is needed.
 5. **Customer queries visible claims** — Patterns 2 and 3. `select: "indexKeys"` returns index-key projections with `fields: { slotStartMs, slotEndMs, claimedAtMs }` from sibling bookings. Clients apply a fixed cooloff window and the `(claimedAtMs, id)` tiebreak to decide which visible claim currently wins.
 6. **Owner and customers converge** on the same visible winning claim from the same visible rows. Only the owner (with full access) can read the complete booking records.
 
-The owner never manually grants or revokes customer access. The submitter link embedded in the schedule is the entire access-control surface.
+The owner never manually grants or revokes customer access. The `index-submitter` link embedded in the schedule is the entire access-control surface.

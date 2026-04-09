@@ -21,7 +21,7 @@ const { rows: cards = [] } = useQuery(db, "cards", {
 });
 
 // Share
-const { shareLink } = useShareLink(db, board, "editor");
+const { shareLink } = useShareLink(db, board, "all-editor");
 ```
 
 Write your frontend. Vennbase handles the rest.
@@ -232,11 +232,11 @@ They return objects shaped like `{ kind: "index-key-projection", id, collection,
 
 Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
 
-In React, prefer `useShareLink(db, row, "editor")` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
+In React, prefer `useShareLink(db, row, "all-editor")` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
 
 ```ts
 // 1. Generate a token for the row you want to share
-const shareToken = db.createShareToken(board, "editor").value;
+const shareToken = db.createShareToken(board, "all-editor").value;
 
 // 2. Build a link the recipient can open in their browser
 const link = db.createShareLink(board, shareToken);
@@ -249,28 +249,40 @@ const sharedBoard = await db.acceptInvite(link);
 If you do not need the token separately, you can create the link directly from a role:
 
 ```ts
-const editorLink = db.createShareLink(board, "editor").value;
+const editorLink = db.createShareLink(board, "all-editor").value;
 ```
 
 `acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, shareToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
 
-For blind inbox workflows, create a submitter link instead:
+Role names start with read scope within the row:
+
+- `index-*` can only work with child rows, and not access content.
+- `content-*` can also access row content, parents, and sync, but not members.
+- `all-*` can access content and inspect members.
+
+and end with write capability:
+
+- `*-viewer` can only read that scope
+- `*-submitter` can also add child rows
+- `*-editor` can edit anything the role can read.
+
+For blind inbox workflows, create an `index-submitter` link instead:
 
 ```ts
-const submissionLink = db.createShareLink(board, "submitter").value;
+const submissionLink = db.createShareLink(board, "index-submitter").value;
 const joined = await db.joinInvite(submissionLink);
-// joined.role === "submitter"
+// joined.role === "index-submitter"
 ```
 
 `joinInvite` is idempotent, so call it whenever you need it.
 
-`"submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "indexKeys" })` to see only index-key projections from sibling rows. Index-key projections expose `kind`, `id`, `collection`, and index-key-only `fields`; they do not include row refs, base URLs, owners, or other locator metadata. Submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Child rows they own are still their own rows, so if they persist a child `RowRef` somewhere readable, they can reopen that row later and update it or remove its shared parent link for cancel/edit flows.
+`"index-submitter"` members can create child rows under the shared parent and can run `db.query(..., { select: "indexKeys" })` to see only index-key projections from sibling rows. Index-key projections expose `kind`, `id`, `collection`, and index-key-only `fields`; they do not include row refs, base URLs, owners, or other locator metadata. Index submitters still cannot read the parent row, fetch full sibling rows, inspect members, or use sync. Child rows they own are still their own rows, so if they persist a child `RowRef` somewhere readable, they can reopen that row later and update it or remove its shared parent link for cancel/edit flows.
 
 ---
 
 ## Membership
 
-Once users have joined a row you can inspect and manage the member list:
+Only `all-*` role members can inspect the member list, and only `all-editor` can mutate it:
 
 ```ts
 // Flat list of usernames
@@ -278,10 +290,10 @@ const members = await db.listMembers(board);
 
 // With roles
 const detailed = await db.listDirectMembers(board);
-// → [{ username: "alice", role: "editor" }, ...]
+// → [{ username: "alice", role: "all-editor" }, ...]
 
 // Add or remove manually
-await db.addMember(board, "bob", "editor").committed;
+await db.addMember(board, "bob", "all-editor").committed;
 await db.removeMember(board, "eve").committed;
 ```
 
@@ -293,7 +305,7 @@ Membership inherited through a parent row is visible via `listEffectiveMembers`.
 
 Vennbase includes a CRDT message bridge. Connect any CRDT library to a row and all members receive each other's updates in real time.
 
-Sending CRDT updates requires `"editor"` access, but all members can poll and receive them.
+Sending CRDT updates requires `"content-editor"` or `"all-editor"` access. Any readable role (`content-*` or `all-*`) can poll and receive them.
 
 In React, here is the recommended [Yjs](https://yjs.dev) integration:
 
@@ -356,14 +368,14 @@ pnpm --filter appointment-app dev
 | `createShareLink(row, role)` | Generate a future-valid share link for that role and return it as a `MutationReceipt<string>`. `.value` is the local URL immediately; `.committed` resolves when recipients can rely on it remotely. |
 | `parseInvite(input)` | Parse an invite URL into `{ ref, shareToken? }`. |
 | `joinInvite(input)` | Idempotently join a row via invite URL or parsed invite object without opening it, and return `{ ref, role }`. |
-| `acceptInvite(input)` | Join a readable invite and return its handle. Use it for `"editor"`, `"contributor"`, or `"viewer"` invites; `"submitter"` invites should use `joinInvite(...)`. |
+| `acceptInvite(input)` | Join a readable invite and return its handle. Use it for `content-*` and `all-*` invites. `index-*` invites should use `joinInvite(...)`. |
 | `saveRow(key, row)` | Persist one current row for the signed-in user under your app-defined key. |
 | `openSavedRow(key, collection)` | Re-open the saved row for the signed-in user as the expected collection, or `null`. Throws if the stored row belongs to a different collection. |
 | `clearSavedRow(key)` | Remove the saved row for the signed-in user. |
 | `listMembers(row)` | Returns `string[]` of all member usernames. |
 | `listDirectMembers(row)` | Returns `{ username, role }[]` for direct members. |
 | `listEffectiveMembers(row)` | Returns resolved membership including grants inherited from parents. |
-| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `"editor"`, `"contributor"`, `"viewer"`, and `"submitter"`. `"editor"` can update fields, manage members, manage parents, and send CRDT messages; `"contributor"` can read the row and submit only rows they own under it; `"viewer"` is read-only; `"submitter"` is can add children under this parent, and may run only `select: "indexKeys"` queries there. Inherited `"contributor"` access becomes `"viewer"` on descendants. |
+| `addMember(row, username, role)` | Grant a user access and return a `MutationReceipt<void>`. Roles: `index-viewer`, `index-submitter`, `index-editor`, `content-viewer`, `content-submitter`, `content-editor`, `all-viewer`, `all-submitter`, `all-editor`. `index-*` is index-only, `content-*` reads content without member visibility, and `all-*` reads content plus members. `*-submitter` becomes `*-viewer` when inherited onto descendants. |
 | `removeMember(row, username)` | Revoke a user's access and return a `MutationReceipt<void>`. |
 | `addParent(child, parent)` | Link a row to an additional parent after creation and return a `MutationReceipt<void>`. |
 | `removeParent(child, parent)` | Unlink a row from a parent and return a `MutationReceipt<void>`. |

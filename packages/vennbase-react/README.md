@@ -180,7 +180,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useShareLink` lazily generates (or reuses) a share link for a row. Pass an explicit role such as `"editor"`, `"contributor"`, or `"submitter"` as the third argument. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a submitter-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
+`useShareLink` lazily generates (or reuses) a share link for a row. Pass an explicit role such as `"all-editor"`, `"content-viewer"`, or `"index-submitter"` as the third argument. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a join-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
 
 ```tsx
 import { useShareLink, useAcceptInviteFromUrl } from "@vennbase/react";
@@ -188,7 +188,7 @@ import { db } from "./db";
 
 // Sharer side
 function ShareButton({ board }: { board: BoardHandle }) {
-  const { shareLink } = useShareLink(db, board, "editor");
+  const { shareLink } = useShareLink(db, board, "all-editor");
   return <button onClick={() => navigator.clipboard.writeText(shareLink ?? "")}>Copy share link</button>;
 }
 
@@ -204,7 +204,7 @@ function InviteHandler() {
 }
 ```
 
-Submitter links now resolve directly without a workaround:
+`index-*` links resolve directly as join-only access:
 
 ```tsx
 function SubmissionHandler() {
@@ -242,7 +242,7 @@ function AppRoot() {
 }
 ```
 
-If a submitter needs index-key sibling visibility, use `select: "indexKeys"` so the hook returns index-key projections containing only `kind`, `id`, `collection`, and index-key-only `fields`:
+If an `index-*` member needs sibling visibility, use `select: "indexKeys"` so the hook returns index-key projections containing only `kind`, `id`, `collection`, and index-key-only `fields`:
 
 ```tsx
 function AvailabilityGrid({ availability }: { availability: RowRef<"availability"> }) {
@@ -292,7 +292,7 @@ function AddCard({ board }: { board: BoardHandle }) {
 | `useMemberUsernames(db, row)` | db, row handle or row ref | `{ data: string[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
-| `useShareLink(db, row, role, options?)` | db, row handle or row ref, role `"editor" \| "contributor" \| "viewer" \| "submitter"`, optional `{ enabled }` | `{ shareLink: string, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
+| `useShareLink(db, row, role, options?)` | db, row handle or row ref, role `MemberRole`, optional `{ enabled }` | `{ shareLink: string, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useAcceptInviteFromUrl(db, options?)` | db, `{ enabled?, url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, collection, loadSavedRow?, getRow? }` | `{ row, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
@@ -375,7 +375,7 @@ function useRow<
 function useShareLink<Schema extends DbSchema>(
   db: Vennbase<Schema>,
   row: RowInput | null | undefined,
-  role: "editor" | "contributor" | "viewer" | "submitter",
+  role: MemberRole,
   options?: UseHookOptions,
 ): {
   shareLink: string | undefined;
@@ -393,14 +393,14 @@ function useShareLink<Schema extends DbSchema>(
 interface OpenedInviteResult<Schema extends DbSchema> {
   kind: "opened";
   ref: RowRef;
-  role: "editor" | "contributor" | "viewer";
+  role: Exclude<MemberRole, `index-${string}`>;
   row: AnyRowHandle<Schema>;
 }
 
 interface JoinedInviteResult {
   kind: "joined";
   ref: RowRef;
-  role: "submitter";
+  role: Extract<MemberRole, `index-${string}`>;
 }
 
 type AcceptedInviteResult<Schema extends DbSchema> =
@@ -432,7 +432,7 @@ function useAcceptInviteFromUrl<Schema extends DbSchema>(
 - `onOpen` runs only for readable invites and receives the opened row directly.
 - `onResolve` runs after invite resolution succeeds and may be async.
 - Readable invites resolve to `{ kind: "opened", row, ref, role }`.
-- Submitter invites resolve to `{ kind: "joined", ref, role: "submitter" }`.
+- `index-*` invites resolve to `{ kind: "joined", ref, role }`.
 - The hook stays in `loading` until `onOpen` and `onResolve` finish and the invite params are removed from the current URL.
 
 ### `useMutation`

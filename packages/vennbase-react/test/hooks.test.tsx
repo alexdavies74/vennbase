@@ -15,6 +15,7 @@ import {
   type CrdtConnection,
   type DbIndexKeyProjection,
   type DbMemberInfo,
+  type MemberRole,
   type Vennbase,
   type RowRef,
 } from "@vennbase/core";
@@ -154,7 +155,7 @@ class FakeDb {
     rowId: string;
     invitedBy: string;
     createdAt: number;
-    role: "editor" | "contributor" | "viewer" | "submitter";
+    role: MemberRole;
   }>();
   failRememberedOpen = false;
   lastOpenedRow: RowRef | null = null;
@@ -182,7 +183,7 @@ class FakeDb {
     return this.inviteDogHandle;
   }
 
-  private shareTokenKey(row: RowRef, role: "editor" | "contributor" | "viewer" | "submitter"): string {
+  private shareTokenKey(row: RowRef, role: MemberRole): string {
     return `${row.baseUrl}:${row.collection}:${row.id}:${role}`;
   }
 
@@ -249,7 +250,7 @@ class FakeDb {
     return this.getStableDogHandle(this.dogName);
   }
 
-  async joinInvite(inviteInput: string): Promise<{ ref: RowRef; role: "viewer" | "submitter" }> {
+  async joinInvite(inviteInput: string): Promise<{ ref: RowRef; role: "content-viewer" | "index-submitter" }> {
     this.joinInviteCalls += 1;
     this.lastInviteInput = inviteInput;
     const url = new URL(inviteInput);
@@ -278,8 +279,8 @@ class FakeDb {
       ref: { id: decodeTrimmed(id, "row_"), collection, baseUrl } as RowRef,
       shareToken: shareToken ? decodeTrimmed(shareToken, "invite_") : undefined,
     };
-    const role = parsed.shareToken === "invite_submitter" ? "submitter" : "viewer";
-    this.pendingInviteOpen = role !== "submitter";
+    const role = parsed.shareToken === "invite_index_submitter" ? "index-submitter" : "content-viewer";
+    this.pendingInviteOpen = role !== "index-submitter";
 
     return {
       ref: parsed.ref,
@@ -301,31 +302,31 @@ class FakeDb {
     return ["alex"];
   }
 
-  async listDirectMembers(): Promise<Array<{ username: string; role: "editor" }>> {
-    return [{ username: "alex", role: "editor" }];
+  async listDirectMembers(): Promise<Array<{ username: string; role: "all-editor" }>> {
+    return [{ username: "alex", role: "all-editor" }];
   }
 
   async listEffectiveMembers(): Promise<Array<DbMemberInfo<TestSchema>>> {
-    return [{ username: "alex", role: "editor", via: "direct" }];
+    return [{ username: "alex", roles: ["all-editor"], via: "direct" }];
   }
 
-  async getExistingShareToken(row: RowRef = dogRef(), role: "editor" | "contributor" | "viewer" | "submitter" = "editor") {
+  async getExistingShareToken(row: RowRef = dogRef(), role: MemberRole = "all-editor") {
     this.getExistingShareTokenCallRoles.push(role);
     return this.shareTokens.get(this.shareTokenKey(row, role)) ?? null;
   }
 
-  createShareToken(row: RowRef = dogRef(), role: "editor" | "contributor" | "viewer" | "submitter") {
+  createShareToken(row: RowRef = dogRef(), role: MemberRole) {
     this.createShareTokenCallRoles.push(role);
     const existingTokenCount = this.shareTokens.has(this.shareTokenKey(row, role)) ? 1 : 0;
     const countForRole = this.createShareTokenCallRoles.filter((entry) => entry === role).length + existingTokenCount;
     const value = {
-      token: role === "submitter"
-        ? "invite_submitter"
-        : role === "contributor"
-          ? countForRole === 1 ? "invite_contributor" : `invite_contributor_${countForRole}`
-          : role === "viewer"
-            ? countForRole === 1 ? "invite_viewer" : `invite_viewer_${countForRole}`
-            : countForRole === 1 ? "invite_1" : `invite_editor_${countForRole}`,
+      token: role === "index-submitter"
+        ? "invite_index_submitter"
+        : role === "content-submitter"
+          ? countForRole === 1 ? "invite_content_submitter" : `invite_content_submitter_${countForRole}`
+          : role === "content-viewer"
+            ? countForRole === 1 ? "invite_content_viewer" : `invite_content_viewer_${countForRole}`
+            : countForRole === 1 ? "invite_1" : `invite_all_editor_${countForRole}`,
       rowId: row.id,
       invitedBy: "alex",
       createdAt: this.createShareTokenCallRoles.length,
@@ -773,7 +774,7 @@ describe("@vennbase/react", () => {
     let latest: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "editor");
+      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "all-editor");
       return <div>{latest.shareLink ?? latest.status}</div>;
     }
 
@@ -788,44 +789,44 @@ describe("@vennbase/react", () => {
     await app.unmount();
   });
 
-  it("uses separate share-link cache entries for contributor and submitter invites", async () => {
+  it("uses separate share-link cache entries for content-submitter and index-submitter invites", async () => {
     const db = new FakeDb();
     const rowRef = dogRef();
     let contributorLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
     let submitterLink: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      contributorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "contributor");
-      submitterLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "submitter");
+      contributorLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "content-submitter");
+      submitterLink = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "index-submitter");
       return <div>{contributorLink.status}:{submitterLink.status}</div>;
     }
 
     const app = await renderApp(<Probe />);
 
     await waitFor(() => {
-      expect(contributorLink?.shareLink).toBe(inviteUrl(rowRef, "invite_contributor"));
-      expect(submitterLink?.shareLink).toBe(inviteUrl(rowRef, "invite_submitter"));
+      expect(contributorLink?.shareLink).toBe(inviteUrl(rowRef, "invite_content_submitter"));
+      expect(submitterLink?.shareLink).toBe(inviteUrl(rowRef, "invite_index_submitter"));
     });
 
-    expect(db.getExistingShareTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
-    expect(db.createShareTokenCallRoles.sort()).toEqual(["contributor", "submitter"]);
+    expect(db.getExistingShareTokenCallRoles.sort()).toEqual(["content-submitter", "index-submitter"]);
+    expect(db.createShareTokenCallRoles.sort()).toEqual(["content-submitter", "index-submitter"]);
     await app.unmount();
   });
 
   it("refreshes mounted share links after imperative share-token creation", async () => {
     const db = new FakeDb();
     const rowRef = dogRef();
-    db.shareTokens.set("https://worker.example:dogs:dog_1:editor", {
+    db.shareTokens.set("https://worker.example:dogs:dog_1:all-editor", {
       token: "invite_1",
       rowId: "dog_1",
       invitedBy: "alex",
       createdAt: 1,
-      role: "editor",
+      role: "all-editor",
     });
     let latest: ReturnType<typeof useShareLink<TestSchema>> | null = null;
 
     function Probe() {
-      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "editor");
+      latest = useShareLink<TestSchema>(db as unknown as Vennbase<TestSchema>, rowRef, "all-editor");
       return <div>{latest.shareLink ?? latest.status}</div>;
     }
 
@@ -836,12 +837,12 @@ describe("@vennbase/react", () => {
     });
 
     await act(async () => {
-      db.createShareToken(rowRef, "editor");
+      db.createShareToken(rowRef, "all-editor");
       await flushMicrotasks();
     });
 
     await waitFor(() => {
-      expect(latest?.shareLink).toBe(inviteUrl(rowRef, "invite_editor_2"));
+      expect(latest?.shareLink).toBe(inviteUrl(rowRef, "invite_all_editor_2"));
     });
     await app.unmount();
   });
@@ -1161,11 +1162,11 @@ describe("@vennbase/react", () => {
     await app.unmount();
   });
 
-  it("returns joined results for submitter invites without opening the row", async () => {
+  it("returns joined results for index-submitter invites without opening the row", async () => {
     window.history.replaceState(
       {},
       "",
-      inviteUrl(dogRef(), "invite_submitter"),
+      inviteUrl(dogRef(), "invite_index_submitter"),
     );
 
     const db = new FakeDb();
@@ -1195,7 +1196,7 @@ describe("@vennbase/react", () => {
       expect(latest?.data).toEqual({
         kind: "joined",
         ref: dogRef(),
-        role: "submitter",
+        role: "index-submitter",
       });
     });
 
@@ -1203,7 +1204,7 @@ describe("@vennbase/react", () => {
     expect(db.getRowCalls).toBe(0);
     expect(openedCalls).toBe(0);
     expect(resolvedKind).toBe("joined");
-    expect(resolvedRole).toBe("submitter");
+    expect(resolvedRole).toBe("index-submitter");
     await app.unmount();
   });
 
@@ -1294,7 +1295,7 @@ describe("@vennbase/react", () => {
       expect(latest?.data).toMatchObject({
         kind: "opened",
         ref: dogRef(),
-        role: "viewer",
+        role: "content-viewer",
       });
       expect(latest?.data?.kind === "opened" ? latest.data.row.fields.name : null).toBe("Buddy");
     });

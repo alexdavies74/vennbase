@@ -31,7 +31,7 @@ describe("invite parsing", () => {
       rowId: ref.id,
       invitedBy: "test",
       createdAt: 1,
-      role: "editor",
+      role: "all-editor",
     });
 
     expect(link).toBe(
@@ -82,7 +82,7 @@ describe("invite parsing", () => {
       rowId: ref.id,
       invitedBy: "test",
       createdAt: 1,
-      role: "editor",
+      role: "all-editor",
     });
 
     expect(new URL(link).searchParams.get(VENNBASE_INVITE_TARGET_PARAM)).toBe(

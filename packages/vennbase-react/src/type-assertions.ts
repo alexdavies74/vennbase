@@ -166,7 +166,7 @@ void projectedTag?.indexKeyFields;
 void useRow(anyClient, projectedTag);
 
 // @ts-expect-error index-key projections are not row handles
-void useShareLink(anyClient, projectedTag, "editor");
+void useShareLink(anyClient, projectedTag, "all-editor");
 
 if (dogResult.data) {
   // @ts-expect-error parentless rows should not accept parent refs
@@ -215,13 +215,13 @@ if (firstTag) {
   void firstTag.in.add(tagRef);
 
   void useRow(anyClient, firstTag);
-  void useShareLink(anyClient, firstTag, "editor");
-  void useShareLink(anyClient, firstTag, "contributor");
-  void useShareLink(anyClient, firstTag, "submitter");
-  void useShareLink(anyClient, firstTag, "editor", { enabled: true });
+  void useShareLink(anyClient, firstTag, "all-editor");
+  void useShareLink(anyClient, firstTag, "content-submitter");
+  void useShareLink(anyClient, firstTag, "index-submitter");
+  void useShareLink(anyClient, firstTag, "all-editor", { enabled: true });
 
   // @ts-expect-error role is now positional
-  void useShareLink(anyClient, firstTag, { role: "editor" });
+  void useShareLink(anyClient, firstTag, { role: "all-editor" });
 }
 
 export {};

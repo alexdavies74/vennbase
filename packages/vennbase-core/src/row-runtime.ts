@@ -13,6 +13,10 @@ interface JoinRowResponse {
   role: MemberRole;
 }
 
+interface DirectMembersResponse {
+  members: Array<{ username: string; role: MemberRole }>;
+}
+
 export interface PlannedRowState {
   user: VennbaseUser;
   federationWorkerUrl: string;
@@ -130,8 +134,8 @@ export class RowRuntime {
   }
 
   async listMembers(rowRef: Pick<RowRef, "id" | "baseUrl">): Promise<string[]> {
-    const snapshot = await this.getRow(rowRef);
-    return snapshot.members;
+    const response = await this.transport.row(rowRef).request<DirectMembersResponse>("members/direct", {});
+    return response.members.map((member) => member.username);
   }
 
   async sendSyncMessage(rowRef: Pick<RowRef, "id" | "baseUrl">, body: unknown): Promise<{ sequence: number }> {

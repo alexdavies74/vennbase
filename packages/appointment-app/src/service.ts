@@ -398,7 +398,7 @@ export class AppointmentService {
 
     const bookingRootWrite = this.db.create("bookingRoots", { createdAt: Date.now() });
     const bookingRoot = bookingRootWrite.value;
-    const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "submitter");
+    const bookingSubmitterLinkWrite = this.db.createShareLink(bookingRoot, "index-submitter");
     const bookingSubmitterLink = bookingSubmitterLinkWrite.value;
     const scheduleWrite = this.db.create("schedules", {
       ...draftToScheduleFields(draft),

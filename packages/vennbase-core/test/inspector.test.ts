@@ -186,7 +186,7 @@ describe("VennbaseInspector", () => {
       collection: "projects",
     });
     expect(directMembers).toEqual([
-      { username: "alice", role: "editor" },
+      { username: "alice", role: "all-editor" },
     ]);
   });
 

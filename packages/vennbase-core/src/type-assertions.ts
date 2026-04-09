@@ -183,11 +183,11 @@ void db.getRow(project).then((row) => {
   const collection: "projects" = row.collection;
   void collection;
 });
-const editorShareToken = db.createShareToken(project, "editor").value;
-void db.createShareToken(project, "contributor");
-void db.createShareToken(project, "submitter");
+const editorShareToken = db.createShareToken(project, "all-editor").value;
+void db.createShareToken(project, "content-submitter");
+void db.createShareToken(project, "index-submitter");
 void db.createShareLink(project, editorShareToken);
-void db.createShareLink(project, "submitter");
+void db.createShareLink(project, "index-submitter");
 void db.joinInvite("https://example.com/?db=%7B%7D");
 void db.listMembers(project);
 void db.saveRow("recent-project", project);
@@ -195,7 +195,7 @@ void db.openSavedRow("recent-project", "projects").then((saved) => {
   const collection: "projects" | undefined = saved?.collection;
   void collection;
 });
-void project.members.add("alice", "editor");
+void project.members.add("alice", "all-editor");
 const projectRowRef = toRowRef(project);
 const projectRefStillTyped: RowRef<"projects"> = projectRowRef;
 void projectRefStillTyped;
@@ -208,7 +208,7 @@ if (isRowRef<"projects">(maybeUnknownRow)) {
 // @ts-expect-error ref fields still require a serializable RowRef
 void db.create("gameRecords", { gameRef: project, role: "owner" }, { in: CURRENT_USER });
 // @ts-expect-error role is now positional on row-handle membership helpers
-void project.members.add("alice", { role: "editor" });
+void project.members.add("alice", { role: "all-editor" });
 
 const taskWrite = db.create("tasks", { title: "Ship v2" }, { in: projectRef });
 const task = taskWrite.value;

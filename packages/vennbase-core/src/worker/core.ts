@@ -1,6 +1,21 @@
 import { parseProtectedRequest, verifyPrincipalProof, verifyRequestProof } from "../auth.js";
 import { canonicalize } from "../crypto.js";
 import type { WorkersHandler } from "@heyputer/puter.js";
+import {
+  canCurateAnyChild,
+  canEditContent,
+  canMaintainOwnChildren,
+  canMaintainWritableChildren,
+  canManageMembers,
+  canMintInviteRole,
+  canQueryFull,
+  canQueryIndex,
+  canReadContent,
+  canSeeMembers,
+  inheritedMemberRoles,
+  mergeMemberRoles,
+  normalizeStoredMemberRole,
+} from "../member-role.js";
 import type { DbFieldValue, MemberRole, RowRef } from "../schema.js";
 import type {
   ApiError,
@@ -131,7 +146,7 @@ interface ChildEntry {
 
 interface EffectiveMember {
   username: string;
-  role: MemberRole;
+  roles: MemberRole[];
   via: "direct" | RowRef;
 }
 
@@ -415,72 +430,6 @@ function sameRowRef(left: RowRef, right: RowRef): boolean {
   return left.id === right.id
     && left.collection === right.collection
     && stripTrailingSlash(left.baseUrl) === stripTrailingSlash(right.baseUrl);
-}
-
-function roleRank(role: MemberRole | null): number {
-  switch (role) {
-    case "editor":
-      return 3;
-    case "contributor":
-      return 2;
-    case "viewer":
-      return 1;
-    case "submitter":
-      return 0;
-    default:
-      return -1;
-  }
-}
-
-function maxRole(left: MemberRole | null, right: MemberRole | null): MemberRole | null {
-  return roleRank(right) > roleRank(left) ? right : left;
-}
-
-function normalizeStoredMemberRole(role: unknown): MemberRole | null {
-  if (role === "editor") {
-    return "editor";
-  }
-
-  if (role === "contributor") {
-    return "contributor";
-  }
-
-  if (role === "viewer") {
-    return "viewer";
-  }
-
-  if (role === "submitter") {
-    return "submitter";
-  }
-
-  return null;
-}
-
-function normalizeInheritedMemberRole(role: MemberRole | null): MemberRole | null {
-  if (role === "submitter") {
-    return null;
-  }
-
-  if (role === "contributor") {
-    return "viewer";
-  }
-
-  return role;
-}
-
-function canMintInviteRole(inviterRole: MemberRole, requestedRole: MemberRole): boolean {
-  switch (inviterRole) {
-    case "editor":
-      return true;
-    case "contributor":
-      return requestedRole !== "editor";
-    case "viewer":
-      return requestedRole === "viewer";
-    case "submitter":
-      return requestedRole === "submitter";
-    default:
-      return false;
-  }
 }
 
 function deepEqualJson(left: JsonValue, right: JsonValue): boolean {
@@ -925,7 +874,7 @@ export class RowWorker {
       return jsonResponse(200, { role });
     }
 
-    let grantedRole: MemberRole = "editor";
+    let grantedRole: MemberRole = "all-editor";
     if (!isOwner) {
       if (!body.inviteToken) {
         error(401, "INVITE_REQUIRED", "Invite token is required for non-owner first join");
@@ -949,7 +898,7 @@ export class RowWorker {
       await this.kv.set(rowMemberRolesKey(rowId), roles);
     }
 
-    return jsonResponse(200, { role: isOwner ? "editor" : grantedRole });
+    return jsonResponse(200, { role: isOwner ? "all-editor" : grantedRole });
   }
 
   private async getInviteToken(
@@ -964,7 +913,7 @@ export class RowWorker {
 
     const requestedRole = normalizeStoredMemberRole(payload.role);
     if (!requestedRole) {
-      error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
+      error(400, "BAD_REQUEST", "role must be one of the supported grid roles");
     }
     await this.assertCanMintInviteRole(rowId, principal, ctx, requestedRole);
 
@@ -996,7 +945,7 @@ export class RowWorker {
 
     const requestedRole = normalizeStoredMemberRole(payload.role);
     if (!requestedRole) {
-      error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
+      error(400, "BAD_REQUEST", "role must be one of the supported grid roles");
     }
     await this.assertCanMintInviteRole(rowId, principal, ctx, requestedRole);
 
@@ -1071,12 +1020,14 @@ export class RowWorker {
       requireRequestProof: false,
     });
     const ttl = parseOptionalNonNegativeInteger(payload.ttl == null ? null : String(payload.ttl), DEFAULT_PARENT_ROW_TTL);
-    const role = await this.resolveMemberRole(rowId, principal, ctx, ttl);
-    if (!role) {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx, ttl);
+    if (roles.length === 0) {
       error(401, "UNAUTHORIZED", "Members only");
     }
 
-    return jsonResponse(200, { role });
+    return jsonResponse(200, {
+      roles,
+    });
   }
 
   private async getFields(
@@ -1305,21 +1256,20 @@ export class RowWorker {
       action: "db/query",
       rowId: parentRowId,
     });
-    const role = await this.resolveMemberRole(parentRowId, principal, ctx);
-    if (!role) {
+    const roles = await this.resolveMemberAccess(parentRowId, principal, ctx);
+    if (roles.length === 0) {
       error(401, "UNAUTHORIZED", "Members only");
     }
 
     const collection = payload.collection?.trim() || undefined;
 
     const select = payload.select === "indexKeys" ? "indexKeys" : "full";
-    if (role === "submitter" && select !== "indexKeys") {
-      error(401, "UNAUTHORIZED", "Submitters may only run index-key projection queries");
+    if (select === "full" && !canQueryFull(roles)) {
+      error(401, "UNAUTHORIZED", "Full queries require content access");
     }
-    if (role === "submitter" && select === "indexKeys") {
-      // allowed
-    } else if (role === "submitter") {
-      error(401, "UNAUTHORIZED", "Readable members only");
+
+    if (select === "indexKeys" && !canQueryIndex(roles)) {
+      error(401, "UNAUTHORIZED", "Index queries require index access");
     }
 
     const order = (payload.order ?? "asc").toLowerCase() === "desc" ? "desc" : "asc";
@@ -1398,10 +1348,10 @@ export class RowWorker {
       action: "members/add",
       rowId,
     });
-    await this.assertWriter(rowId, principal, ctx);
+    await this.assertMemberManager(rowId, principal, ctx);
     const username = body.username?.trim();
-    const role = body.role;
-    if (!username || !role || (role !== "editor" && role !== "contributor" && role !== "viewer" && role !== "submitter")) {
+    const normalizedRole = normalizeStoredMemberRole(body.role);
+    if (!username || !normalizedRole) {
       error(400, "BAD_REQUEST", "username and valid role are required");
     }
 
@@ -1412,7 +1362,7 @@ export class RowWorker {
     }
 
     const roles = await this.getMemberRoles(rowId);
-    roles[username] = role;
+    roles[username] = normalizedRole;
     await this.kv.set(rowMemberRolesKey(rowId), roles);
 
     return jsonResponse(200, {
@@ -1430,7 +1380,7 @@ export class RowWorker {
       action: "members/remove",
       rowId,
     });
-    await this.assertWriter(rowId, principal, ctx);
+    await this.assertMemberManager(rowId, principal, ctx);
     const username = body.username?.trim();
     if (!username) {
       error(400, "BAD_REQUEST", "username is required");
@@ -1461,14 +1411,14 @@ export class RowWorker {
       action: "members/direct",
       rowId,
     });
-    await this.assertReadableMember(rowId, principal, ctx);
+    await this.assertMemberVisible(rowId, principal, ctx);
 
     const members = await this.getMembers(rowId);
     const roles = await this.getMemberRoles(rowId);
     return jsonResponse(200, {
       members: members.map((username) => ({
         username,
-        role: username === this.config.owner ? "editor" : roles[username] ?? "viewer",
+        role: username === this.config.owner ? "all-editor" : roles[username] ?? "all-viewer",
       })),
     });
   }
@@ -1484,18 +1434,24 @@ export class RowWorker {
       requireRequestProof: false,
     });
     const ttl = parseOptionalNonNegativeInteger(payload.ttl == null ? null : String(payload.ttl), DEFAULT_PARENT_ROW_TTL);
-    await this.assertReadableMember(rowId, principal, ctx, ttl);
+    await this.assertMemberVisible(rowId, principal, ctx, ttl);
 
-    const members = new Map<string, EffectiveMember>();
+    const members = new Map<string, {
+      username: string;
+      roles: MemberRole[];
+      via: "direct" | RowRef;
+    }>();
     const direct = await this.getMembers(rowId);
     const directRoles = await this.getMemberRoles(rowId);
 
     for (const username of direct) {
-      const role: MemberRole = username === this.config.owner ? "editor" : directRoles[username] ?? "viewer";
+      const role: MemberRole = username === this.config.owner ? "all-editor" : directRoles[username] ?? "all-viewer";
       const existing = members.get(username);
-      if (!existing || roleRank(role) > roleRank(existing.role)) {
-        members.set(username, { username, role, via: "direct" });
-      }
+      members.set(username, {
+        username,
+        roles: mergeMemberRoles(existing?.roles ?? [], [role]),
+        via: "direct",
+      });
     }
 
     if (ttl > 0 && ctx.workersExec) {
@@ -1527,18 +1483,12 @@ export class RowWorker {
           }
 
           for (const member of payload?.members ?? []) {
-            const inheritedRole = normalizeInheritedMemberRole(member.role);
-            if (!inheritedRole) {
-              continue;
-            }
             const existing = members.get(member.username);
-            if (!existing || roleRank(inheritedRole) > roleRank(existing.role)) {
-              members.set(member.username, {
-                username: member.username,
-                role: inheritedRole,
-                via: parentRef,
-              });
-            }
+            members.set(member.username, {
+              username: member.username,
+              roles: mergeMemberRoles(existing?.roles ?? [], inheritedMemberRoles(member.roles)),
+              via: existing?.via === "direct" ? "direct" : parentRef,
+            });
           }
         } catch {
           // best effort only
@@ -1547,7 +1497,12 @@ export class RowWorker {
     }
 
     return jsonResponse(200, {
-      members: Array.from(members.values()),
+      members: Array.from(members.values())
+        .map((member): EffectiveMember => ({
+          username: member.username,
+          roles: member.roles,
+          via: member.via,
+        })),
     });
   }
 
@@ -1560,30 +1515,23 @@ export class RowWorker {
     parentBaseUrl: string;
     principal: VerifiedPrincipal;
   }): Promise<void> {
-    const parentRole = await this.resolveMemberRole(args.parentRowId, args.principal, args.ctx);
+    const parentRoles = await this.resolveMemberAccess(args.parentRowId, args.principal, args.ctx);
     const canWriteChild = await this.canWriteChildRow(args);
     const ownsChild = args.principal.username === args.childOwner;
 
-    if (parentRole === "editor" && canWriteChild) {
+    if (canCurateAnyChild(parentRoles)) {
       return;
     }
 
-    if ((parentRole === "contributor" || parentRole === "submitter") && ownsChild && canWriteChild) {
+    if (canMaintainWritableChildren(parentRoles) && canWriteChild) {
       return;
     }
 
-    if (
-      canWriteChild
-      && await this.remoteRowHasParent(args.childRef, {
-        id: args.parentRowId,
-        baseUrl: args.parentBaseUrl,
-      }, args.auth.principal, args.ctx)
-      && (parentRole === "editor" || ((parentRole === "contributor" || parentRole === "submitter") && ownsChild))
-    ) {
+    if (canMaintainOwnChildren(parentRoles) && ownsChild && canWriteChild) {
       return;
     }
 
-    error(401, "UNAUTHORIZED", "Must be a parent editor or an owning contributor/submitter on a linked child row");
+    error(401, "UNAUTHORIZED", "Parent membership does not allow maintaining this child index entry");
   }
 
   private async canWriteChildRow(args: {
@@ -1597,16 +1545,16 @@ export class RowWorker {
       return true;
     }
 
-    const role = await this.resolveRemoteRowRole(args.childRef, args.auth.principal, args.ctx, 1);
-    return role === "editor";
+    const roles = await this.resolveRemoteRowRoles(args.childRef, args.auth.principal, args.ctx, 1);
+    return canEditContent(roles ?? []);
   }
 
-  private async resolveRemoteRowRole(
+  private async resolveRemoteRowRoles(
     rowRef: RowRef,
     principal: PrincipalProof,
     ctx: WorkerRequestContext,
     ttl: number,
-  ): Promise<MemberRole | null> {
+  ): Promise<MemberRole[] | null> {
     if (!ctx.workersExec) {
       return null;
     }
@@ -1631,20 +1579,27 @@ export class RowWorker {
           body: JSON.stringify(forwarded),
         },
       );
-      const payload = await response.json().catch(() => null) as { role?: MemberRole } | null;
+      const payload = await response.json().catch(() => null) as {
+        role?: MemberRole;
+        roles?: MemberRole[];
+      } | null;
       if (!response.ok) {
         return null;
       }
 
-      const role = normalizeStoredMemberRole(payload?.role);
-      if (role) {
-        return role;
+      if (Array.isArray(payload?.roles)) {
+        return inheritedMemberRoles(
+          payload.roles
+            .map((role) => normalizeStoredMemberRole(role))
+            .filter((role): role is MemberRole => role !== null),
+        );
       }
+
+      const role = normalizeStoredMemberRole(payload?.role);
+      return role ? inheritedMemberRoles([role]) : null;
     } catch {
       return null;
     }
-
-    return null;
   }
 
   private async remoteRowHasParent(
@@ -1767,8 +1722,8 @@ export class RowWorker {
     ctx: WorkerRequestContext,
     ttl: number = DEFAULT_PARENT_ROW_TTL,
   ): Promise<void> {
-    const role = await this.resolveMemberRole(rowId, principal, ctx, ttl);
-    if (!role) {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx, ttl);
+    if (roles.length === 0) {
       error(401, "UNAUTHORIZED", "Members only");
     }
   }
@@ -1779,24 +1734,46 @@ export class RowWorker {
     ctx: WorkerRequestContext,
     ttl: number = DEFAULT_PARENT_ROW_TTL,
   ): Promise<void> {
-    const role = await this.resolveMemberRole(rowId, principal, ctx, ttl);
-    if (!role) {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx, ttl);
+    if (roles.length === 0) {
       error(401, "UNAUTHORIZED", "Members only");
     }
 
-    if (role === "submitter") {
-      error(401, "UNAUTHORIZED", "Readable members only");
+    if (!canReadContent(roles)) {
+      error(401, "UNAUTHORIZED", "Content readers only");
     }
   }
 
-  private async hasRole(
+  private async assertMemberVisible(
     rowId: string,
     principal: VerifiedPrincipal,
     ctx: WorkerRequestContext,
-    roles: MemberRole[],
-  ): Promise<boolean> {
-    const effectiveRole = await this.resolveMemberRole(rowId, principal, ctx);
-    return !!effectiveRole && roles.includes(effectiveRole);
+    ttl: number = DEFAULT_PARENT_ROW_TTL,
+  ): Promise<void> {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx, ttl);
+    if (roles.length === 0) {
+      error(401, "UNAUTHORIZED", "Members only");
+    }
+
+    if (!canSeeMembers(roles)) {
+      error(401, "UNAUTHORIZED", "Member visibility only");
+    }
+  }
+
+  private async assertMemberManager(
+    rowId: string,
+    principal: VerifiedPrincipal,
+    ctx: WorkerRequestContext,
+    ttl: number = DEFAULT_PARENT_ROW_TTL,
+  ): Promise<void> {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx, ttl);
+    if (roles.length === 0) {
+      error(401, "UNAUTHORIZED", "Members only");
+    }
+
+    if (!canManageMembers(roles)) {
+      error(401, "UNAUTHORIZED", "Member managers only");
+    }
   }
 
   private async assertCanMintInviteRole(
@@ -1805,12 +1782,12 @@ export class RowWorker {
     ctx: WorkerRequestContext,
     requestedRole: MemberRole,
   ): Promise<void> {
-    const inviterRole = await this.resolveMemberRole(rowId, principal, ctx);
-    if (!inviterRole) {
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx);
+    if (roles.length === 0) {
       error(401, "UNAUTHORIZED", "Members only");
     }
 
-    if (!canMintInviteRole(inviterRole, requestedRole)) {
+    if (!canMintInviteRole(roles, requestedRole)) {
       error(401, "UNAUTHORIZED", "Invite role not allowed for current member role");
     }
   }
@@ -1820,31 +1797,32 @@ export class RowWorker {
     principal: VerifiedPrincipal,
     ctx: WorkerRequestContext,
   ): Promise<void> {
-    const role = await this.resolveMemberRole(rowId, principal, ctx);
-    if (role !== "editor") {
-      error(401, "UNAUTHORIZED", "Writers only");
+    const roles = await this.resolveMemberAccess(rowId, principal, ctx);
+    if (!canEditContent(roles)) {
+      error(401, "UNAUTHORIZED", "Content writers only");
     }
   }
 
-  private async resolveMemberRole(
+  private async resolveMemberAccess(
     rowId: string,
     principal: VerifiedPrincipal,
     ctx: WorkerRequestContext,
     ttl: number = DEFAULT_PARENT_ROW_TTL,
-  ): Promise<MemberRole | null> {
-    let bestRole = await this.getDirectRole(rowId, principal);
+  ): Promise<MemberRole[]> {
+    const directRole = await this.getDirectRole(rowId, principal);
+    let roles = directRole ? [directRole] : [];
 
     if (ttl === 0 || !ctx.workersExec) {
-      return bestRole;
+      return roles;
     }
 
     const parentRefs = await this.getParentRefs(rowId);
     if (parentRefs.length === 0) {
-      return bestRole;
+      return roles;
     }
 
     const parentRoles = await Promise.all(
-      parentRefs.map(async (parentRef): Promise<MemberRole | null> => {
+      parentRefs.map(async (parentRef): Promise<MemberRole[] | null> => {
         try {
           const forwarded: ProtectedRequest<RoleResolutionRequest> = {
             auth: {
@@ -1865,15 +1843,20 @@ export class RowWorker {
               body: JSON.stringify(forwarded),
             },
           );
-          const payload = await response.json().catch(() => null) as { role?: MemberRole } | null;
+          const payload = await response.json().catch(() => null) as {
+            roles?: MemberRole[];
+          } | null;
 
           if (!response.ok) {
             return null;
           }
 
-          const role = normalizeInheritedMemberRole(normalizeStoredMemberRole(payload?.role));
-          if (role) {
-            return role;
+          if (Array.isArray(payload?.roles)) {
+            return inheritedMemberRoles(
+              payload.roles
+                .map((role) => normalizeStoredMemberRole(role))
+                .filter((role): role is MemberRole => role !== null),
+            );
           }
 
           return null;
@@ -1883,11 +1866,11 @@ export class RowWorker {
       }),
     );
 
-    for (const parentRole of parentRoles) {
-      bestRole = maxRole(bestRole, parentRole);
+    for (const inherited of parentRoles) {
+      roles = mergeMemberRoles(roles, inherited);
     }
 
-    return bestRole;
+    return roles;
   }
 
   private async getDirectRole(rowId: string, principal: VerifiedPrincipal): Promise<MemberRole | null> {
@@ -1895,7 +1878,7 @@ export class RowWorker {
       if (this.config.ownerPublicKeyJwk && canonicalize(principal.publicKeyJwk) !== canonicalize(this.config.ownerPublicKeyJwk)) {
         return null;
       }
-      return "editor";
+      return "all-editor";
     }
 
     const members = await this.getMembers(rowId);
@@ -1910,7 +1893,7 @@ export class RowWorker {
     }
 
     const roles = await this.getMemberRoles(rowId);
-    return roles[principal.username] ?? "viewer";
+    return roles[principal.username] ?? "all-viewer";
   }
 
   private async getMembers(rowId: string): Promise<string[]> {
@@ -2025,11 +2008,9 @@ export class RowWorker {
       error(400, "BAD_REQUEST", "Row metadata missing");
     }
 
-    const members = await this.getMembers(rowId);
     return {
       ...row,
       collection: await this.getRowCollection(rowId),
-      members,
       parentRefs: await this.getParentRefs(rowId),
     };
   }

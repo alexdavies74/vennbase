@@ -54,6 +54,7 @@ import type {
 } from "./types.js";
 import { Sync } from "./sync.js";
 import { normalizeRowRef, rowRefKey } from "./row-reference.js";
+import { canReadContent } from "./member-role.js";
 
 export interface VennbaseOptions<Schema extends DbSchema = DbSchema> {
   schema: Schema;
@@ -343,8 +344,8 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   async acceptInvite(input: string | ParsedInvite): Promise<AnyRowHandle<Schema>> {
     const joined = await this.joinInvite(input);
-    if (joined.role === "submitter") {
-      throw new Error("This invite grants submitter access only. Use joinInvite() instead of acceptInvite().");
+    if (!canReadContent([joined.role])) {
+      throw new Error("This invite grants join-only access. Use joinInvite() instead of acceptInvite().");
     }
 
     const row = await this.getRow(joined.ref as RowRef<CollectionName<Schema>>) as AnyRowHandle<Schema>;
@@ -360,9 +361,8 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
         ...(this.readyMutationState ? [this.readyMutationState.user.username] : []),
       ].filter(Boolean)));
     }
-    const usernames = await this.rowRuntime.listMembers(rowRef);
     const directMembers = await this.listDirectMembers(row);
-    return Array.from(new Set([...usernames, ...directMembers.map((member) => member.username)]));
+    return Array.from(new Set(directMembers.map((member) => member.username)));
   }
 
   addParent(child: RowInput, parent: RowInput): MutationReceipt<void> {
@@ -471,7 +471,7 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
       const direct = this.optimisticStore.getDirectMembers(rowRef) ?? [];
       return direct.map((member) => ({
         username: member.username,
-        role: member.role,
+        roles: [member.role],
         via: "direct",
       })) as Array<DbMemberInfo<Schema>>;
     }

@@ -137,6 +137,5 @@ export interface DeployWorkerArgs {
 
 export interface RowSnapshot extends Row {
   collection: string | null;
-  members: string[];
   parentRefs: RowRef[];
 }
