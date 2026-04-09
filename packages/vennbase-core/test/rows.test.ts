@@ -575,6 +575,67 @@ describe("Vennbase rows", () => {
     ]));
   });
 
+  it("rejects viewer attempts to mint stronger invites", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = await buildReadyDb({ username: "alice", network });
+    const bobDb = await buildReadyDb({ username: "bob", network });
+
+    const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
+    await project.members.add("bob", "viewer").committed;
+
+    const inviteWrite = bobDb.createShareLink(project.ref, "editor");
+    await expect(inviteWrite.committed).rejects.toBeInstanceOf(VennbaseError);
+    await expect(inviteWrite.committed).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      status: 401,
+    });
+  });
+
+  it("lets submitters mint submitter invites", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = await buildReadyDb({ username: "alice", network });
+    const bobDb = await buildReadyDb({ username: "bob", network });
+    const charlieDb = await buildReadyDb({ username: "charlie", network });
+
+    const project = await settle(aliceDb.create("projects", { name: "Inbox" }));
+    const submissionUrl = await aliceDb.createShareLink(project.ref, "submitter").committed;
+
+    const joined = await bobDb.joinInvite(submissionUrl);
+    expect(joined).toEqual({
+      ref: project.ref,
+      role: "submitter",
+    });
+
+    const forwardedSubmissionUrl = await bobDb.createShareLink(joined.ref, "submitter").committed;
+    await expect(charlieDb.joinInvite(forwardedSubmissionUrl)).resolves.toEqual({
+      ref: project.ref,
+      role: "submitter",
+    });
+  });
+
+  it("lets contributors mint viewer and submitter invites", async () => {
+    const network = new TestWorkerNetwork();
+    const aliceDb = await buildReadyDb({ username: "alice", network });
+    const bobDb = await buildReadyDb({ username: "bob", network });
+    const charlieDb = await buildReadyDb({ username: "charlie", network });
+    const danaDb = await buildReadyDb({ username: "dana", network });
+
+    const project = await settle(aliceDb.create("projects", { name: "Roadmap" }));
+    await project.members.add("bob", "contributor").committed;
+
+    const viewerUrl = await bobDb.createShareLink(project.ref, "viewer").committed;
+    const submitterUrl = await bobDb.createShareLink(project.ref, "submitter").committed;
+
+    const opened = await charlieDb.acceptInvite(viewerUrl);
+    expect(opened.ref).toEqual(project.ref);
+    expect(opened.collection).toBe("projects");
+
+    await expect(danaDb.joinInvite(submitterUrl)).resolves.toEqual({
+      ref: project.ref,
+      role: "submitter",
+    });
+  });
+
   it("creates future-valid submitter links from optimistic row handles", async () => {
     const network = new TestWorkerNetwork();
     const aliceDb = await buildReadyDb({ username: "alice", network });

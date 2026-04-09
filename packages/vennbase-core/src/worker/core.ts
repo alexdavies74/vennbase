@@ -468,6 +468,21 @@ function normalizeInheritedMemberRole(role: MemberRole | null): MemberRole | nul
   return role;
 }
 
+function canMintInviteRole(inviterRole: MemberRole, requestedRole: MemberRole): boolean {
+  switch (inviterRole) {
+    case "editor":
+      return true;
+    case "contributor":
+      return requestedRole !== "editor";
+    case "viewer":
+      return requestedRole === "viewer";
+    case "submitter":
+      return requestedRole === "submitter";
+    default:
+      return false;
+  }
+}
+
 function deepEqualJson(left: JsonValue, right: JsonValue): boolean {
   if (left === right) {
     return true;
@@ -946,12 +961,12 @@ export class RowWorker {
       action: "invite-token/get",
       rowId,
     });
-    await this.assertReadableMember(rowId, principal, ctx);
 
     const requestedRole = normalizeStoredMemberRole(payload.role);
     if (!requestedRole) {
       error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
     }
+    await this.assertCanMintInviteRole(rowId, principal, ctx, requestedRole);
 
     const entries = await this.kv.list(tokenKeyPrefix(rowId));
     const existing = entries
@@ -974,22 +989,23 @@ export class RowWorker {
       action: "invite-token/create",
       rowId,
     });
-    await this.assertReadableMember(rowId, principal, ctx);
 
     if (payload.rowId !== rowId) {
       error(400, "BAD_REQUEST", "Payload rowId does not match route rowId");
     }
 
-    if (!normalizeStoredMemberRole(payload.role)) {
+    const requestedRole = normalizeStoredMemberRole(payload.role);
+    if (!requestedRole) {
       error(400, "BAD_REQUEST", "role must be editor, contributor, viewer, or submitter");
     }
+    await this.assertCanMintInviteRole(rowId, principal, ctx, requestedRole);
 
     const inviteToken: ShareToken = {
       token: payload.token,
       rowId: payload.rowId,
       invitedBy: principal.username,
       createdAt: payload.createdAt,
-      role: payload.role,
+      role: requestedRole,
     };
 
     await this.kv.set(tokenKey(rowId, inviteToken.token), inviteToken);
@@ -1781,6 +1797,22 @@ export class RowWorker {
   ): Promise<boolean> {
     const effectiveRole = await this.resolveMemberRole(rowId, principal, ctx);
     return !!effectiveRole && roles.includes(effectiveRole);
+  }
+
+  private async assertCanMintInviteRole(
+    rowId: string,
+    principal: VerifiedPrincipal,
+    ctx: WorkerRequestContext,
+    requestedRole: MemberRole,
+  ): Promise<void> {
+    const inviterRole = await this.resolveMemberRole(rowId, principal, ctx);
+    if (!inviterRole) {
+      error(401, "UNAUTHORIZED", "Members only");
+    }
+
+    if (!canMintInviteRole(inviterRole, requestedRole)) {
+      error(401, "UNAUTHORIZED", "Invite role not allowed for current member role");
+    }
   }
 
   private async assertWriter(

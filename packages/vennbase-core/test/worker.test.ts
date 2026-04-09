@@ -85,6 +85,79 @@ async function createRow(worker: RowWorker, rowId: string, rowName = "Rex"): Pro
   );
 }
 
+async function joinRow(worker: RowWorker, rowId: string, username: string, inviteToken?: string): Promise<Response> {
+  return worker.handle(
+    await authedRequest({
+      url: rowEndpoint(rowId, "row/join"),
+      action: "row/join",
+      rowId,
+      username,
+      body: inviteToken
+        ? {
+          username,
+          inviteToken,
+        }
+        : { username },
+    }),
+  );
+}
+
+async function addMember(worker: RowWorker, rowId: string, username: string, role: "editor" | "contributor" | "viewer" | "submitter"): Promise<Response> {
+  return worker.handle(
+    await authedRequest({
+      url: rowEndpoint(rowId, "members/add"),
+      action: "members/add",
+      rowId,
+      username: "owner",
+      body: {
+        username,
+        role,
+      },
+    }),
+  );
+}
+
+async function createInviteTokenRequest(
+  worker: RowWorker,
+  rowId: string,
+  username: string,
+  role: "editor" | "contributor" | "viewer" | "submitter",
+  token: string,
+): Promise<Response> {
+  return worker.handle(
+    await authedRequest({
+      url: rowEndpoint(rowId, "invite-token/create"),
+      action: "invite-token/create",
+      rowId,
+      username,
+      body: {
+        token,
+        rowId,
+        invitedBy: username,
+        createdAt: 10,
+        role,
+      },
+    }),
+  );
+}
+
+async function getInviteTokenRequest(
+  worker: RowWorker,
+  rowId: string,
+  username: string,
+  role: "editor" | "contributor" | "viewer" | "submitter",
+): Promise<Response> {
+  return worker.handle(
+    await authedRequest({
+      url: rowEndpoint(rowId, "invite-token/get"),
+      action: "invite-token/get",
+      rowId,
+      username,
+      body: { role },
+    }),
+  );
+}
+
 class CountingKv extends InMemoryKv {
   public listCalls = 0;
 
@@ -504,7 +577,6 @@ describe("RowWorker", () => {
       { endpoint: "sync/poll", action: "sync/poll", body: { sinceSequence: 0 } },
       { endpoint: "members/direct", action: "members/direct", body: undefined },
       { endpoint: "parents/list", action: "parents/list", body: {} },
-      { endpoint: "invite-token/get", action: "invite-token/get", body: {} },
     ]) {
       const response = await worker.handle(
         await authedRequest({
@@ -519,6 +591,50 @@ describe("RowWorker", () => {
       expect(response.status).toBe(401);
       expect((await jsonBody(response)).code).toBe("UNAUTHORIZED");
     }
+
+    const submitterMintedInvite = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_submitter", "invite-token/create"),
+        action: "invite-token/create",
+        rowId: "project_submitter",
+        username: "submitter",
+        body: {
+          token: "invite_submitter_forwarded",
+          rowId: "project_submitter",
+          invitedBy: "submitter",
+          createdAt: 11,
+          role: "submitter",
+        },
+      }),
+    );
+    expect(submitterMintedInvite.status).toBe(200);
+
+    const submitterInviteLookup = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_submitter", "invite-token/get"),
+        action: "invite-token/get",
+        rowId: "project_submitter",
+        username: "submitter",
+        body: { role: "submitter" },
+      }),
+    );
+    expect(submitterInviteLookup.status).toBe(200);
+    expect((await jsonBody(submitterInviteLookup)).inviteToken).toMatchObject({
+      token: "invite_submitter_forwarded",
+      role: "submitter",
+    });
+
+    const submitterViewerInviteLookup = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_submitter", "invite-token/get"),
+        action: "invite-token/get",
+        rowId: "project_submitter",
+        username: "submitter",
+        body: { role: "viewer" },
+      }),
+    );
+    expect(submitterViewerInviteLookup.status).toBe(401);
+    expect((await jsonBody(submitterViewerInviteLookup)).code).toBe("UNAUTHORIZED");
 
     const submitterQuery = await worker.handle(
       await authedRequest({
@@ -777,6 +893,111 @@ describe("RowWorker", () => {
     expect((await jsonBody(unregisterForeign)).code).toBe("UNAUTHORIZED");
   });
 
+  it("limits invite minting by the caller's current role", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    await createRow(worker, "row_invites");
+    await joinRow(worker, "row_invites", "owner");
+    await addMember(worker, "row_invites", "viewer", "viewer");
+    await addMember(worker, "row_invites", "contributor", "contributor");
+    await addMember(worker, "row_invites", "submitter", "submitter");
+
+    await joinRow(worker, "row_invites", "viewer");
+    await joinRow(worker, "row_invites", "contributor");
+    await joinRow(worker, "row_invites", "submitter");
+
+    const viewerCreate = await createInviteTokenRequest(worker, "row_invites", "viewer", "viewer", "invite_viewer");
+    expect(viewerCreate.status).toBe(200);
+    expect((await jsonBody(viewerCreate)).inviteToken).toMatchObject({
+      token: "invite_viewer",
+      role: "viewer",
+      invitedBy: "viewer",
+    });
+
+    const viewerGet = await getInviteTokenRequest(worker, "row_invites", "viewer", "viewer");
+    expect(viewerGet.status).toBe(200);
+    expect((await jsonBody(viewerGet)).inviteToken).toMatchObject({
+      token: "invite_viewer",
+      role: "viewer",
+    });
+
+    for (const role of ["submitter", "contributor", "editor"] as const) {
+      const response = await createInviteTokenRequest(worker, "row_invites", "viewer", role, `viewer_${role}`);
+      expect(response.status).toBe(401);
+      expect((await jsonBody(response)).code).toBe("UNAUTHORIZED");
+    }
+
+    const viewerDisallowedGet = await getInviteTokenRequest(worker, "row_invites", "viewer", "submitter");
+    expect(viewerDisallowedGet.status).toBe(401);
+    expect((await jsonBody(viewerDisallowedGet)).code).toBe("UNAUTHORIZED");
+
+    const submitterCreate = await createInviteTokenRequest(worker, "row_invites", "submitter", "submitter", "invite_submitter");
+    expect(submitterCreate.status).toBe(200);
+    expect((await jsonBody(submitterCreate)).inviteToken).toMatchObject({
+      token: "invite_submitter",
+      role: "submitter",
+      invitedBy: "submitter",
+    });
+
+    const submitterGet = await getInviteTokenRequest(worker, "row_invites", "submitter", "submitter");
+    expect(submitterGet.status).toBe(200);
+    expect((await jsonBody(submitterGet)).inviteToken).toMatchObject({
+      token: "invite_submitter",
+      role: "submitter",
+    });
+
+    for (const role of ["viewer", "contributor", "editor"] as const) {
+      const response = await createInviteTokenRequest(worker, "row_invites", "submitter", role, `submitter_${role}`);
+      expect(response.status).toBe(401);
+      expect((await jsonBody(response)).code).toBe("UNAUTHORIZED");
+    }
+
+    const submitterDisallowedGet = await getInviteTokenRequest(worker, "row_invites", "submitter", "viewer");
+    expect(submitterDisallowedGet.status).toBe(401);
+    expect((await jsonBody(submitterDisallowedGet)).code).toBe("UNAUTHORIZED");
+
+    for (const role of ["contributor", "viewer", "submitter"] as const) {
+      const response = await createInviteTokenRequest(worker, "row_invites", "contributor", role, `contributor_${role}`);
+      expect(response.status).toBe(200);
+      expect((await jsonBody(response)).inviteToken).toMatchObject({
+        token: `contributor_${role}`,
+        role,
+        invitedBy: "contributor",
+      });
+    }
+
+    const contributorGet = await getInviteTokenRequest(worker, "row_invites", "contributor", "submitter");
+    expect(contributorGet.status).toBe(200);
+    expect((await jsonBody(contributorGet)).inviteToken).toMatchObject({
+      token: "contributor_submitter",
+      role: "submitter",
+    });
+
+    const contributorEditorInvite = await createInviteTokenRequest(worker, "row_invites", "contributor", "editor", "contributor_editor");
+    expect(contributorEditorInvite.status).toBe(401);
+    expect((await jsonBody(contributorEditorInvite)).code).toBe("UNAUTHORIZED");
+
+    const contributorEditorGet = await getInviteTokenRequest(worker, "row_invites", "contributor", "editor");
+    expect(contributorEditorGet.status).toBe(401);
+    expect((await jsonBody(contributorEditorGet)).code).toBe("UNAUTHORIZED");
+
+    for (const role of ["editor", "contributor", "viewer", "submitter"] as const) {
+      const response = await createInviteTokenRequest(worker, "row_invites", "owner", role, `owner_${role}`);
+      expect(response.status).toBe(200);
+      expect((await jsonBody(response)).inviteToken).toMatchObject({
+        token: `owner_${role}`,
+        role,
+        invitedBy: "owner",
+      });
+    }
+  });
+
   it("blocks viewers from maintaining parent indexes", async () => {
     const worker = new RowWorker(
       {
@@ -1024,6 +1245,42 @@ describe("RowWorker", () => {
     });
     expect(inheritedRole.status).toBe(200);
     expect((await jsonBody(inheritedRole)).role).toBe("viewer");
+
+    const viewerInvite = await run({
+      url: rowEndpoint("task_contributor_child", "invite-token/create"),
+      action: "invite-token/create",
+      rowId: "task_contributor_child",
+      username: "contributor",
+      body: {
+        token: "invite_child_viewer",
+        rowId: "task_contributor_child",
+        invitedBy: "contributor",
+        createdAt: 10,
+        role: "viewer",
+      },
+    });
+    expect(viewerInvite.status).toBe(200);
+    expect((await jsonBody(viewerInvite)).inviteToken).toMatchObject({
+      token: "invite_child_viewer",
+      role: "viewer",
+      invitedBy: "contributor",
+    });
+
+    const contributorInvite = await run({
+      url: rowEndpoint("task_contributor_child", "invite-token/create"),
+      action: "invite-token/create",
+      rowId: "task_contributor_child",
+      username: "contributor",
+      body: {
+        token: "invite_child_contributor",
+        rowId: "task_contributor_child",
+        invitedBy: "contributor",
+        createdAt: 11,
+        role: "contributor",
+      },
+    });
+    expect(contributorInvite.status).toBe(401);
+    expect((await jsonBody(contributorInvite)).code).toBe("UNAUTHORIZED");
 
     const effective = await run({
       url: rowEndpoint("task_contributor_child", "members/effective"),
