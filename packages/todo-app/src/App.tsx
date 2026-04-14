@@ -239,9 +239,8 @@ function BoardView({ board, onLeave }: { board: BoardHandle; onLeave: () => void
           if (!trimmed) return;
 
           try {
-            const cardWrite = db.create("cards", { text: trimmed, done: false, createdAt: Date.now() }, { in: board });
+            db.create("cards", { text: trimmed, done: false, createdAt: Date.now() }, { in: board });
             setText("");
-            void cardWrite.committed.catch(console.error);
           } catch (error) {
             console.error(error);
           }

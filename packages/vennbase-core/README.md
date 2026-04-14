@@ -41,7 +41,7 @@ Write your frontend. Vennbase handles the rest.
 
 Every piece of data in Vennbase is a **row**. A row belongs to a **collection** defined in your schema, holds typed fields, and has its own identity.
 
-Rows can be **nested**. A `card` lives inside a `board`; a `recentBoard` lives inside the built-in `user` collection. The parent relationship defines visibility — gaining access to a parent automatically grants access to its children.
+Rows can be **nested**. A `card` lives inside a `board`; a `recentBoard` lives inside the built-in `user` collection. Parent links define query scope and visibility: gaining access to a parent automatically grants access to its children.
 
 Access is **explicit-grant only**. To let someone into a row, generate a share link and send it to them. They accept it, they're in. There are no rule expressions to write and no policy surface to misconfigure.
 
@@ -51,6 +51,7 @@ Access is **explicit-grant only**. To let someone into a row, generate a share l
 
 | Document | Description |
 |----------|-------------|
+| [`packages/todo-app`](https://github.com/alexdavies74/vennbase/tree/main/packages/todo-app) | Small working board-and-cards app mirrored by this README. |
 | [`PATTERNS.md`](https://github.com/alexdavies74/vennbase/blob/main/packages/vennbase-core/PATTERNS.md) | Recipe-style app patterns for blind inboxes, index-key projections, resource claims, and other real-world Vennbase designs. |
 
 ---
@@ -129,12 +130,13 @@ import { useSession } from "@vennbase/react";
 
 function AppShell() {
   const session = useSession(db);
+  const signedIn = session.status === "success" && session.data?.signedIn === true;
 
   if (session.status === "loading") {
     return <p>Checking session…</p>;
   }
 
-  if (!session.session?.signedIn) {
+  if (!signedIn) {
     return <button onClick={() => void session.signIn()}>Log in with Puter</button>;
   }
 
@@ -156,7 +158,7 @@ db.create("cards", { text: "Write README", done: false, createdAt: Date.now() },
 db.create("cards", { text: "Publish to npm", done: false, createdAt: Date.now() }, { in: board });
 ```
 
-`create` and `update` are synchronous optimistic writes. Use `.value` on the returned receipt when you want the row handle immediately.
+`create` and `update` are synchronous optimistic writes. In normal app code, use `.value` on the returned receipt when you want the row handle immediately. Only await `.committed` when another client must be able to rely on the write right away, or when you explicitly need remote confirmation.
 
 To update fields on an existing row:
 
@@ -230,26 +232,24 @@ They return objects shaped like `{ kind: "index-key-projection", id, collection,
 
 ## Sharing rows with share links
 
-Access to a row is always explicit. There is no rule system to misconfigure — no typo in a policy expression that accidentally exposes everything. A user either holds a valid invite token or they don't.
+Access to a row is always explicit. There is no rule system to misconfigure. A user either holds a valid invite token or they do not.
 
-In React, prefer `useShareLink(db, row, "all-editor")` for the sender and `useAcceptInviteFromUrl(db, ...)` for the recipient. Underneath, readable invites still follow the same three-step flow:
+```tsx
+const { shareLink } = useShareLink(db, board, "all-editor");
 
-```ts
-// 1. Generate a token for the row you want to share
-const shareToken = db.createShareToken(board, "all-editor").value;
-
-// 2. Build a link the recipient can open in their browser
-const link = db.createShareLink(board, shareToken);
-// → "https://yourapp.com/?db=..."
-
-// 3. Recipient opens the link; your app calls acceptInvite
-const sharedBoard = await db.acceptInvite(link);
+const incomingInvite = useAcceptInviteFromUrl<Schema, BoardHandle>(db, {
+  enabled: board === null,
+  onOpen: (nextBoard) => {
+    void rememberRecentBoard(nextBoard).catch(console.error);
+    setBoard(nextBoard);
+  },
+});
 ```
 
-If you do not need the token separately, you can create the link directly from a role:
 
 ```ts
 const editorLink = db.createShareLink(board, "all-editor").value;
+const sharedBoard = await db.acceptInvite(editorLink);
 ```
 
 `acceptInvite` accepts either a full invite URL or a pre-parsed `{ ref, shareToken? }` object from `db.parseInvite(input)`. In React, `useAcceptInviteFromUrl(db, ...)` handles the common invite-landing flow for you.
@@ -329,7 +329,7 @@ await flush();
 
 ## Example apps
 
-`packages/todo-app` is the code from this README assembled into a working app — boards, recent boards, cards, and share links. Run it with:
+`packages/todo-app` is the working version of this README — boards, recent boards, cards, and share links. Start with `src/schema.ts`, `src/db.ts`, and `src/App.tsx`. Run it with:
 
 ```bash
 pnpm --filter todo-app dev

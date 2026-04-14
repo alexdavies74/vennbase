@@ -402,10 +402,11 @@ export class AppointmentService {
       ...draftToScheduleFields(draft),
       bookingSubmitterLink,
     });
+    const schedule = scheduleWrite.value;
     // The embedded link is future-valid immediately, so we can store it on the
     // schedule optimistically. Before returning the schedule to code that might
     // publish it, wait for the inbox row and invite token to exist remotely.
-    const [schedule] = await Promise.all([
+    await Promise.all([
       scheduleWrite.committed,
       bookingRootWrite.committed,
       bookingSubmitterLinkWrite.committed,
@@ -420,8 +421,7 @@ export class AppointmentService {
       throw new Error(validationError);
     }
 
-    const updatedWrite = this.db.update("schedules", schedule, draftToScheduleFields(draft));
-    return updatedWrite.committed;
+    return this.db.update("schedules", schedule, draftToScheduleFields(draft)).value;
   }
 
   getBookingRootRef(schedule: ScheduleHandle): BookingRootRef {
@@ -457,7 +457,7 @@ export class AppointmentService {
       createdAt: Date.now(),
     }, {
       in: [schedule.ref, CURRENT_USER],
-    }).committed;
+    }).value;
   }
 
   async bookSlot(args: {
@@ -466,7 +466,7 @@ export class AppointmentService {
     slotStartMs: number;
     slotEndMs: number;
   }): Promise<BookingHandle> {
-    const bookingWrite = this.db.create("bookings", {
+    return this.db.create("bookings", {
       slotStartMs: args.slotStartMs,
       slotEndMs: args.slotEndMs,
       claimedAtMs: Date.now(),
@@ -474,8 +474,7 @@ export class AppointmentService {
       customerUsername: args.scheduleUser.owner,
     }, {
       in: [args.bookingRootRef, args.scheduleUser.ref],
-    });
-    return bookingWrite.committed;
+    }).value;
   }
 
   async cancelBooking(args: {
@@ -501,6 +500,6 @@ export class AppointmentService {
       customerUsername: args.booking.fields.customerUsername,
     }, {
       in: [args.bookingRootRef, args.booking.fields.scheduleUserRef],
-    }).committed;
+    }).value;
   }
 }
