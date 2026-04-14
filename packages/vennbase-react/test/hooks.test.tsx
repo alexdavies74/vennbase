@@ -865,9 +865,67 @@ describe("@vennbase/react", () => {
 
     const app = await renderApp(<Probe />);
 
-    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.invitePhase).toBe("waiting");
+    expect(latest?.blockingReason).toBe("disabled");
     expect(latest?.inviteInput).toBe(inviteUrl(dogRef()));
     expect(latest?.status).toBe("idle");
+    expect(db.joinInviteCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("reports signed-out invites as waiting without accepting them", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
+    );
+
+    const db = new FakeDb();
+    db.signedIn = false;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>);
+      return <div>{latest.invitePhase}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    expect(latest?.invitePhase).toBe("waiting");
+    expect(latest?.blockingReason).toBe("signed-out");
+    expect(latest?.inviteInput).toBe(inviteUrl(dogRef()));
+    expect(latest?.status).toBe("idle");
+    expect(db.joinInviteCalls).toBe(0);
+    expect(db.getRowCalls).toBe(0);
+    await app.unmount();
+  });
+
+  it("reports session errors as waiting blockers without accepting the invite", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      inviteUrl(dogRef()),
+    );
+
+    const db = new FakeDb();
+    db.failSession = true;
+    let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
+
+    function Probe() {
+      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>);
+      return <div>{latest.status}</div>;
+    }
+
+    const app = await renderApp(<Probe />);
+
+    await waitFor(() => {
+      expect(latest?.status).toBe("error");
+    });
+
+    expect(latest?.invitePhase).toBe("waiting");
+    expect(latest?.blockingReason).toBe("session-error");
+    expect((latest?.error as Error | undefined)?.message).toBe("session failed");
     expect(db.joinInviteCalls).toBe(0);
     expect(db.getRowCalls).toBe(0);
     await app.unmount();
@@ -897,7 +955,8 @@ describe("@vennbase/react", () => {
 
     const app = await renderApp(<Probe enabled={false} />);
 
-    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.invitePhase).toBe("waiting");
+    expect(latest?.blockingReason).toBe("disabled");
     expect(latest?.inviteInput).toBe(inviteUrl(dogRef()));
     expect(latest?.status).toBe("idle");
     expect(db.joinInviteCalls).toBe(0);
@@ -908,6 +967,8 @@ describe("@vennbase/react", () => {
       expect(latest?.status).toBe("success");
     });
 
+    expect(latest?.invitePhase).toBe("resolved");
+    expect(latest?.blockingReason).toBeNull();
     expect(db.joinInviteCalls).toBe(1);
     expect(db.getRowCalls).toBe(1);
     expect(db.lastInviteInput).toBe(inviteUrl(dogRef()));
@@ -938,16 +999,17 @@ describe("@vennbase/react", () => {
           setOpenedRow(row);
         },
       });
+      const inviteActive = latestInvite.invitePhase !== "none";
       const savedRow = useSavedRow<TestSchema>(db as unknown as Vennbase<TestSchema>, {
         key: "myStudio",
         collection: "dogs",
-        enabled: signedIn && openedRow === null && !latestInvite.hasInvite,
+        enabled: signedIn && openedRow === null && !inviteActive,
       });
       const route = !signedIn
         ? "signin"
         : openedRow
           ? "invite"
-          : latestInvite.hasInvite && latestInvite.status !== "error"
+          : inviteActive && latestInvite.invitePhase !== "error"
             ? "opening"
             : savedRow.status === "success"
               ? savedRow.row ? "saved" : "create"
@@ -964,7 +1026,8 @@ describe("@vennbase/react", () => {
 
     const app = await renderApp(<Probe />);
 
-    expect(latestInvite?.hasInvite).toBe(true);
+    expect(latestInvite?.invitePhase).toBe("waiting");
+    expect(latestInvite?.blockingReason).toBe("disabled");
     expect(latestInvite?.status).toBe("idle");
     expect(db.openSavedRowCalls).toBe(0);
 
@@ -997,19 +1060,27 @@ describe("@vennbase/react", () => {
     db.sessionPromise = session.promise;
     let latest: ReturnType<typeof useAcceptInviteFromUrl<TestSchema>> | null = null;
     let openedDogName = "";
+    const phases: string[] = [];
 
     function Probe() {
-      latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
+      const invite = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>, {
         onOpen: (row) => {
           openedDogName = row.fields.name;
         },
       });
-      return <div>{latest.status}</div>;
+      latest = invite;
+      useEffect(() => {
+        if (phases[phases.length - 1] !== invite.invitePhase) {
+          phases.push(invite.invitePhase);
+        }
+      }, [invite.invitePhase]);
+      return <div>{invite.status}</div>;
     }
 
     const app = await renderApp(<Probe />);
 
-    expect(latest?.hasInvite).toBe(true);
+    expect(latest?.invitePhase).toBe("waiting");
+    expect(latest?.blockingReason).toBe("session-loading");
     expect(latest?.status).toBe("loading");
     expect(db.joinInviteCalls).toBe(0);
 
@@ -1027,10 +1098,12 @@ describe("@vennbase/react", () => {
       expect(window.location.search).toBe("");
     });
     await waitFor(() => {
-      expect(latest?.hasInvite).toBe(false);
+      expect(latest?.invitePhase).toBe("none");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.status).toBe("idle");
       expect(latest?.data).toBeUndefined();
     });
+    expect(phases).toContain("resolved");
     await app.unmount();
   });
 
@@ -1070,6 +1143,8 @@ describe("@vennbase/react", () => {
       expect(db.joinInviteCalls).toBe(1);
     });
     expect(openedDogName).toBe("Buddy");
+    expect(latest?.invitePhase).toBe("accepting");
+    expect(latest?.blockingReason).toBeNull();
     expect(latest?.status).toBe("loading");
     expect(latest?.data).toBeUndefined();
     expect(window.location.search).toContain(VENNBASE_INVITE_TARGET_PARAM);
@@ -1082,7 +1157,8 @@ describe("@vennbase/react", () => {
 
     await waitFor(() => {
       expect(window.location.search).toBe("");
-      expect(latest?.hasInvite).toBe(false);
+      expect(latest?.invitePhase).toBe("none");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.status).toBe("idle");
       expect(latest?.data).toBeUndefined();
     });
@@ -1140,7 +1216,7 @@ describe("@vennbase/react", () => {
 
     function Probe() {
       latest = useAcceptInviteFromUrl<TestSchema>(db as unknown as Vennbase<TestSchema>);
-      return <div>{latest.hasInvite ? latest.status : "no-invite"}</div>;
+      return <div>{latest.invitePhase}</div>;
     }
 
     const app = await renderApp(<Probe />);
@@ -1153,7 +1229,8 @@ describe("@vennbase/react", () => {
 
     await waitFor(() => {
       expect(window.location.search).toBe("");
-      expect(latest?.hasInvite).toBe(false);
+      expect(latest?.invitePhase).toBe("none");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.status).toBe("idle");
       expect(latest?.data).toBeUndefined();
     });
@@ -1192,6 +1269,8 @@ describe("@vennbase/react", () => {
 
     await waitFor(() => {
       expect(latest?.status).toBe("success");
+      expect(latest?.invitePhase).toBe("resolved");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.data).toEqual({
         kind: "joined",
         ref: dogRef(),
@@ -1238,6 +1317,8 @@ describe("@vennbase/react", () => {
 
     await waitFor(() => {
       expect(latest?.status).toBe("error");
+      expect(latest?.invitePhase).toBe("error");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.error).toBeInstanceOf(Error);
       expect((latest?.error as Error | undefined)?.message).toBe("activate failed");
     });
@@ -1263,7 +1344,8 @@ describe("@vennbase/react", () => {
 
     const app = await renderApp(<Probe />);
 
-    expect(latest?.hasInvite).toBe(false);
+    expect(latest?.invitePhase).toBe("none");
+    expect(latest?.blockingReason).toBeNull();
     expect(latest?.inviteInput).toBeNull();
     expect(latest?.status).toBe("idle");
     expect(db.joinInviteCalls).toBe(0);
@@ -1291,6 +1373,8 @@ describe("@vennbase/react", () => {
 
     await waitFor(() => {
       expect(latest?.status).toBe("success");
+      expect(latest?.invitePhase).toBe("resolved");
+      expect(latest?.blockingReason).toBeNull();
       expect(latest?.data).toMatchObject({
         kind: "opened",
         ref: dogRef(),
@@ -1327,7 +1411,7 @@ describe("@vennbase/react", () => {
     const inviteApp = await renderApp(<InviteProbe />);
 
     await waitFor(() => {
-      expect(latestInvite?.hasInvite).toBe(false);
+      expect(latestInvite?.invitePhase).toBe("none");
     });
 
     expect(db.joinInviteCalls).toBe(1);

@@ -180,7 +180,7 @@ function Room({ row }: { row: BoardHandle | null }) {
 
 ## Invite links
 
-`useShareLink` lazily generates (or reuses) a share link for a row. Pass an explicit role such as `"all-editor"`, `"content-viewer"`, or `"index-submitter"` as the third argument. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a join-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
+`useShareLink` lazily generates (or reuses) a share link for a row. Pass an explicit role such as `"all-editor"`, `"content-viewer"`, or `"index-submitter"` as the third argument. `useAcceptInviteFromUrl` handles the recipient side: it detects Vennbase invite URLs in the current URL, waits for the session, joins the invite, resolves either an opened row or a join-only membership result, runs `onOpen` for readable invites, runs `onResolve` for either branch, and then clears the invite params. It is a URL-consumption hook, not a router. If you also want to remember the opened row for restore-on-launch, persist it from those callbacks with `db.saveRow(...)`.
 
 ```tsx
 import { useShareLink, useAcceptInviteFromUrl } from "@vennbase/react";
@@ -194,17 +194,22 @@ function ShareButton({ board }: { board: BoardHandle }) {
 
 // Recipient side — call once near the app root
 function InviteHandler() {
-  useAcceptInviteFromUrl(db, {
+  const invite = useAcceptInviteFromUrl(db, {
     onOpen: (board) => {
-      // navigate to the shared board
+      // app-owned route state lives here
       console.log(board);
     },
   });
+
+  if (invite.invitePhase === "waiting" || invite.invitePhase === "accepting") {
+    return <p>Opening invite…</p>;
+  }
+
   return null;
 }
 ```
 
-`index-*` links resolve directly as join-only access:
+Readable invites resolve to `{ kind: "opened", row, ref, role }`. `index-*` links are join-only and resolve to `{ kind: "joined", ref, role }` without opening a row:
 
 ```tsx
 function SubmissionHandler() {
@@ -222,21 +227,34 @@ function SubmissionHandler() {
 
 `useSavedRow` is a narrow wrapper around `db.openSavedRow(...)`, `db.saveRow(...)`, and `db.clearSavedRow(...)`. It does not inspect the current URL or accept invites. Use it to restore one per-user row under an app-defined key, and compose it with `useAcceptInviteFromUrl` when invite acceptance should also update that saved slot.
 
+When you compose them, give invite consumption precedence over restore:
+
+1. Treat `invitePhase === "waiting" || invitePhase === "accepting"` as invite-in-progress.
+2. In `onOpen` / `onResolve`, set your app-owned post-invite route state.
+3. Only run saved-row restore once `invitePhase === "none"` and no invite-owned route state is active.
+4. Treat signed-out UI separately from restore; `invitePhase !== "none"` only means there is an invite to consume or a recent invite delivery to finish.åååååå
+
 ```tsx
 import { useAcceptInviteFromUrl, useSavedRow } from "@vennbase/react";
 import { db } from "./db";
 
 function AppRoot() {
-  const savedBoard = useSavedRow(db, {
-    key: "current-board",
-    collection: "boards",
-  });
-
-  useAcceptInviteFromUrl(db, {
+  const invite = useAcceptInviteFromUrl(db, {
     onOpen: async (board) => {
       await db.saveRow("current-board", board.ref);
     },
   });
+  const savedBoard = useSavedRow(db, {
+    key: "current-board",
+    collection: "boards",
+    enabled: invite.invitePhase === "none",
+  });
+
+  const inviteLoading = invite.invitePhase === "waiting" || invite.invitePhase === "accepting";
+
+  if (inviteLoading) {
+    return <pre>Opening invite…</pre>;
+  }
 
   return <pre>{savedBoard.row?.id ?? "No saved board yet."}</pre>;
 }
@@ -283,7 +301,7 @@ db.update("cards", card, { done: !card.fields.done });
 | `useDirectMembers(db, row)` | db, row handle or row ref | `{ data: { username, role }[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useEffectiveMembers(db, row)` | db, row handle or row ref | `{ data: DbMemberInfo[], status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useShareLink(db, row, role, options?)` | db, row handle or row ref, role `MemberRole`, optional `{ enabled }` | `{ shareLink: string, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
-| `useAcceptInviteFromUrl(db, options?)` | db, `{ enabled?, url?, clearInviteParams?, onOpen?, onResolve? }` | `{ hasInvite, inviteInput, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
+| `useAcceptInviteFromUrl(db, options?)` | db, `{ enabled?, url?, clearInviteParams?, onOpen?, onResolve? }` | `{ invitePhase, blockingReason, inviteInput, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh }` |
 | `useSavedRow(db, options)` | db, `{ key, collection, loadSavedRow?, getRow? }` | `{ row, data, status, isLoading, isIdle, isSuccess, isError, isRefreshing, error, refreshError, refresh, save, clear }` |
 | `useMutation(fn)` | async function | `{ mutate, data, status, error, reset }` |
 
@@ -406,7 +424,8 @@ interface UseAcceptInviteFromUrlOptions<Schema extends DbSchema> extends UseHook
 
 interface UseAcceptInviteFromUrlResult<Schema extends DbSchema>
   extends UseResourceResult<AcceptedInviteResult<Schema>> {
-  hasInvite: boolean;
+  invitePhase: "none" | "waiting" | "accepting" | "resolved" | "error";
+  blockingReason: "disabled" | "session-loading" | "signed-out" | "session-error" | null;
   inviteInput: string | null;
 }
 
@@ -419,11 +438,13 @@ function useAcceptInviteFromUrl<Schema extends DbSchema>(
 - `url` defaults to `window.location.href`.
 - `enabled` defaults to `true`
 - `clearInviteParams` defaults to `true`.
+- `invitePhase` describes the invite lifecycle. `"none"` means there is no current invite to consume. `"waiting"` means an invite is present but blocked on `enabled`, session initialization, or sign-in. `"accepting"` means join/open callbacks are in flight. `"resolved"` means the current render still exposes the accepted invite result before the cleared URL drops back to `"none"`. `"error"` means invite handling failed and the URL was not cleared.
+- `blockingReason` explains why a `"waiting"` invite is blocked.
 - `onOpen` runs only for readable invites and receives the opened row directly.
 - `onResolve` runs after invite resolution succeeds and may be async.
 - Readable invites resolve to `{ kind: "opened", row, ref, role }`.
 - `index-*` invites resolve to `{ kind: "joined", ref, role }`.
-- The hook stays in `loading` until `onOpen` and `onResolve` finish and the invite params are removed from the current URL.
+- The hook consumes invite URLs and clears them after successful delivery. It does not preserve app-level route state for you.
 
 ### `useMutation`
 

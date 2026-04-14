@@ -47,10 +47,11 @@ export default function App() {
       setBoard(nextBoard);
     },
   });
-  const invitePending = incomingInvite.hasInvite;
+  const invitePresent = incomingInvite.invitePhase !== "none";
+  const inviteLoading = incomingInvite.invitePhase === "waiting" || incomingInvite.invitePhase === "accepting";
   const inviteError = incomingInvite.error instanceof Error
     ? incomingInvite.error.message
-    : incomingInvite.status === "error"
+    : incomingInvite.invitePhase === "error"
       ? "Failed to open invite link."
       : "";
 
@@ -59,8 +60,8 @@ export default function App() {
       <main>
         <h1>Vennbase Todo</h1>
         <section>
-          <h2>{invitePending ? "Log in to join board" : "Log in to start"}</h2>
-          <p>{invitePending ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
+          <h2>{invitePresent ? "Log in to join board" : "Log in to start"}</h2>
+          <p>{invitePresent ? "Sign in with Puter to open this shared board." : "Sign in with Puter before creating or joining a board."}</p>
           <button
             type="button"
             disabled={loginStatus === "loading" || session.status === "loading"}
@@ -77,7 +78,7 @@ export default function App() {
                 });
             }}
           >
-            {loginStatus === "loading" || session.status === "loading" ? "Opening Puter…" : invitePending ? "Log in to join" : "Log in with Puter"}
+            {loginStatus === "loading" || session.status === "loading" ? "Opening Puter…" : invitePresent ? "Log in to join" : "Log in with Puter"}
           </button>
           {loginError ? <p className="error">{loginError}</p> : null}
         </section>
@@ -85,7 +86,7 @@ export default function App() {
     )
     : board
     ? <BoardView board={board} onLeave={() => setBoard(null)} />
-    : invitePending && incomingInvite.status !== "error"
+    : inviteLoading
       ? <OpeningInviteView />
       : <LandingView errorMessage={inviteError} onBoard={setBoard} />;
 }

@@ -46,6 +46,8 @@ type TagRows = ReturnType<typeof useQuery<TestSchema, "tags">>["rows"];
 type SavedDogResult = ReturnType<typeof useSavedRow<TestSchema, "dogs">>;
 type CurrentUserResult = ReturnType<typeof useCurrentUser<TestSchema>>;
 type InviteResult = ReturnType<typeof useAcceptInviteFromUrl<TestSchema>>["data"];
+type InvitePhase = ReturnType<typeof useAcceptInviteFromUrl<TestSchema>>["invitePhase"];
+type InviteBlockingReason = ReturnType<typeof useAcceptInviteFromUrl<TestSchema>>["blockingReason"];
 
 declare const dogResult: DogResult;
 declare const tagRows: TagRows;
@@ -57,6 +59,8 @@ declare const tagRef: RowRef<"tags">;
 declare const anyClient: Vennbase<TestSchema>;
 declare const currentUserResult: CurrentUserResult;
 declare const inviteResult: InviteResult;
+declare const invitePhase: InvitePhase;
+declare const inviteBlockingReason: InviteBlockingReason;
 
 const maybeAnyRowHandle: AnyRowHandle<TestSchema> | undefined = dogResult.data;
 const maybeDogHandle: DogHandle | undefined = dogResult.data;
@@ -142,6 +146,13 @@ void savedDogSummary;
 void maybeDogNameFromRef;
 void maybeSavedDogName;
 void maybeSavedDogSummaryName;
+void invitePhase;
+void inviteBlockingReason;
+
+const maybeInvitePhase: "none" | "waiting" | "accepting" | "resolved" | "error" = invitePhase;
+const maybeInviteBlockingReason: "disabled" | "session-loading" | "signed-out" | "session-error" | null = inviteBlockingReason;
+void maybeInvitePhase;
+void maybeInviteBlockingReason;
 
 // @ts-expect-error queries always require an explicit in option
 void useQuery(anyClient, "recentDogs", {

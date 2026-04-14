@@ -80,10 +80,10 @@ function LoadingPanel(props: {
 function SignInPanel(props: {
   busy: boolean;
   errorMessage: string;
-  hasInvite: boolean;
+  invitePresent: boolean;
   onSignIn(): void;
 }) {
-  const description = props.hasInvite
+  const description = props.invitePresent
     ? "Log in with Puter to join this shared dog room."
     : "Log in with Puter before creating or restoring a dog room.";
 
@@ -92,7 +92,7 @@ function SignInPanel(props: {
       <h1>Adopt a dog</h1>
       <p className="muted">{description}</p>
       <button className="primary" type="button" disabled={props.busy} onClick={props.onSignIn}>
-        {props.busy ? "Opening Puter…" : props.hasInvite ? "Log in to join invite" : "Log in with Puter"}
+        {props.busy ? "Opening Puter…" : props.invitePresent ? "Log in to join invite" : "Log in with Puter"}
       </button>
       <p className="muted">{props.errorMessage}</p>
     </section>
@@ -259,8 +259,9 @@ export function App() {
       service.activateHistory(dogRow);
     },
   });
-  const invitePending = invite.hasInvite;
-  const inviteRow = invite.status === "success" && invite.data?.kind === "opened"
+  const invitePresent = invite.invitePhase !== "none";
+  const inviteLoading = invite.invitePhase === "waiting" || invite.invitePhase === "accepting";
+  const inviteRow = invite.invitePhase === "resolved" && invite.data?.kind === "opened"
     ? service.expectDogRow(invite.data.row)
     : null;
   const dogHistory = useQuery(
@@ -287,7 +288,7 @@ export function App() {
   });
   const restoredRow = openedActiveRow.status === "success" ? openedActiveRow.data : null;
   const row = inviteRow ?? restoredRow;
-  const bootError = invite.status === "error"
+  const bootError = invite.invitePhase === "error"
     ? getErrorMessage(invite.error, "Failed to join share link.")
     : dogHistory.status === "error"
       ? getErrorMessage(dogHistory.error, "Could not restore saved room.")
@@ -295,12 +296,12 @@ export function App() {
         ? getErrorMessage(openedActiveRow.error, "Could not reopen saved room.")
         : "";
   const bootLoading =
-    invite.status === "loading"
+    inviteLoading
     || dogHistory.status === "loading"
     || (!!activeRowRef && openedActiveRow.status === "loading");
 
   if (session.status === "loading") {
-    return <SignInPanel busy errorMessage="" hasInvite={invitePending} onSignIn={() => undefined} />;
+    return <SignInPanel busy errorMessage="" invitePresent={invitePresent} onSignIn={() => undefined} />;
   }
 
   if (session.status === "error") {
@@ -308,7 +309,7 @@ export function App() {
       <SignInPanel
         busy={loginStatus === "loading"}
         errorMessage={getErrorMessage(session.error, "Could not initialize app.")}
-        hasInvite={invitePending}
+        invitePresent={invitePresent}
         onSignIn={() => undefined}
       />
     );
@@ -319,7 +320,7 @@ export function App() {
       <SignInPanel
         busy={loginStatus === "loading"}
         errorMessage={loginError}
-        hasInvite={invitePending}
+        invitePresent={invitePresent}
         onSignIn={() => {
           setLoginError("");
           setLoginStatus("loading");

@@ -69,15 +69,17 @@ export default function App() {
       setSchedule(nextSchedule);
     },
   });
+  const invitePresent = invite.invitePhase !== "none";
+  const inviteLoading = invite.invitePhase === "waiting" || invite.invitePhase === "accepting";
 
   if (!signedIn) {
     return (
       <MainLayout>
         <section className="card">
           <span className="eyebrow">Appointment booking</span>
-          <h1>{invite.hasInvite ? "Log in to book" : "Create a schedule"}</h1>
+          <h1>{invitePresent ? "Log in to book" : "Create a schedule"}</h1>
           <p className="muted">
-            {invite.hasInvite
+            {invitePresent
               ? "Sign in with Puter to open this schedule and reserve a slot."
               : "Sign in with Puter before creating or sharing a booking schedule."}
           </p>
@@ -100,7 +102,7 @@ export default function App() {
           >
             {session.status === "loading" || loginStatus === "loading"
               ? "Opening Puter..."
-              : invite.hasInvite
+              : invitePresent
                 ? "Log in to book"
                 : "Log in with Puter"}
           </button>
@@ -114,7 +116,7 @@ export default function App() {
     return <ScheduleScreen schedule={schedule} onLeave={() => setSchedule(null)} />;
   }
 
-  if (invite.hasInvite && invite.status !== "error") {
+  if (inviteLoading) {
     return (
       <MainLayout>
         <section className="card">
@@ -126,7 +128,7 @@ export default function App() {
     );
   }
 
-  const inviteErrorMessage = invite.status === "error"
+  const inviteErrorMessage = invite.invitePhase === "error"
     ? getErrorMessage(invite.error, "Failed to open share link.")
     : "";
 

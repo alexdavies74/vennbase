@@ -125,6 +125,20 @@ export type AcceptedInviteResult<
   | OpenedInviteResult<Schema, TOpened>
   | JoinedInviteResult;
 
+export type InvitePhase =
+  | "none"
+  | "waiting"
+  | "accepting"
+  | "resolved"
+  | "error";
+
+export type InviteBlockingReason =
+  | "disabled"
+  | "session-loading"
+  | "signed-out"
+  | "session-error"
+  | null;
+
 export interface UseAcceptInviteFromUrlOptions<
   Schema extends DbSchema,
   TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
@@ -139,7 +153,8 @@ export interface UseAcceptInviteFromUrlResult<
   Schema extends DbSchema,
   TOpened extends AnyRowHandle<Schema> = AnyRowHandle<Schema>,
 > extends UseResourceResult<AcceptedInviteResult<Schema, TOpened>> {
-  hasInvite: boolean;
+  invitePhase: InvitePhase;
+  blockingReason: InviteBlockingReason;
   inviteInput: string | null;
 }
 
@@ -910,7 +925,8 @@ export function useAcceptInviteFromUrl<
 
   if (!inviteInput) {
     return {
-      hasInvite: false,
+      invitePhase: "none",
+      blockingReason: null,
       inviteInput: null,
       ...makeResourceResult({
         status: "idle",
@@ -920,7 +936,8 @@ export function useAcceptInviteFromUrl<
 
   if (!enabled) {
     return {
-      hasInvite: true,
+      invitePhase: "waiting",
+      blockingReason: "disabled",
       inviteInput,
       ...makeResourceResult({
         status: "idle",
@@ -930,7 +947,8 @@ export function useAcceptInviteFromUrl<
 
   if (session.status === "error") {
     return {
-      hasInvite: true,
+      invitePhase: "waiting",
+      blockingReason: "session-error",
       inviteInput,
       ...makeResourceResult({
         error: session.error,
@@ -941,7 +959,8 @@ export function useAcceptInviteFromUrl<
 
   if (session.status !== "success") {
     return {
-      hasInvite: true,
+      invitePhase: "waiting",
+      blockingReason: "session-loading",
       inviteInput,
       ...makeResourceResult({
         status: "loading",
@@ -951,7 +970,8 @@ export function useAcceptInviteFromUrl<
 
   if (!session.data?.signedIn) {
     return {
-      hasInvite: true,
+      invitePhase: "waiting",
+      blockingReason: "signed-out",
       inviteInput,
       ...makeResourceResult({
         status: "idle",
@@ -960,9 +980,11 @@ export function useAcceptInviteFromUrl<
   }
 
   if (resource.status !== "success" || resource.data === undefined) {
+    const invitePhase = resource.status === "error" ? "error" : "accepting";
     return {
       ...resource,
-      hasInvite: true,
+      invitePhase,
+      blockingReason: null,
       inviteInput,
       refresh,
     };
@@ -974,7 +996,8 @@ export function useAcceptInviteFromUrl<
     || deliveryState.status === "loading"
   ) {
     return {
-      hasInvite: true,
+      invitePhase: "accepting",
+      blockingReason: null,
       inviteInput,
       ...makeResourceResult({
         isRefreshing: resource.isRefreshing,
@@ -986,7 +1009,8 @@ export function useAcceptInviteFromUrl<
 
   if (deliveryState.status === "error") {
     return {
-      hasInvite: true,
+      invitePhase: "error",
+      blockingReason: null,
       inviteInput,
       ...makeResourceResult({
         error: deliveryState.error,
@@ -999,7 +1023,8 @@ export function useAcceptInviteFromUrl<
 
   return {
     ...resource,
-    hasInvite: true,
+    invitePhase: "resolved",
+    blockingReason: null,
     inviteInput,
     refresh,
   };
