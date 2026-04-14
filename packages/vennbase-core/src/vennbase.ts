@@ -79,6 +79,16 @@ interface ReadyMutationState {
 const INTERNAL_USER_SCOPE_ROW_KEY = "__vennbase_user_scope_v1__";
 type LocalMutationListener = () => void;
 
+type QueryOptionShape = {
+  select?: DbQuerySelect | undefined;
+};
+
+type QueryOptionsArg<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+  TOptions extends QueryOptionShape,
+> = TOptions & DbQueryOptions<Schema, TCollection, InferDbQuerySelect<TOptions>>;
+
 export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBackend<Schema> {
   private readonly auth: AuthManager;
   private readonly transport: Transport;
@@ -239,10 +249,10 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   async query<
     TCollection extends CollectionName<Schema>,
-    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
   >(
     collection: TCollection,
-    options: TOptions,
+    options: QueryOptionsArg<Schema, TCollection, TOptions>,
   ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     return this.queryModule.query(collection, options);
   }
@@ -257,10 +267,10 @@ export class Vennbase<Schema extends DbSchema = DbSchema> implements RowHandleBa
 
   watchQuery<
     TCollection extends CollectionName<Schema>,
-    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
   >(
     collection: TCollection,
-    options: TOptions,
+    options: QueryOptionsArg<Schema, TCollection, TOptions>,
     callbacks: DbQueryWatchCallbacks<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>[number]>,
   ): DbQueryWatchHandle {
     return this.queryModule.watchQuery(collection, options, callbacks);

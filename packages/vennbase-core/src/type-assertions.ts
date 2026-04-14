@@ -162,9 +162,27 @@ void db.query("tasks", { in: teamRef });
 // @ts-expect-error parentless collections cannot be queried because queries always require in
 void db.query("projects", {});
 
+const zeroIndexMixedOrderQuery = db.query("mixedRecords", {
+  in: CURRENT_USER,
+  // @ts-expect-error zero-index collections cannot order queries
+  orderBy: "label",
+});
+const zeroIndexMixedOrderRows: Promise<DbQueryRows<typeof typeTestSchema, "mixedRecords">> = zeroIndexMixedOrderQuery;
+void zeroIndexMixedOrderRows;
+
+const zeroIndexMixedWhereQuery = db.query("mixedRecords", {
+  in: CURRENT_USER,
+  // @ts-expect-error zero-index collections cannot filter queries
+  where: { label: "x" },
+});
+const zeroIndexMixedWhereRows: Promise<DbQueryRows<typeof typeTestSchema, "mixedRecords">> = zeroIndexMixedWhereQuery;
+void zeroIndexMixedWhereRows;
+
 // @ts-expect-error mixed parent collections still require an explicit scope
 void db.query("mixedRecords", { where: { label: "x" } });
+// @ts-expect-error zero-index collections cannot filter queries
 void db.query("mixedRecords", { in: CURRENT_USER, where: { label: "x" } });
+// @ts-expect-error zero-index collections cannot filter queries
 void db.query("mixedRecords", { in: [CURRENT_USER, projectRef], where: { label: "x" } });
 
 // @ts-expect-error mixed parent collections still require an explicit scope on insert

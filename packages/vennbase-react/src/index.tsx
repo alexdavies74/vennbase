@@ -97,6 +97,16 @@ export interface UseHookOptions {
   enabled?: boolean;
 }
 
+type QueryOptionShape = {
+  select?: DbQuerySelect | undefined;
+};
+
+type QueryOptionsArg<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+  TOptions extends QueryOptionShape,
+> = TOptions & DbQueryOptions<Schema, TCollection, InferDbQuerySelect<TOptions>>;
+
 export interface UseShareLinkHookOptions extends UseHookOptions {}
 
 type JoinOnlyInviteRole = Extract<MemberRole, `index-${string}`>;
@@ -525,16 +535,19 @@ export function useCurrentUser<Schema extends DbSchema>(
 export function useQuery<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-  TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+  TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
 >(
   db: Vennbase<Schema>,
   collection: TCollection,
-  options: TOptions | null | undefined,
+  options: QueryOptionsArg<Schema, TCollection, TOptions> | null | undefined,
   hookOptions: UseHookOptions = {},
 ): UseQueryResult<DbQueryRow<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
   const runtime = useRuntime(db);
   const session = useSessionResource(runtime, hookOptions.enabled ?? true);
-  const resourceKey = options ? makeQueryKey<Schema, TCollection, TOptions>(collection, options) : null;
+  const queryOptions = options as DbQueryOptions<Schema, TCollection, InferDbQuerySelect<TOptions>> | null | undefined;
+  const resourceKey = options
+    ? makeQueryKey(collection as never, queryOptions as never)
+    : null;
   const blocked = blockedResourceResult<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>>(session);
   const isFullQuery = options?.select !== "indexKeys";
   const resource = useOptionalResource(
@@ -545,7 +558,7 @@ export function useQuery<
       resourceKey as string,
       () => runtime.client.query(
         collection,
-        options as TOptions,
+        options as QueryOptionsArg<Schema, TCollection, TOptions>,
       ),
       snapshots.queryRows,
       isFullQuery
@@ -561,7 +574,7 @@ export function useQuery<
 
   return {
     ...result,
-    rows: result.data,
+    rows: result.data as DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>> | undefined,
   };
 }
 

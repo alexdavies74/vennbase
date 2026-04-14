@@ -357,12 +357,38 @@ export type IndexKeyFieldNames<
     FieldIsIndexKey<FieldDefinitions<Schema, TCollection>[K]> extends true ? K : never;
 }[keyof FieldDefinitions<Schema, TCollection>] & string;
 
+type HasIndexKeyFields<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+> = [IndexKeyFieldNames<Schema, TCollection>] extends [never] ? false : true;
+
+type QueryOptionDiagnostic<TMessage extends string> = {
+  readonly [K in TMessage]: never;
+};
+
+type NoIndexKeyWhereDiagnostic<TCollection extends string> = QueryOptionDiagnostic<
+  `Collection "${TCollection}" has no index-key fields; where is unavailable. Mark a field with .indexKey() to enable filtering.`
+>;
+
+type NoIndexKeyOrderByDiagnostic<TCollection extends string> = QueryOptionDiagnostic<
+  `Collection "${TCollection}" has no index-key fields; orderBy is unavailable. Mark a field with .indexKey() to enable ordering.`
+>;
+
+type QueryOrderBy<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+> = HasIndexKeyFields<Schema, TCollection> extends true
+  ? IndexKeyFieldNames<Schema, TCollection>
+  : keyof NoIndexKeyOrderByDiagnostic<TCollection> & string;
+
 export type QueryWhere<
   Schema extends DbSchema,
   TCollection extends CollectionName<Schema>,
-> = Partial<{
-  [K in IndexKeyFieldNames<Schema, TCollection>]: QueryFieldValue<FieldDefinitions<Schema, TCollection>[K]>;
-}>;
+> = HasIndexKeyFields<Schema, TCollection> extends true
+  ? Partial<{
+    [K in IndexKeyFieldNames<Schema, TCollection>]: QueryFieldValue<FieldDefinitions<Schema, TCollection>[K]>;
+  }>
+  : NoIndexKeyWhereDiagnostic<TCollection>;
 
 type QueryBaseOptions<
   Schema extends DbSchema,
@@ -370,7 +396,7 @@ type QueryBaseOptions<
 > = HasDeclaredParents<Schema, TCollection> extends true ? {
   in: ParentInput<AllowedParentCollections<Schema, TCollection>>;
   where?: QueryWhere<Schema, TCollection>;
-  orderBy?: IndexKeyFieldNames<Schema, TCollection>;
+  orderBy?: QueryOrderBy<Schema, TCollection>;
   order?: "asc" | "desc";
   limit?: number;
 } : never;

@@ -28,6 +28,12 @@ const schema = defineSchema({
       createdAt: field.number().indexKey(),
     },
   }),
+  notes: collection({
+    in: ["dogs"],
+    fields: {
+      body: field.string(),
+    },
+  }),
   recentDogs: collection({
     in: ["user"],
     fields: {
@@ -40,6 +46,7 @@ const schema = defineSchema({
 type TestSchema = typeof schema;
 type DogHandle = RowHandle<TestSchema, "dogs">;
 type TagHandle = RowHandle<TestSchema, "tags">;
+type NoteHandle = RowHandle<TestSchema, "notes">;
 
 type DogResult = ReturnType<typeof useRow<TestSchema, "dogs">>;
 type TagRows = ReturnType<typeof useQuery<TestSchema, "tags">>["rows"];
@@ -117,13 +124,25 @@ function useTypedQuery<
   TCollection extends keyof TestSchema & string,
   TSelect extends DbQuerySelect = "full",
 >(collection: TCollection, options: DbQueryOptions<TestSchema, TCollection, TSelect>) {
-  return useQuery(anyClient, collection, options);
+  return useQuery(anyClient, collection, options as never);
 }
 
 const genericProjectedTag: DbQueryRow<TestSchema, "tags", "indexKeys"> | undefined =
   useTypedQuery("tags", projectedTagOptions).rows?.[0];
 const genericRecentDog: DbQueryRow<TestSchema, "recentDogs"> | undefined =
   useTypedQuery("recentDogs", recentDogOptions).rows?.[0];
+const zeroIndexNotes = useQuery(anyClient, "notes", {
+  in: dogHandle,
+  // @ts-expect-error zero-index collections cannot order queries
+  orderBy: "body",
+});
+const maybeZeroIndexNote: NoteHandle | undefined = zeroIndexNotes.rows?.[0];
+const zeroIndexWhereNotes = useQuery(anyClient, "notes", {
+  in: dogHandle,
+  // @ts-expect-error zero-index collections cannot filter queries
+  where: { body: "walk" },
+});
+const maybeZeroIndexWhereNote: NoteHandle | undefined = zeroIndexWhereNotes.rows?.[0];
 
 void maybeAnyRowHandle;
 void maybeDogHandle;
@@ -139,6 +158,8 @@ void recentDog;
 void recentDogFromOptions;
 void genericProjectedTag;
 void genericRecentDog;
+void maybeZeroIndexNote;
+void maybeZeroIndexWhereNote;
 void dogName;
 void projectedCreatedAt;
 void savedDog;

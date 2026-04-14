@@ -1109,7 +1109,7 @@ export class RowWorker {
     });
 
     const schema = this.normalizeChildSchema(body.schema);
-    if (schema) {
+    if (schema !== null) {
       await this.kv.set(rowChildSchemaKey(parentRowId, body.collection), schema);
     }
     const storedSchema = schema ?? await this.getChildSchema(parentRowId, body.collection);
@@ -1121,7 +1121,7 @@ export class RowWorker {
       owner: body.childOwner,
       baseUrl: childRef.baseUrl,
       collection: body.collection,
-      fields: indexKeyFields.length > 0 ? pickFieldRecordKeys(childFields, indexKeyFields) : childFields,
+      fields: storedSchema ? pickFieldRecordKeys(childFields, indexKeyFields) : childFields,
       addedAt: this.now(),
       updatedAt: this.now(),
       active: true,
@@ -1214,7 +1214,7 @@ export class RowWorker {
       owner: body.childOwner,
       baseUrl: childRef.baseUrl || stripTrailingSlash(existing?.baseUrl ?? ""),
       collection: body.collection,
-      fields: indexKeyFields.length > 0 ? pickFieldRecordKeys(nextFields, indexKeyFields) : nextFields,
+      fields: schema ? pickFieldRecordKeys(nextFields, indexKeyFields) : nextFields,
       addedAt: existing?.addedAt ?? this.now(),
       updatedAt: this.now(),
       active: true,
@@ -1276,6 +1276,9 @@ export class RowWorker {
     );
     const orderBy = payload.orderBy?.trim() || undefined;
     const where = payload.where ? toFieldRecord(payload.where, "where") : undefined;
+    if (collection) {
+      await this.assertIndexedChildQueryAllowed(parentRowId, collection, where, orderBy);
+    }
 
     const rows = await this.queryByChildren(parentRowId, collection, where, orderBy, order, limit);
 
@@ -1654,16 +1657,40 @@ export class RowWorker {
   }
 
   private normalizeChildSchema(schema: ChildSchemaPayload | undefined): ChildCollectionSchema | null {
-    if (!schema?.indexKeyFields || !Array.isArray(schema.indexKeyFields)) {
+    if (!schema || !Array.isArray(schema.indexKeyFields)) {
       return null;
     }
 
     const indexKeyFields = schema.indexKeyFields.filter((field): field is string => typeof field === "string" && field.length > 0);
-    if (indexKeyFields.length === 0) {
-      return null;
+    return { indexKeyFields };
+  }
+
+  private async assertIndexedChildQueryAllowed(
+    parentRowId: string,
+    collection: string,
+    where: Record<string, JsonValue> | undefined,
+    orderBy: string | undefined,
+  ): Promise<void> {
+    const schema = await this.getChildSchema(parentRowId, collection);
+    if (!schema || schema.indexKeyFields.length > 0) {
+      return;
     }
 
-    return { indexKeyFields };
+    if (where && Object.keys(where).length > 0) {
+      error(
+        400,
+        "BAD_REQUEST",
+        `Collection "${collection}" has no index-key fields; where is unavailable. Mark a field with .indexKey() to enable filtering.`,
+      );
+    }
+
+    if (orderBy) {
+      error(
+        400,
+        "BAD_REQUEST",
+        `Collection "${collection}" has no index-key fields; orderBy is unavailable. Mark a field with .indexKey() to enable ordering.`,
+      );
+    }
   }
 
   private async getChildSchema(parentRowId: string, collection: string): Promise<ChildCollectionSchema | null> {

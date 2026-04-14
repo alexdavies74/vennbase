@@ -74,6 +74,12 @@ const schema = defineSchema({
       status: field.string().indexKey().default("todo"),
     },
   }),
+  classes: collection({
+    in: ["projects"],
+    fields: {
+      title: field.string(),
+    },
+  }),
   gameRecords: collection({
     in: ["user"],
     fields: {
@@ -804,6 +810,66 @@ describe("Vennbase rows", () => {
       },
       orderBy: "title",
     } as never)).rejects.toThrow("orderBy must be an index-key field");
+
+    expect(transport.row).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects zero-index where locally with a collection-specific error", async () => {
+    const request = vi.fn();
+    const transport = {
+      row: vi.fn(() => ({
+        request,
+      })),
+    };
+    const optimisticStore = new OptimisticStore();
+    const query = new Query(
+      transport as never,
+      { getRow: vi.fn() } as never,
+      optimisticStore,
+      schema,
+    );
+
+    await expect(query.query("classes", {
+      in: {
+        id: "project_1",
+        collection: "projects",
+        baseUrl: "https://worker.example",
+      },
+      where: { title: "Ship v2" },
+    } as never)).rejects.toThrow(
+      'Collection "classes" has no index-key fields; where is unavailable. Mark a field with .indexKey() to enable filtering.',
+    );
+
+    expect(transport.row).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects zero-index orderBy locally with a collection-specific error", async () => {
+    const request = vi.fn();
+    const transport = {
+      row: vi.fn(() => ({
+        request,
+      })),
+    };
+    const optimisticStore = new OptimisticStore();
+    const query = new Query(
+      transport as never,
+      { getRow: vi.fn() } as never,
+      optimisticStore,
+      schema,
+    );
+
+    await expect(query.query("classes", {
+      in: {
+        id: "project_1",
+        collection: "projects",
+        baseUrl: "https://worker.example",
+      },
+      orderBy: "title",
+    } as never)).rejects.toThrow(
+      'Collection "classes" has no index-key fields; orderBy is unavailable. Mark a field with .indexKey() to enable ordering.',
+    );
 
     expect(transport.row).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();

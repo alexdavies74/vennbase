@@ -135,10 +135,27 @@ function snapshotRows(rows: Array<{
 }
 
 function validateIndexedQuery(
+  collection: string,
   indexKeyFields: string[],
   where: Record<string, JsonValue> | undefined,
   orderBy: string | undefined,
 ): void {
+  if (indexKeyFields.length === 0) {
+    if (where && Object.keys(where).length > 0) {
+      throw new Error(
+        `Collection "${collection}" has no index-key fields; where is unavailable. Mark a field with .indexKey() to enable filtering.`,
+      );
+    }
+
+    if (orderBy) {
+      throw new Error(
+        `Collection "${collection}" has no index-key fields; orderBy is unavailable. Mark a field with .indexKey() to enable ordering.`,
+      );
+    }
+
+    return;
+  }
+
   for (const fieldName of Object.keys(where ?? {})) {
     if (!indexKeyFields.includes(fieldName)) {
       throw new Error(`where.${fieldName} must be an index-key field`);
@@ -159,6 +176,16 @@ interface QueryRowLoader<Schema extends DbSchema> {
   ): RowHandle<Schema, TCollection> | null;
 }
 
+type QueryOptionShape = {
+  select?: DbQuerySelect | undefined;
+};
+
+type QueryOptionsArg<
+  Schema extends DbSchema,
+  TCollection extends CollectionName<Schema>,
+  TOptions extends QueryOptionShape,
+> = TOptions & DbQueryOptions<Schema, TCollection, InferDbQuerySelect<TOptions>>;
+
 export class Query<Schema extends DbSchema> {
   constructor(
     private readonly transport: Transport,
@@ -167,26 +194,24 @@ export class Query<Schema extends DbSchema> {
     private readonly schema: Schema,
     private readonly resolveOptions?: <
       TCollection extends CollectionName<Schema>,
-      TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
     >(
       collection: TCollection,
-      options: TOptions,
-    ) => Promise<TOptions>,
+      options: DbQueryOptions<Schema, TCollection, DbQuerySelect>,
+    ) => Promise<DbQueryOptions<Schema, TCollection, DbQuerySelect>>,
     private readonly resolveOptionsSync?: <
       TCollection extends CollectionName<Schema>,
-      TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
     >(
       collection: TCollection,
-      options: TOptions,
-    ) => TOptions,
+      options: DbQueryOptions<Schema, TCollection, DbQuerySelect>,
+    ) => DbQueryOptions<Schema, TCollection, DbQuerySelect>,
   ) {}
 
   async query<
     TCollection extends CollectionName<Schema>,
-    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
   >(
     collection: TCollection,
-    options: TOptions,
+    options: QueryOptionsArg<Schema, TCollection, TOptions>,
   ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     return this.runQuery(collection, options);
   }
@@ -211,6 +236,7 @@ export class Query<Schema extends DbSchema> {
     const indexKeyFields = getCollectionIndexKeyFieldNames(collectionSpec);
     const orderBy = resolvedOptions.orderBy;
     validateIndexedQuery(
+      String(collection),
       indexKeyFields,
       resolvedOptions.where as Record<string, JsonValue> | undefined,
       orderBy,
@@ -227,15 +253,15 @@ export class Query<Schema extends DbSchema> {
 
   private async runQuery<
     TCollection extends CollectionName<Schema>,
-    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
   >(
     collection: TCollection,
-    options: TOptions,
+    options: QueryOptionsArg<Schema, TCollection, TOptions>,
   ): Promise<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>> {
     const collectionSpec = getCollectionSpec(this.schema, collection);
-    const resolvedOptions = this.resolveOptions
+    const resolvedOptions = (this.resolveOptions
       ? await this.resolveOptions(collection, options)
-      : options;
+      : options) as DbQueryOptions<Schema, TCollection, InferDbQuerySelect<TOptions>>;
     const parentRefs = normalizeParentRefs(resolvedOptions.in);
     if (parentRefs.length === 0) {
       throw new Error(
@@ -251,6 +277,7 @@ export class Query<Schema extends DbSchema> {
     const select = resolvedOptions.select ?? "full";
 
     validateIndexedQuery(
+      String(collection),
       indexKeyFields,
       resolvedOptions.where as Record<string, JsonValue> | undefined,
       orderBy,
@@ -523,10 +550,10 @@ export class Query<Schema extends DbSchema> {
 
   watchQuery<
     TCollection extends CollectionName<Schema>,
-    TOptions extends DbQueryOptions<Schema, TCollection, DbQuerySelect> = DbQueryOptions<Schema, TCollection, "full">,
+    TOptions extends QueryOptionShape = DbQueryOptions<Schema, TCollection, "full">,
   >(
     collection: TCollection,
-    options: TOptions,
+    options: QueryOptionsArg<Schema, TCollection, TOptions>,
     callbacks: DbQueryWatchCallbacks<DbQueryRows<Schema, TCollection, InferDbQuerySelect<TOptions>>[number]>,
   ): DbQueryWatchHandle {
     let lastSnapshot: string | null = null;

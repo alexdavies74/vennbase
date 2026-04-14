@@ -256,6 +256,177 @@ describe("RowWorker", () => {
     expect((await jsonBody(response)).rows).toEqual([]);
   });
 
+  it("rejects where queries for collections with explicit empty index-key schema metadata", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    expect(await createRow(worker, "project_zero_where")).toMatchObject({ status: 200 });
+
+    const registerChild = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_where", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_zero_where",
+        username: "owner",
+        body: {
+          childRef: {
+            id: "class_1",
+            collection: "classes",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "owner",
+          collection: "classes",
+          fields: {
+            title: "Morning flow",
+          },
+          schema: {
+            indexKeyFields: [],
+          },
+        },
+      }),
+    );
+    expect(registerChild.status).toBe(200);
+
+    const response = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_where", "db/query"),
+        action: "db/query",
+        rowId: "project_zero_where",
+        username: "owner",
+        body: {
+          collection: "classes",
+          where: { title: "Morning flow" },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonBody(response)).toMatchObject({
+      code: "BAD_REQUEST",
+      message: 'Collection "classes" has no index-key fields; where is unavailable. Mark a field with .indexKey() to enable filtering.',
+    });
+  });
+
+  it("rejects orderBy queries for collections with explicit empty index-key schema metadata", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    expect(await createRow(worker, "project_zero_order")).toMatchObject({ status: 200 });
+
+    const registerChild = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_order", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_zero_order",
+        username: "owner",
+        body: {
+          childRef: {
+            id: "class_1",
+            collection: "classes",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "owner",
+          collection: "classes",
+          fields: {
+            title: "Morning flow",
+          },
+          schema: {
+            indexKeyFields: [],
+          },
+        },
+      }),
+    );
+    expect(registerChild.status).toBe(200);
+
+    const response = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_order", "db/query"),
+        action: "db/query",
+        rowId: "project_zero_order",
+        username: "owner",
+        body: {
+          collection: "classes",
+          orderBy: "title",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await jsonBody(response)).toMatchObject({
+      code: "BAD_REQUEST",
+      message: 'Collection "classes" has no index-key fields; orderBy is unavailable. Mark a field with .indexKey() to enable ordering.',
+    });
+  });
+
+  it("stores no projected fields for collections with explicit empty index-key schema metadata", async () => {
+    const worker = new RowWorker(
+      {
+        owner: "owner",
+        workerUrl: "https://worker.example",
+      },
+      { kv: new InMemoryKv() },
+    );
+
+    expect(await createRow(worker, "project_zero_projection")).toMatchObject({ status: 200 });
+
+    const registerChild = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_projection", "parents/register-child"),
+        action: "parents/register-child",
+        rowId: "project_zero_projection",
+        username: "owner",
+        body: {
+          childRef: {
+            id: "class_1",
+            collection: "classes",
+            baseUrl: "https://worker.example",
+          },
+          childOwner: "owner",
+          collection: "classes",
+          fields: {
+            title: "Morning flow",
+          },
+          schema: {
+            indexKeyFields: [],
+          },
+        },
+      }),
+    );
+    expect(registerChild.status).toBe(200);
+
+    const response = await worker.handle(
+      await authedRequest({
+        url: rowEndpoint("project_zero_projection", "db/query"),
+        action: "db/query",
+        rowId: "project_zero_projection",
+        username: "owner",
+        body: {
+          collection: "classes",
+          select: "indexKeys",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await jsonBody(response)).rows).toEqual([
+      {
+        rowId: "class_1",
+        collection: "classes",
+        fields: {},
+      },
+    ]);
+  });
+
   it("returns mixed child rows when db/query omits collection", async () => {
     const kv = new InMemoryKv();
     const worker = new RowWorker(

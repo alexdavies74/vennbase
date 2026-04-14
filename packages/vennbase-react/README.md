@@ -95,6 +95,7 @@ function CardList({ board }: { board: BoardHandle }) {
 ### Full rows vs index-key projections
 
 By default, `useQuery` returns full `RowHandle` values. Those handles are locatable and can be passed to row-scoped hooks and helpers.
+`where` and `orderBy` only work on fields declared with `.indexKey()`, and collections with no `.indexKey()` fields cannot use either option.
 
 If you pass `select: "indexKeys"`, `useQuery` returns index-key projections shaped like `{ kind: "index-key-projection", id, collection, fields }`, where `fields` contains only values declared `.indexKey()`. They are for index-key visibility only and cannot be reopened or reused as row handles.
 
