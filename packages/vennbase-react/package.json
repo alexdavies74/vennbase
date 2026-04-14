@@ -1,6 +1,6 @@
 {
   "name": "@vennbase/react",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "React hooks for Vennbase — a multi-user database for apps that have no backend.",
   "license": "Apache-2.0",
   "keywords": ["database", "puter", "backend-free", "collaborative", "realtime", "react", "hooks"],
